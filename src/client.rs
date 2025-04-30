@@ -2,7 +2,7 @@ use crate::codec::EchoCodec;
 use crate::protocol::{
     create_protocol, create_request_response_config, EchoRequest, EchoResponse, PROTOCOL_ID,
 };
-use crate::xauth::behaviour::{AuthResponse, AuthResult, XAuthBehaviour, XAuthEvent};
+use crate::xauth::behaviour::{XAuthBehaviour, XAuthEvent};
 use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use libp2p::{
@@ -171,35 +171,7 @@ pub async fn run_client(server_uri: &str) -> Result<()> {
                             println!("Identify событие: {:?}", event);
                         },
                         ClientBehaviourEvent::XAuth(event) => {
-                            match event {
-                                XAuthEvent::InboundRequest { request, peer, channel } => {
-                                    println!("Received auth request from {:?}: {:?}", peer, request);
-
-                                    // Process the authentication request
-                                    let result = if request.get("hello") == Some(&"world".to_string()) {
-                                        println!("Authentication successful for {:?}", peer);
-                                        AuthResult::Ok
-                                    } else {
-                                        println!("Authentication failed for {:?}", peer);
-                                        AuthResult::Error("Invalid authentication data".to_string())
-                                    };
-
-                                    // Send response
-                                    if let Err(e) = swarm.behaviour_mut().xauth.request_response.send_response(channel, AuthResponse(result)) {
-                                        println!("Failed to send response: {:?}", e);
-                                    }
-                                }
-                                XAuthEvent::Success { peer_id, .. } => {
-                                    println!("Authentication successful for peer: {:?}", peer_id);
-                                }
-                                XAuthEvent::Failure { peer_id, reason, .. } => {
-                                    println!("Authentication failed for peer: {:?}, reason: {}", peer_id, reason);
-                                }
-                                XAuthEvent::Timeout { peer_id, .. } => {
-                                    println!("Authentication timed out for peer: {:?}", peer_id);
-                                }
-                            }
-                            
+                            println!("XAuth событие: {:?}", event);
                         }
                     },
                     _ => {}
