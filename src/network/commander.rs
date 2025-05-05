@@ -1,4 +1,4 @@
-use libp2p::Multiaddr;
+use libp2p::{Multiaddr, PeerId};
 use tokio::sync::{mpsc, oneshot};
 
 use super::commands::NetworkCommand;
@@ -60,5 +60,21 @@ impl Commander {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("Failed to connect: {}", e).into()),
         }
+    }
+
+
+    pub async fn get_kad_known_peers(&self) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        
+        self.cmd_tx
+            .send(NetworkCommand::GetKadKnownPeers {
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get kad peers command: {}", e).into()
+            })?;
+        
+        Ok(response_rx.await?)
     }
 }

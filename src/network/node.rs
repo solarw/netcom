@@ -100,6 +100,23 @@ impl NetworkNode {
     // Handle commands sent to the network node
     async fn handle_command(&mut self, cmd: NetworkCommand) {
         match cmd {
+            NetworkCommand::GetKadKnownPeers { response } => {
+                let mut peers = Vec::new();
+                // Access the routing table in a different way
+                // NOT IMPLEMENTED
+
+                for kbucketref in self.swarm.behaviour_mut().kad.kbuckets(){
+                    for i in kbucketref.iter(){
+                        let addresses = i.node.value.clone().into_vec();
+                        let peer_id = i.node.key.into_preimage();
+                        if !addresses.is_empty(){
+                            peers.push((peer_id, addresses));
+                        }
+                    }
+                }
+              
+                let _ = response.send(peers);
+            }
             NetworkCommand::EnableMdns => {
                 self.mdns_enabled = true;
                 info!("mDNS discovery enabled");
@@ -237,13 +254,39 @@ impl NetworkNode {
                 if self.mdns_enabled {
                     for (peer_id, addr) in peers {
                         info!("mDNS discovered peer: {peer_id} at {addr}");
-                        continue;
-                        self.swarm
-                            .behaviour_mut()
-                            .kad
-                            .add_address(&peer_id, addr.clone());
+                        // Log when we add an address to Kademlia
+                        self.swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
+                        
+                        info!("📚 Added address to Kademlia: {peer_id} at {addr}");
+                        
+                        // Optionally send an event about the Kademlia address addition
+                        let _ = self.event_tx.send(NetworkEvent::KadAddressAdded { 
+                            peer_id, 
+                            addr: addr.clone() 
+                        }).await;
                     }
                 }
+            }
+            NodeBehaviourEvent::Kad(kad::Event::RoutingUpdated { 
+                peer, 
+                addresses, 
+                old_peer, .. 
+            }) => {
+                // This event is triggered when the routing table is updated
+                info!("📔 Kademlia routing updated for peer: {peer}");
+                for addr in addresses.iter() {
+                    info!("📕 Known address: {addr}");
+                }
+                
+                // Optionally send an event about the routing update
+                let _ = self.event_tx.send(NetworkEvent::KadRoutingUpdated { 
+                    peer_id: peer, 
+                    addresses: addresses.into_vec() 
+                }).await;
+            }
+            // Handle other Kademlia events that might be useful
+            NodeBehaviourEvent::Kad(kad::Event::PendingRoutablePeer { peer, .. }) => {
+                info!("🔍 Kademlia looking for addresses of peer: {peer}");
             }
             NodeBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
                 info!("Identified peer {peer_id}: {info:?}");

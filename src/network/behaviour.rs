@@ -1,4 +1,9 @@
-use libp2p::{identify, identity, kad, mdns, ping, swarm::NetworkBehaviour};
+use libp2p::{
+    identify, identity,
+    kad::{self, BucketInserts},
+    mdns, ping,
+    swarm::NetworkBehaviour,
+};
 
 #[derive(NetworkBehaviour)]
 pub struct NodeBehaviour {
@@ -9,17 +14,19 @@ pub struct NodeBehaviour {
 }
 
 pub fn make_behaviour(key: &identity::Keypair) -> NodeBehaviour {
-    let kad_config = kad::Config::default();
-    
+    let mut kad_config = kad::Config::default();
+    kad_config.set_query_timeout(std::time::Duration::from_secs(300)); // 5 minutes
+    kad_config.disjoint_query_paths(true);
+
+    // Most importantly - set bucket insertion to Manual
+    kad_config.set_kbucket_inserts(BucketInserts::OnConnected);
+
     // Create the store
     let kad_store = kad::store::MemoryStore::new(key.public().to_peer_id());
-    
+
     // Create the Kademlia behavior with the custom config
-    let kad_behaviour = kad::Behaviour::with_config(
-        key.public().to_peer_id(),
-        kad_store,
-        kad_config
-    );
+    let kad_behaviour =
+        kad::Behaviour::with_config(key.public().to_peer_id(), kad_store, kad_config);
     // Set up mDNS discovery
     let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())
         .expect("Failed to create mDNS behavior");

@@ -35,4 +35,15 @@ pub enum NetworkEvent {
     MdnsIsOn {},
     MdnsIsOff {},
 
+
+    KadAddressAdded {
+        peer_id: PeerId,
+        addr: Multiaddr,
+    },
+    
+    KadRoutingUpdated {
+        peer_id: PeerId,
+        addresses: Vec<Multiaddr>,
+    },
+
 }

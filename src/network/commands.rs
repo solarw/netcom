@@ -43,4 +43,8 @@ pub enum NetworkCommand {
 
     // Shutdown command
     Shutdown,
+
+    GetKadKnownPeers {
+        response: oneshot::Sender<Vec<(PeerId, Vec<Multiaddr>)>>,
+    },
 }
