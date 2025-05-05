@@ -237,6 +237,7 @@ impl NetworkNode {
                 if self.mdns_enabled {
                     for (peer_id, addr) in peers {
                         info!("mDNS discovered peer: {peer_id} at {addr}");
+                        continue;
                         self.swarm
                             .behaviour_mut()
                             .kad

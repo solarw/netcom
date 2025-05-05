@@ -9,9 +9,17 @@ pub struct NodeBehaviour {
 }
 
 pub fn make_behaviour(key: &identity::Keypair) -> NodeBehaviour {
+    let kad_config = kad::Config::default();
+    
+    // Create the store
     let kad_store = kad::store::MemoryStore::new(key.public().to_peer_id());
-    let kad_behaviour = kad::Behaviour::new(key.public().to_peer_id(), kad_store);
-
+    
+    // Create the Kademlia behavior with the custom config
+    let kad_behaviour = kad::Behaviour::with_config(
+        key.public().to_peer_id(),
+        kad_store,
+        kad_config
+    );
     // Set up mDNS discovery
     let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())
         .expect("Failed to create mDNS behavior");
