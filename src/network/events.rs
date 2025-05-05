@@ -1,4 +1,4 @@
-use libp2p::{swarm::ConnectionId, Multiaddr, PeerId};
+use libp2p::{swarm::ConnectionId, Multiaddr, PeerId, StreamProtocol};
 
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
@@ -20,6 +20,7 @@ pub enum NetworkEvent {
         peer_id: PeerId,
         addr: Multiaddr,
         connection_id: ConnectionId,
+        protocols: Vec<StreamProtocol>,  // Add this field
     },
     ConnectionClosed {
         peer_id: PeerId,

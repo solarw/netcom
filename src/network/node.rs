@@ -100,21 +100,54 @@ impl NetworkNode {
     // Handle commands sent to the network node
     async fn handle_command(&mut self, cmd: NetworkCommand) {
         match cmd {
+            NetworkCommand::GetPeerAddresses { peer_id, response } => {
+                // Use Kademlia's routing table to get addresses
+                let mut addresses = Vec::new();
+
+                // Get the Kademlia behavior from the swarm
+                // Iterate through all the k-buckets
+                for bucket in self.swarm.behaviour_mut().kad.kbuckets() {
+                    // Iterate through all entries in the bucket
+                    for entry in bucket.iter() {
+                        // Check if this entry matches the peer we're looking for
+                        if entry.node.key.preimage() == &peer_id {
+                            // Add the addresses to our result
+                            addresses = entry.node.value.clone().into_vec();
+                            break;
+                        }
+                    }
+
+                    // If we've found addresses, no need to check more buckets
+                    if !addresses.is_empty() {
+                        break;
+                    }
+                }
+
+                let _ = response.send(addresses);
+            }
+
+            NetworkCommand::FindPeerAddresses { peer_id, response } => {
+                // Initiate a Kademlia search for the peer
+                self.swarm.behaviour_mut().kad.get_closest_peers(peer_id);
+                // For now, just acknowledge that the search was started
+                let _ = response.send(Ok(()));
+            }
+
             NetworkCommand::GetKadKnownPeers { response } => {
                 let mut peers = Vec::new();
                 // Access the routing table in a different way
                 // NOT IMPLEMENTED
 
-                for kbucketref in self.swarm.behaviour_mut().kad.kbuckets(){
-                    for i in kbucketref.iter(){
+                for kbucketref in self.swarm.behaviour_mut().kad.kbuckets() {
+                    for i in kbucketref.iter() {
                         let addresses = i.node.value.clone().into_vec();
                         let peer_id = i.node.key.into_preimage();
-                        if !addresses.is_empty(){
+                        if !addresses.is_empty() {
                             peers.push((peer_id, addresses));
                         }
                     }
                 }
-              
+
                 let _ = response.send(peers);
             }
             NetworkCommand::EnableMdns => {
@@ -188,32 +221,31 @@ impl NetworkNode {
             libp2p::swarm::SwarmEvent::ConnectionEstablished {
                 peer_id,
                 endpoint,
-                num_established,  // Number of total established connections to this peer
+                num_established,
                 connection_id,
                 ..
             } => {
                 let addr = endpoint.get_remote_address().clone();
-                
+
                 // Track this connection
                 self.connected_peers
                     .entry(peer_id)
                     .or_insert_with(Vec::new)
                     .push(addr.clone());
-                
+
                 info!("Connected to {peer_id} at {addr}");
-                
-                // Always emit ConnectionOpened event
+
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ConnectionOpened {
                         peer_id,
                         addr: addr.clone(),
                         connection_id,
+                        protocols: Vec::new(),
                     })
                     .await;
-                
-                // Only emit PeerConnected event if this is the first connection
-                // (num_established will be 1 for the first connection)
+
+                // Only emit PeerConnected event if this is the first connection (num_established will be 1)
                 if num_established.get() == 1 {
                     info!("First connection to peer {peer_id} established");
                     let _ = self
@@ -221,28 +253,28 @@ impl NetworkNode {
                         .send(NetworkEvent::PeerConnected { peer_id })
                         .await;
                 }
-            },
-            
-            libp2p::swarm::SwarmEvent::ConnectionClosed { 
-                peer_id, 
-                cause, 
+            }
+
+            libp2p::swarm::SwarmEvent::ConnectionClosed {
+                peer_id,
+                cause,
                 endpoint,
                 connection_id,
                 num_established, // Remaining established connections to this peer
-                .. 
+                ..
             } => {
                 let addr = endpoint.get_remote_address().clone();
-                
+
                 // Update our connection tracking - remove this specific connection
                 if let Some(connections) = self.connected_peers.get_mut(&peer_id) {
                     connections.retain(|a| a != &addr);
-                    
+
                     // If we have no more connections, remove the peer entry
                     if connections.is_empty() {
                         self.connected_peers.remove(&peer_id);
                     }
                 }
-                
+
                 // Always emit ConnectionClosed event
                 let _ = self
                     .event_tx
@@ -254,7 +286,7 @@ impl NetworkNode {
                     .await;
 
                 println!("111111111111111111111111111111 {}", num_established);
-                
+
                 // If no connections remain, emit PeerDisconnected
                 if num_established == 0 {
                     info!("Disconnected from {peer_id}, cause: {cause:?}");
@@ -263,24 +295,24 @@ impl NetworkNode {
                         .send(NetworkEvent::PeerDisconnected { peer_id })
                         .await;
                 }
-            },
-            
+            }
+
             libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
                 info!("Listening on {address}");
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ListeningOnAddress { addr: address })
                     .await;
-            },
-            
+            }
+
             libp2p::swarm::SwarmEvent::ExpiredListenAddr { address, .. } => {
                 info!("Stopped listening on {address}");
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::StopListeningOnAddress { addr: address })
                     .await;
-            },
-            
+            }
+
             libp2p::swarm::SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                 warn!("Failed to connect to {:?}: {error}", peer_id);
                 let _ = self
@@ -290,8 +322,8 @@ impl NetworkNode {
                         error: error.to_string(),
                     })
                     .await;
-            },
-            
+            }
+
             libp2p::swarm::SwarmEvent::IncomingConnectionError {
                 local_addr,
                 send_back_addr,
@@ -306,12 +338,12 @@ impl NetworkNode {
                         error: error.to_string(),
                     })
                     .await;
-            },
-            
+            }
+
             libp2p::swarm::SwarmEvent::Behaviour(event) => {
                 self.handle_behaviour_event(event).await;
-            },
-            
+            }
+
             _ => {}
         }
     }
@@ -324,34 +356,44 @@ impl NetworkNode {
                     for (peer_id, addr) in peers {
                         info!("mDNS discovered peer: {peer_id} at {addr}");
                         // Log when we add an address to Kademlia
-                        self.swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
-                        
+                        self.swarm
+                            .behaviour_mut()
+                            .kad
+                            .add_address(&peer_id, addr.clone());
+
                         info!("📚 Added address to Kademlia: {peer_id} at {addr}");
-                        
+
                         // Optionally send an event about the Kademlia address addition
-                        let _ = self.event_tx.send(NetworkEvent::KadAddressAdded { 
-                            peer_id, 
-                            addr: addr.clone() 
-                        }).await;
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::KadAddressAdded {
+                                peer_id,
+                                addr: addr.clone(),
+                            })
+                            .await;
                     }
                 }
             }
-            NodeBehaviourEvent::Kad(kad::Event::RoutingUpdated { 
-                peer, 
-                addresses, 
-                old_peer, .. 
+            NodeBehaviourEvent::Kad(kad::Event::RoutingUpdated {
+                peer,
+                addresses,
+                old_peer,
+                ..
             }) => {
                 // This event is triggered when the routing table is updated
                 info!("📔 Kademlia routing updated for peer: {peer}");
                 for addr in addresses.iter() {
                     info!("📕 Known address: {addr}");
                 }
-                
+
                 // Optionally send an event about the routing update
-                let _ = self.event_tx.send(NetworkEvent::KadRoutingUpdated { 
-                    peer_id: peer, 
-                    addresses: addresses.into_vec() 
-                }).await;
+                let _ = self
+                    .event_tx
+                    .send(NetworkEvent::KadRoutingUpdated {
+                        peer_id: peer,
+                        addresses: addresses.into_vec(),
+                    })
+                    .await;
             }
             // Handle other Kademlia events that might be useful
             NodeBehaviourEvent::Kad(kad::Event::PendingRoutablePeer { peer, .. }) => {

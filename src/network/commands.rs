@@ -47,4 +47,15 @@ pub enum NetworkCommand {
     GetKadKnownPeers {
         response: oneshot::Sender<Vec<(PeerId, Vec<Multiaddr>)>>,
     },
+
+    GetPeerAddresses {
+        peer_id: PeerId,
+        response: oneshot::Sender<Vec<Multiaddr>>,
+    },
+    
+    // Initiate a network search for a peer's addresses
+    FindPeerAddresses {
+        peer_id: PeerId,
+        response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
+    },
 }

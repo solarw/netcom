@@ -77,4 +77,52 @@ impl Commander {
         
         Ok(response_rx.await?)
     }
+
+
+
+
+
+
+     // Get known addresses for a peer from the Kademlia DHT
+     pub async fn get_peer_addresses(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        
+        self.cmd_tx
+            .send(NetworkCommand::GetPeerAddresses {
+                peer_id,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get peer addresses command: {}", e).into()
+            })?;
+        
+        response_rx.await.map_err(|e| format!("Failed to receive response: {}", e).into())
+    }
+    
+    // Initiate a network search for a peer's addresses
+    pub async fn find_peer_addresses(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        
+        self.cmd_tx
+            .send(NetworkCommand::FindPeerAddresses {
+                peer_id,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send find peer addresses command: {}", e).into()
+            })?;
+        
+        match response_rx.await {
+            Ok(result) => result,
+            Err(e) => Err(format!("Failed to receive response: {}", e).into()),
+        }
+    }
 }

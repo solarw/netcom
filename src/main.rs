@@ -12,6 +12,10 @@ struct Args {
     /// Optional peer address to connect to (e.g. "/ip4/127.0.0.1/udp/12345/quic-v1")
     #[arg(short, long)]
     connect: Option<String>,
+
+    /// Disable mDNS discovery
+    #[arg(long, default_value_t = false)]
+    disable_mdns: bool,
 }
 
 #[tokio::main]
@@ -24,9 +28,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Args::parse();
     
     let local_key = make_new_key();
-    let (mut node, cmd_tx, mut event_rx, peer_id) = NetworkNode::new(local_key).await?;
+    let (mut node, cmd_tx, mut event_rx, _peer_id) = NetworkNode::new(local_key).await?;
 
     println!("Local peer ID: {}", node.local_peer_id());
+    
+    // Set mDNS state based on command line argument
+    if args.disable_mdns {
+        println!("mDNS discovery disabled");
+        cmd_tx.send(network::commands::NetworkCommand::DisableMdns).await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send DisableMdns command: {}", e).into()
+            })?;
+    } else {
+        println!("mDNS discovery enabled");
+        cmd_tx.send(network::commands::NetworkCommand::EnableMdns).await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send EnableMdns command: {}", e).into()
+            })?;
+    }
     
     // Spawn the network node task
     let node_task = tokio::spawn(async move {
@@ -84,6 +103,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
                 NetworkEvent::MdnsIsOff {} => {
                     println!("📡 MDNS discovery is disabled");
+                }
+                NetworkEvent::ConnectionOpened { peer_id, addr, .. } => {
+                    println!("🔌 Connection opened to {peer_id} at {addr}");
+                }
+                NetworkEvent::ConnectionClosed { peer_id, addr, .. } => {
+                    println!("🔌 Connection closed to {peer_id} at {addr}");
                 }
                 // You can add more event handlers here as needed
                 _ => {}
