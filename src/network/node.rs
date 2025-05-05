@@ -5,16 +5,18 @@ use std::str::FromStr;
 use tokio::sync::mpsc;
 use tracing::error;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
 use tracing::{info, warn};
 
+use super::xauth;
 use super::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
     commands::NetworkCommand,
     events::NetworkEvent,
 };
+
 pub struct NetworkNode {
     cmd_rx: mpsc::Receiver<NetworkCommand>,
     event_tx: mpsc::Sender<NetworkEvent>,
@@ -22,6 +24,8 @@ pub struct NetworkNode {
     mdns_enabled: bool,
     connected_peers: HashMap<PeerId, Vec<Multiaddr>>,
     local_peer_id: PeerId,
+    // New field for tracking authenticated peers
+    authenticated_peers: HashSet<PeerId>,
 }
 
 impl NetworkNode {
@@ -62,11 +66,16 @@ impl NetworkNode {
                 mdns_enabled: true,
                 connected_peers: HashMap::new(),
                 local_peer_id,
+                authenticated_peers: HashSet::new(),
             },
             cmd_tx,
             event_rx,
             local_peer_id,
         ))
+    }
+
+    pub fn is_peer_authenticated(&self, peer_id: &PeerId) -> bool {
+        self.authenticated_peers.contains(peer_id)
     }
 
     // Get the local peer ID
@@ -100,6 +109,16 @@ impl NetworkNode {
     // Handle commands sent to the network node
     async fn handle_command(&mut self, cmd: NetworkCommand) {
         match cmd {
+
+
+            NetworkCommand::IsPeerAuthenticated { peer_id, response } => {
+                let is_authenticated = self.authenticated_peers.contains(&peer_id) || 
+                                       self.swarm.behaviour().por_auth.is_peer_authenticated(&peer_id);
+                
+                let _ = response.send(is_authenticated);
+            }
+    
+            
             NetworkCommand::GetPeerAddresses { peer_id, response } => {
                 // Use Kademlia's routing table to get addresses
                 let mut addresses = Vec::new();
@@ -436,6 +455,95 @@ impl NetworkNode {
                         }
                     }
                     _ => {}
+                }
+            }
+            // Handle PorAuth events
+            NodeBehaviourEvent::PorAuth(event) => {
+                match event {
+                    xauth::behaviours::PorAuthEvent::MutualAuthSuccess {
+                        peer_id,
+                        address,
+                        metadata,
+                    } => {
+                        info!(
+                            "✅ Mutual authentication successful with peer {peer_id} at {address}"
+                        );
+                        // Store authenticated peer
+                        self.authenticated_peers.insert(peer_id);
+
+                        // You could also store the metadata if needed
+                        if !metadata.is_empty() {
+                            info!("📝 Peer metadata: {:?}", metadata);
+                        }
+                    }
+                    xauth::behaviours::PorAuthEvent::VerifyPorRequest {
+                        peer_id,
+                        address,
+                        por,
+                        metadata,
+                        response_channel,
+                    } => {
+                        info!("🔐 Verifying PoR from peer {peer_id} at {address}");
+
+                        // Validate the Proof of Representation
+                        match por.validate() {
+                            Ok(()) => {
+                                info!("🟢 PoR validation successful for {peer_id}");
+
+                                // Accept the authentication
+                                self.swarm
+                                    .behaviour_mut()
+                                    .por_auth
+                                    .submit_por_verification_result(
+                                        peer_id,
+                                        xauth::behaviours::AuthResult::Ok(HashMap::new()),
+                                        response_channel,
+                                    );
+                            }
+                            Err(e) => {
+                                info!("🔴 PoR validation failed for {peer_id}: {e}");
+
+                                // Reject the authentication
+                                self.swarm
+                                    .behaviour_mut()
+                                    .por_auth
+                                    .submit_por_verification_result(
+                                        peer_id,
+                                        xauth::behaviours::AuthResult::Error(format!(
+                                            "PoR validation failed: {}",
+                                            e
+                                        )),
+                                        response_channel,
+                                    );
+                            }
+                        }
+                    }
+                    xauth::behaviours::PorAuthEvent::OutboundAuthSuccess { peer_id, .. } => {
+                        info!("🔹 Outbound authentication successful with {peer_id}");
+                    }
+                    xauth::behaviours::PorAuthEvent::InboundAuthSuccess { peer_id, .. } => {
+                        info!("🔸 Inbound authentication successful with {peer_id}");
+                    }
+                    xauth::behaviours::PorAuthEvent::OutboundAuthFailure {
+                        peer_id,
+                        reason,
+                        ..
+                    } => {
+                        info!("❌ Outbound authentication failed with {peer_id}: {reason}");
+                    }
+                    xauth::behaviours::PorAuthEvent::InboundAuthFailure {
+                        peer_id, reason, ..
+                    } => {
+                        info!("❌ Inbound authentication failed with {peer_id}: {reason}");
+                    }
+                    xauth::behaviours::PorAuthEvent::AuthTimeout {
+                        peer_id, direction, ..
+                    } => {
+                        info!(
+                            "⏱️ Authentication timeout with {peer_id}, direction: {:?}",
+                            direction
+                        );
+                    }
                 }
             }
             _ => {}

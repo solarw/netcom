@@ -1,6 +1,7 @@
 use libp2p::{Multiaddr, PeerId};
 use std::error::Error;
 use tokio::sync::oneshot;
+// Add this to the NetworkCommand enum in commands.rs
 #[derive(Debug)]
 pub enum NetworkCommand {
     // MDNS commands
@@ -10,7 +11,6 @@ pub enum NetworkCommand {
     // KAD commands
     EnableKad,
     DisableKad,
-
 
     // Connection commands
     OpenListenPort {
@@ -57,5 +57,11 @@ pub enum NetworkCommand {
     FindPeerAddresses {
         peer_id: PeerId,
         response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
+    },
+    
+    // Check if a peer is authenticated
+    IsPeerAuthenticated {
+        peer_id: PeerId,
+        response: oneshot::Sender<bool>,
     },
 }

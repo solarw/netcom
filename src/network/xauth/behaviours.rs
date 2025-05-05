@@ -420,6 +420,7 @@ impl PorAuthBehaviour {
                         }
                     },
                     AuthDirection::Both => {
+                        println!("11111111111111111111111111111111111111111111111111111111");
                         conn.state = AuthState::Failed("Authentication timed out in both directions".to_string());
                     },
                 }
