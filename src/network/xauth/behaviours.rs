@@ -15,6 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+// Import the ProofOfRepresentation from the por module
+use super::por::por::ProofOfRepresentation;
+
 // Protocol identifier
 pub const PROTOCOL_ID: &str = "/por-auth/1.0.0";
 pub const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -22,7 +25,7 @@ pub const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
 // Authentication messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PorAuthRequest {
-    pub por_data: Vec<u8>,
+    pub por: ProofOfRepresentation,
     pub metadata: HashMap<String, String>,
 }
 
@@ -79,7 +82,7 @@ pub enum PorAuthEvent {
     VerifyPorRequest {
         peer_id: PeerId,
         address: Multiaddr,
-        por_data: Vec<u8>,
+        por: ProofOfRepresentation,
         metadata: HashMap<String, String>,
         response_channel: ResponseChannel<PorAuthResponse>,
     },
@@ -130,19 +133,19 @@ pub struct PorAuthBehaviour {
     pending_events: VecDeque<ToSwarm<PorAuthEvent, request_response::OutboundRequestId>>,
     
     // Authentication data (PoR)
-    por_data: Vec<u8>,
+    por: ProofOfRepresentation,
     
     // Additional metadata to send with auth request
     metadata: HashMap<String, String>,
 }
 
 impl PorAuthBehaviour {
-    pub fn new(por_data: Vec<u8>) -> Self {
+    pub fn new(por: ProofOfRepresentation) -> Self {
         let metadata = HashMap::new();
-        Self::with_metadata(por_data, metadata)
+        Self::with_metadata(por, metadata)
     }
     
-    pub fn with_metadata(por_data: Vec<u8>, metadata: HashMap<String, String>) -> Self {
+    pub fn with_metadata(por: ProofOfRepresentation, metadata: HashMap<String, String>) -> Self {
         Self {
             request_response: request_response::cbor::Behaviour::new(
                 [(
@@ -153,14 +156,14 @@ impl PorAuthBehaviour {
             ),
             connections: HashMap::new(),
             pending_events: VecDeque::new(),
-            por_data,
+            por,
             metadata,
         }
     }
 
     // Update the PoR data used for authentication
-    pub fn update_por_data(&mut self, por_data: Vec<u8>) {
-        self.por_data = por_data;
+    pub fn update_por(&mut self, por: ProofOfRepresentation) {
+        self.por = por;
     }
 
     // Update the metadata sent with authentication
@@ -186,7 +189,7 @@ impl PorAuthBehaviour {
                 self.pending_events.push_back(ToSwarm::GenerateEvent(PorAuthEvent::VerifyPorRequest {
                     peer_id,
                     address,
-                    por_data: request.por_data,
+                    por: request.por,
                     metadata: request.metadata,
                     response_channel: channel,
                 }));
@@ -275,7 +278,7 @@ impl PorAuthBehaviour {
             
             // Send authentication request
             let request = PorAuthRequest {
-                por_data: self.por_data.clone(),
+                por: self.por.clone(),
                 metadata: self.metadata.clone(),
             };
             
@@ -669,6 +672,7 @@ mod tests {
         Transport,
     };
     use std::{collections::HashMap, time::Duration};
+    use super::super::por::por::{ProofOfRepresentation, PorUtils};
 
     // Create test in-memory transport
     fn create_test_transport(keypair: &identity::Keypair) -> libp2p::core::transport::Boxed<(PeerId, libp2p::core::muxing::StreamMuxerBox)> {
@@ -682,7 +686,7 @@ mod tests {
     }
 
     // Create test swarm with PorAuth behavior
-    fn create_test_swarm(keypair: identity::Keypair, por_data: Vec<u8>) -> Swarm<PorAuthBehaviour> {
+    fn create_test_swarm(keypair: identity::Keypair, por: ProofOfRepresentation) -> Swarm<PorAuthBehaviour> {
         let peer_id = PeerId::from(keypair.public());
         let transport = create_test_transport(&keypair);
         
@@ -690,7 +694,7 @@ mod tests {
         let mut metadata = HashMap::new();
         metadata.insert("node_id".to_string(), peer_id.to_string());
         
-        let auth_behaviour = PorAuthBehaviour::with_metadata(por_data, metadata);
+        let auth_behaviour = PorAuthBehaviour::with_metadata(por, metadata);
         
         Swarm::new(
             transport,
@@ -703,18 +707,30 @@ mod tests {
     #[tokio::test]
     async fn test_successful_mutual_auth() {
         // Create two nodes with valid PoR data
+        let owner_keypair1 = PorUtils::generate_owner_keypair();
+        let owner_keypair2 = PorUtils::generate_owner_keypair();
+        
         let keypair1 = identity::Keypair::generate_ed25519();
         let keypair2 = identity::Keypair::generate_ed25519();
         
         let peer_id1 = PeerId::from(keypair1.public());
         let peer_id2 = PeerId::from(keypair2.public());
         
-        // Valid PoR data for testing
-        let por_data1 = vec![1, 2, 3, 4];
-        let por_data2 = vec![5, 6, 7, 8];
+        // Create valid PoRs for testing
+        let por1 = ProofOfRepresentation::create(
+            &owner_keypair1, 
+            peer_id1, 
+            Duration::from_secs(3600)
+        ).expect("Failed to create PoR");
         
-        let mut swarm1 = create_test_swarm(keypair1, por_data1.clone());
-        let mut swarm2 = create_test_swarm(keypair2, por_data2.clone());
+        let por2 = ProofOfRepresentation::create(
+            &owner_keypair2, 
+            peer_id2, 
+            Duration::from_secs(3600)
+        ).expect("Failed to create PoR");
+        
+        let mut swarm1 = create_test_swarm(keypair1, por1);
+        let mut swarm2 = create_test_swarm(keypair2, por2);
         
         // Set up listener on swarm1
         swarm1.listen_on("/memory/1".parse().unwrap()).unwrap();
@@ -746,10 +762,12 @@ mod tests {
             tokio::select! {
                 event = swarm1.select_next_some() => {
                     if let SwarmEvent::Behaviour(PorAuthEvent::VerifyPorRequest { 
-                        peer_id, por_data, response_channel, .. 
+                        peer_id, por, response_channel, .. 
                     }) = event {
                         assert_eq!(peer_id, peer_id2);
-                        assert_eq!(por_data, por_data2);
+                        // Validate the PoR
+                        let validation_result = por.validate();
+                        assert!(validation_result.is_ok());
                         swarm1_verify_event_received = true;
                         
                         // Approve authentication
@@ -765,10 +783,12 @@ mod tests {
                 }
                 event = swarm2.select_next_some() => {
                     if let SwarmEvent::Behaviour(PorAuthEvent::VerifyPorRequest { 
-                        peer_id, por_data, response_channel, .. 
+                        peer_id, por, response_channel, .. 
                     }) = event {
                         assert_eq!(peer_id, peer_id1);
-                        assert_eq!(por_data, por_data1);
+                        // Validate the PoR
+                        let validation_result = por.validate();
+                        assert!(validation_result.is_ok());
                         swarm2_verify_event_received = true;
                         
                         // Approve authentication
@@ -806,19 +826,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_failure() {
-        // Create two nodes
+        // Create owner keypairs
+        let owner_keypair1 = PorUtils::generate_owner_keypair();
+        let owner_keypair2 = PorUtils::generate_owner_keypair();
+        
+        // Create node keypairs
         let keypair1 = identity::Keypair::generate_ed25519();
         let keypair2 = identity::Keypair::generate_ed25519();
         
         let peer_id1 = PeerId::from(keypair1.public());
         let peer_id2 = PeerId::from(keypair2.public());
         
-        // PoR data for testing
-        let por_data1 = vec![1, 2, 3, 4];
-        let por_data2 = vec![5, 6, 7, 8]; // This will be rejected
+        // Create PoRs for testing
+        let por1 = ProofOfRepresentation::create(
+            &owner_keypair1, 
+            peer_id1, 
+            Duration::from_secs(3600)
+        ).expect("Failed to create PoR");
         
-        let mut swarm1 = create_test_swarm(keypair1, por_data1.clone());
-        let mut swarm2 = create_test_swarm(keypair2, por_data2.clone());
+        // Create a PoR with an already expired duration (will be rejected)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let por2 = ProofOfRepresentation::create_with_times(
+            &owner_keypair2,
+            peer_id2,
+            now - 7200,  // 2 hours ago
+            now - 3600,  // 1 hour ago
+        ).expect("Failed to create expired PoR");
+        
+        let mut swarm1 = create_test_swarm(keypair1, por1);
+        let mut swarm2 = create_test_swarm(keypair2, por2);
         
         // Set up listener on swarm1
         swarm1.listen_on("/memory/2".parse().unwrap()).unwrap();
@@ -850,16 +890,18 @@ mod tests {
                 event = swarm1.select_next_some() => {
                     println!("Swarm1 event: {:?}", event);
                     if let SwarmEvent::Behaviour(PorAuthEvent::VerifyPorRequest { 
-                        peer_id, por_data, response_channel, .. 
+                        peer_id, por, response_channel, .. 
                     }) = event {
                         assert_eq!(peer_id, peer_id2);
-                        assert_eq!(por_data, por_data2);
+                        // Validate the PoR - should fail because it's expired
+                        let validation_result = por.validate();
+                        assert!(validation_result.is_err());
                         swarm1_verify_event_received = true;
                         
-                        // Reject authentication
+                        // Reject authentication due to expired PoR
                         swarm1.behaviour_mut().submit_por_verification_result(
                             peer_id,
-                            AuthResult::Error("Invalid PoR data".to_string()),
+                            AuthResult::Error("Invalid or expired PoR".to_string()),
                             response_channel
                         );
                     } else if let SwarmEvent::Behaviour(PorAuthEvent::OutboundAuthFailure { peer_id, .. }) = event {
@@ -896,18 +938,23 @@ mod tests {
     
     #[tokio::test]
     async fn test_auth_timeout() {
-        // Create two nodes
+        // Create owner keypair and node keypair for the authenticated node
+        let owner_keypair1 = PorUtils::generate_owner_keypair();
         let keypair1 = identity::Keypair::generate_ed25519();
         let keypair2 = identity::Keypair::generate_ed25519();
         
         let peer_id1 = PeerId::from(keypair1.public());
         let peer_id2 = PeerId::from(keypair2.public());
         
-        // PoR data for testing
-        let por_data1 = vec![1, 2, 3, 4];
+        // Create valid PoR
+        let por1 = ProofOfRepresentation::create(
+            &owner_keypair1, 
+            peer_id1, 
+            Duration::from_secs(3600)
+        ).expect("Failed to create PoR");
         
-        // Create a swarm that will never respond to auth requests
-        let mut swarm1 = create_test_swarm(keypair1, por_data1.clone());
+        // Create a swarm that will respond to auth requests
+        let mut swarm1 = create_test_swarm(keypair1, por1);
         
         // Create a test transport
         let transport2 = create_test_transport(&keypair2);

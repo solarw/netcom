@@ -5,6 +5,8 @@ use libp2p::{
     swarm::NetworkBehaviour,
 };
 
+use super::xauth::behaviours::PorAuthBehaviour;
+
 #[derive(NetworkBehaviour)]
 pub struct NodeBehaviour {
     pub identify: identify::Behaviour,
