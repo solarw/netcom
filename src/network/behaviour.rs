@@ -5,6 +5,8 @@ use libp2p::{
     swarm::NetworkBehaviour,
 };
 
+use libp2p_stream;
+
 use super::xauth::behaviours::PorAuthBehaviour;
 use super::xauth::por::por::ProofOfRepresentation;
 
@@ -15,6 +17,7 @@ pub struct NodeBehaviour {
     pub mdns: mdns::tokio::Behaviour,
     pub ping: ping::Behaviour,
     pub por_auth: PorAuthBehaviour,
+    pub stream: libp2p_stream::Behaviour,
 }
 
 pub fn make_behaviour(key: &identity::Keypair, por: ProofOfRepresentation) -> NodeBehaviour {
@@ -31,7 +34,7 @@ pub fn make_behaviour(key: &identity::Keypair, por: ProofOfRepresentation) -> No
     // Create the Kademlia behavior with the custom config
     let kad_behaviour =
         kad::Behaviour::with_config(key.public().to_peer_id(), kad_store, kad_config);
-    
+
     // Set up mDNS discovery
     let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())
         .expect("Failed to create mDNS behavior");
@@ -47,7 +50,7 @@ pub fn make_behaviour(key: &identity::Keypair, por: ProofOfRepresentation) -> No
 
     // Set up PoR authentication behavior with the provided PoR
     let por_auth = PorAuthBehaviour::new(por);
-
+    let stream = libp2p_stream::Behaviour::new();
     // Create the network behavior
     NodeBehaviour {
         identify,
@@ -55,5 +58,6 @@ pub fn make_behaviour(key: &identity::Keypair, por: ProofOfRepresentation) -> No
         mdns,
         ping,
         por_auth,
+        stream,
     }
 }

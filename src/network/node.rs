@@ -2,6 +2,7 @@ use libp2p::futures::StreamExt;
 
 use libp2p::{identify, identity, kad, mdns, Multiaddr, PeerId, Swarm};
 use std::str::FromStr;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -11,6 +12,7 @@ use std::error::Error;
 use tracing::{info, warn};
 
 use super::xauth::events::PorAuthEvent;
+use super::xstream::manager::StreamManager;
 use super::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
     commands::NetworkCommand,
@@ -26,6 +28,8 @@ pub struct NetworkNode {
     local_peer_id: PeerId,
     // New field for tracking authenticated peers
     authenticated_peers: HashSet<PeerId>,
+
+    stream_manager: StreamManager,
 }
 
 impl NetworkNode {
@@ -44,9 +48,8 @@ impl NetworkNode {
     > {
         // Create a keypair for authentication
         let local_peer_id = PeerId::from(local_key.public());
-
         // Create a SwarmBuilder with QUIC transport
-        let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
+        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
             .with_quic()
             .with_behaviour(|key| make_behaviour(key, por))?
@@ -58,7 +61,7 @@ impl NetworkNode {
         // Set up communication channels
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
         let (event_tx, event_rx) = mpsc::channel(100);
-
+        let stream_control = swarm.behaviour_mut().stream.new_control();
         Ok((
             Self {
                 cmd_rx,
@@ -68,6 +71,7 @@ impl NetworkNode {
                 connected_peers: HashMap::new(),
                 local_peer_id,
                 authenticated_peers: HashSet::new(),
+                stream_manager: StreamManager::new(stream_control),
             },
             cmd_tx,
             event_rx,
@@ -103,6 +107,13 @@ impl NetworkNode {
                 event = self.swarm.select_next_some() => {
                     self.handle_swarm_event(event).await;
                 }
+                Some(incoming_stream) = self.stream_manager.poll() => {
+                    let _ = self
+                            .event_tx
+                            .send(NetworkEvent::IncomingStream { stream: Arc::new(incoming_stream) }
+                            )
+                            .await;
+                }
             }
         }
     }
@@ -110,6 +121,21 @@ impl NetworkNode {
     // Handle commands sent to the network node
     async fn handle_command(&mut self, cmd: NetworkCommand) {
         match cmd {
+            NetworkCommand::OpenStream {
+                peer_id,
+                connection_id:_,
+                response,
+            } => {
+                match self.stream_manager.open_stream(peer_id).await
+                {
+                    Ok(stream) => {response.send(Ok(stream));},
+                    Err(e) => {
+                        response.send(Err("some".to_string()));
+                    }
+                }
+                
+            }
+
             NetworkCommand::SubmitPorVerification {
                 connection_id,
                 result,

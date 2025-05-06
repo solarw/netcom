@@ -1,7 +1,7 @@
 use libp2p::{Multiaddr, PeerId, swarm::ConnectionId};
 use std::error::Error;
 use tokio::sync::oneshot;
-use super::xauth::definitions::AuthResult;
+use super::{xauth::definitions::AuthResult, xstream::manager::XStream};
 
 // Add this to the NetworkCommand enum in commands.rs
 #[derive(Debug)]
@@ -72,4 +72,10 @@ pub enum NetworkCommand {
         connection_id: ConnectionId,
         result: AuthResult,
     },
+
+    OpenStream {
+        peer_id: PeerId, 
+        connection_id: Option<ConnectionId>,
+        response: oneshot::Sender<Result<XStream, String>>,
+    }
 }

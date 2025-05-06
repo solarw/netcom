@@ -1,8 +1,9 @@
-use libp2p::{Multiaddr, PeerId, swarm::ConnectionId};
+use libp2p::{swarm::ConnectionId, Multiaddr, PeerId};
 use tokio::sync::{mpsc, oneshot};
 
 use super::commands::NetworkCommand;
 use super::xauth::definitions::AuthResult;
+use super::xstream::manager::XStream;
 
 pub struct Commander {
     cmd_tx: mpsc::Sender<NetworkCommand>,
@@ -167,7 +168,7 @@ impl Commander {
             .await
             .map_err(|e| format!("Failed to receive response: {}", e).into())
     }
-    
+
     // New method to submit PoR verification result
     pub async fn submit_por_verification(
         &self,
@@ -183,7 +184,28 @@ impl Commander {
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                 format!("Failed to send PoR verification result: {}", e).into()
             })?;
-            
+
         Ok(())
+    }
+
+    pub async fn open_stream(&self, peer_id: PeerId) -> Result<XStream, String> {
+
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::OpenStream {
+                peer_id: peer_id,
+                connection_id: None,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send find peer addresses command: {}", e).into()
+            });
+
+        match response_rx.await {
+            Ok(result) => result,
+            Err(e) => Err(format!("Failed to receive response: {}", e).into()),
+        }
     }
 }
