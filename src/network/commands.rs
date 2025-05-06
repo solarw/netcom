@@ -1,6 +1,8 @@
-use libp2p::{Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, swarm::ConnectionId};
 use std::error::Error;
 use tokio::sync::oneshot;
+use super::xauth::definitions::AuthResult;
+
 // Add this to the NetworkCommand enum in commands.rs
 #[derive(Debug)]
 pub enum NetworkCommand {
@@ -63,5 +65,11 @@ pub enum NetworkCommand {
     IsPeerAuthenticated {
         peer_id: PeerId,
         response: oneshot::Sender<bool>,
+    },
+    
+    // NEW: Submit PoR verification result
+    SubmitPorVerification {
+        connection_id: ConnectionId,
+        result: AuthResult,
     },
 }

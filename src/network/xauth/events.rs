@@ -6,7 +6,7 @@ use super::{definitions::AuthDirection, por::por::ProofOfRepresentation};
 
 
 // Events emitted by the behaviour
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PorAuthEvent {
     // Authentication succeeded in both directions
     MutualAuthSuccess {

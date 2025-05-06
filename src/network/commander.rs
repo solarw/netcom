@@ -1,7 +1,8 @@
-use libp2p::{Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId, swarm::ConnectionId};
 use tokio::sync::{mpsc, oneshot};
 
 use super::commands::NetworkCommand;
+use super::xauth::definitions::AuthResult;
 
 pub struct Commander {
     cmd_tx: mpsc::Sender<NetworkCommand>,
@@ -59,6 +60,28 @@ impl Commander {
         match response_rx.await? {
             Ok(_) => Ok(()),
             Err(e) => Err(format!("Failed to connect: {}", e).into()),
+        }
+    }
+
+    pub async fn disconnect(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::Disconnect {
+                peer_id,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send disconnect command: {}", e).into()
+            })?;
+
+        match response_rx.await? {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("Failed to disconnect: {}", e).into()),
         }
     }
 
@@ -143,5 +166,24 @@ impl Commander {
         response_rx
             .await
             .map_err(|e| format!("Failed to receive response: {}", e).into())
+    }
+    
+    // New method to submit PoR verification result
+    pub async fn submit_por_verification(
+        &self,
+        connection_id: ConnectionId,
+        result: AuthResult,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.cmd_tx
+            .send(NetworkCommand::SubmitPorVerification {
+                connection_id,
+                result,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send PoR verification result: {}", e).into()
+            })?;
+            
+        Ok(())
     }
 }

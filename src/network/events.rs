@@ -1,4 +1,5 @@
 use libp2p::{swarm::ConnectionId, Multiaddr, PeerId, StreamProtocol};
+use super::xauth::events::PorAuthEvent;
 
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
@@ -15,12 +16,12 @@ pub enum NetworkEvent {
         error: String,
     },
 
-    // new events
+    // Connection events
     ConnectionOpened {
         peer_id: PeerId,
         addr: Multiaddr,
         connection_id: ConnectionId,
-        protocols: Vec<StreamProtocol>,  // Add this field
+        protocols: Vec<StreamProtocol>,  
     },
     ConnectionClosed {
         peer_id: PeerId,
@@ -33,18 +34,23 @@ pub enum NetworkEvent {
     StopListeningOnAddress {
         addr: Multiaddr,
     },
+    
+    // Discovery events
     MdnsIsOn {},
     MdnsIsOff {},
-
-
+    
+    // Kademlia DHT events
     KadAddressAdded {
         peer_id: PeerId,
         addr: Multiaddr,
     },
-    
     KadRoutingUpdated {
         peer_id: PeerId,
         addresses: Vec<Multiaddr>,
     },
-
+    
+    // Authentication event wrapper
+    AuthEvent {
+        event: PorAuthEvent,
+    },
 }

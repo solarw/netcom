@@ -1,9 +1,11 @@
 use clap::Parser;
-use network::{commander::Commander, events::NetworkEvent, node::NetworkNode, utils::make_new_key};
-use std::str::FromStr;
+use network::{commander::Commander, events::NetworkEvent, node::NetworkNode, utils::make_new_key, xauth::events::PorAuthEvent};
+use network::xauth::definitions::AuthResult;
+use std::{str::FromStr, collections::HashMap};
 
 mod network;
 use libp2p::Multiaddr;
+use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[derive(Parser, Debug)]
@@ -16,6 +18,14 @@ struct Args {
     /// Disable mDNS discovery
     #[arg(long, default_value_t = false)]
     disable_mdns: bool,
+    
+    /// Require authentication for connections
+    #[arg(long, default_value_t = false)]
+    require_auth: bool,
+    
+    /// Always accept authentication requests (for testing)
+    #[arg(long, default_value_t = false)]
+    accept_all_auth: bool,
 }
 
 #[tokio::main]
@@ -53,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     // Create commander
-    let cmd = Commander::new(cmd_tx);
+    let cmd = Commander::new(cmd_tx.clone());
     
     // Listen on a random port (0 means OS will assign an available port)
     let port = 0;
@@ -77,6 +87,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Spawn a task to handle and display network events
     let event_task = tokio::spawn(async move {
         let mut discovered_peers = std::collections::HashSet::new();
+        // Track authenticated peers separately
+        let mut authenticated_peers = std::collections::HashSet::new();
         
         while let Some(event) = event_rx.recv().await {
             match event {
@@ -87,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 NetworkEvent::PeerDisconnected { peer_id } => {
                     println!("❌ Disconnected from peer: {}", peer_id);
                     discovered_peers.remove(&peer_id);
+                    authenticated_peers.remove(&peer_id);
                 }
                 NetworkEvent::ConnectionError { peer_id, error } => {
                     if let Some(pid) = peer_id {
@@ -110,6 +123,106 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 NetworkEvent::ConnectionClosed { peer_id, addr, .. } => {
                     println!("🔌 Connection closed to {peer_id} at {addr}");
                 }
+                
+                // Handle authentication events
+                NetworkEvent::AuthEvent { event } => {
+                    match event {
+                        PorAuthEvent::MutualAuthSuccess { peer_id, metadata, .. } => {
+                            println!("🔐 Mutual authentication successful with peer: {peer_id}");
+                            authenticated_peers.insert(peer_id);
+                            
+                            // If there's metadata, print it
+                            if !metadata.is_empty() {
+                                println!("📝 Peer metadata: {:?}", metadata);
+                            }
+                            
+                            // Here you can trigger additional actions for authenticated peers
+                            // For example, starting data exchange, joining swarms, etc.
+                            println!("✨ Peer {peer_id} is now fully authenticated and trusted");
+                        }
+                        PorAuthEvent::VerifyPorRequest { 
+                            peer_id, 
+                            connection_id, 
+                            address, 
+                            por, 
+                            metadata 
+                        } => {
+                            println!("🔍 Received authentication request from peer {peer_id}");
+                            
+                            // Here we make the authentication decision ourselves
+                            let auth_result = if args.accept_all_auth {
+                                // If --accept-all-auth is enabled, always accept
+                                println!("🔑 Automatically accepting auth request (--accept-all-auth enabled)");
+                                AuthResult::Ok(HashMap::new())
+                            } else {
+                                // Otherwise, validate the PoR
+                                match por.validate() {
+                                    Ok(()) => {
+                                        println!("✅ PoR validation successful for {peer_id}");
+                                        AuthResult::Ok(HashMap::new())
+                                    }
+                                    Err(e) => {
+                                        println!("❌ PoR validation failed for {peer_id}: {e}");
+                                        AuthResult::Error(format!("PoR validation failed: {}", e))
+                                    }
+                                }
+                            };
+                            
+                            // Send the authentication result back to the network using commander
+                            match cmd.submit_por_verification(connection_id, auth_result).await {
+                                Ok(_) => println!("📤 Sent authentication response for {peer_id}"),
+                                Err(e) => println!("❌ Failed to send authentication response: {e}"),
+                            }
+                        }
+                        PorAuthEvent::OutboundAuthSuccess { peer_id, .. } => {
+                            println!("🔑 Outbound authentication successful with peer: {peer_id}");
+                            // We verified them, but they haven't verified us yet
+                            println!("⏳ Waiting for peer to verify our authentication...");
+                        }
+                        PorAuthEvent::InboundAuthSuccess { peer_id, .. } => {
+                            println!("🔒 Inbound authentication successful with peer: {peer_id}");
+                            // They verified us, but we haven't verified them yet
+                            println!("⏳ Waiting to verify peer's authentication...");
+                        }
+                        PorAuthEvent::OutboundAuthFailure { peer_id, reason, .. } => {
+                            println!("❌ Failed to authenticate peer {peer_id}: {reason}");
+                            // Optionally disconnect from unauthenticated peers if auth is required
+                            if args.require_auth {
+                                println!("🚫 Disconnecting from unauthenticated peer as --require-auth is enabled");
+                                // Use the commander to disconnect
+                                match cmd.disconnect(peer_id).await {
+                                    Ok(_) => println!("📤 Disconnected from {peer_id}"),
+                                    Err(e) => println!("❌ Failed to disconnect: {e}"),
+                                }
+                            }
+                        }
+                        PorAuthEvent::InboundAuthFailure { peer_id, reason, .. } => {
+                            println!("❌ Peer {peer_id} failed to authenticate us: {reason}");
+                            // Optionally disconnect in this case as well
+                            if args.require_auth {
+                                println!("🚫 Disconnecting from peer that couldn't authenticate us as --require-auth is enabled");
+                                // Use the commander to disconnect
+                                match cmd.disconnect(peer_id).await {
+                                    Ok(_) => println!("📤 Disconnected from {peer_id}"),
+                                    Err(e) => println!("❌ Failed to disconnect: {e}"),
+                                }
+                            }
+                        }
+                        PorAuthEvent::AuthTimeout { peer_id, direction, .. } => {
+                            println!("⏱️ Authentication timed out with peer {peer_id}, direction: {:?}", direction);
+                            // Optionally disconnect for timeout
+                            if args.require_auth {
+                                println!("🚫 Disconnecting due to authentication timeout as --require-auth is enabled");
+                                // Use the commander to disconnect
+                                match cmd.disconnect(peer_id).await {
+                                    Ok(_) => println!("📤 Disconnected from {peer_id}"),
+                                    Err(e) => println!("❌ Failed to disconnect: {e}"),
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 // You can add more event handlers here as needed
                 _ => {}
             }
@@ -118,8 +231,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             if !discovered_peers.is_empty() {
                 println!("📋 Current discovered peers: {:?}", discovered_peers);
             }
+            
+            // Print the list of authenticated peers
+            if !authenticated_peers.is_empty() {
+                println!("🔐 Authenticated peers: {:?}", authenticated_peers);
+            }
         }
     });
+    
+    // Setup ctrl+c handler to gracefully shut down
+    //let cmd_clone = cmd.clone();
+    ctrlc::set_handler(move || {
+        info!("Ctrl+C received, shutting down...");
+        // This will be limited because we're in a different thread, 
+        // but you could set up a channel to signal shutdown
+        std::process::exit(0);
+    })?;
     
     // Wait for the node task to complete
     let _ = tokio::join!(node_task, event_task);

@@ -11,6 +11,8 @@ use std::error::Error;
 use tracing::{info, warn};
 
 use super::xauth;
+use super::xauth::definitions::AuthResult;
+use super::xauth::events::PorAuthEvent;
 use super::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
     commands::NetworkCommand,
@@ -109,16 +111,34 @@ impl NetworkNode {
     // Handle commands sent to the network node
     async fn handle_command(&mut self, cmd: NetworkCommand) {
         match cmd {
+            NetworkCommand::SubmitPorVerification {
+                connection_id,
+                result,
+            } => {
+                info!("Submitting PoR verification result for connection {connection_id}");
 
-
+                // Submit the verification result to the por_auth behaviour
+                match self
+                    .swarm
+                    .behaviour_mut()
+                    .por_auth
+                    .submit_por_verification_result(connection_id, result)
+                {
+                    Ok(_) => info!("✅ Successfully submitted verification result"),
+                    Err(e) => warn!("❌ Failed to submit verification result: {}", e),
+                }
+            }
             NetworkCommand::IsPeerAuthenticated { peer_id, response } => {
-                let is_authenticated = self.authenticated_peers.contains(&peer_id) || 
-                                       self.swarm.behaviour().por_auth.is_peer_authenticated(&peer_id);
-                
+                let is_authenticated = self.authenticated_peers.contains(&peer_id)
+                    || self
+                        .swarm
+                        .behaviour()
+                        .por_auth
+                        .is_peer_authenticated(&peer_id);
+
                 let _ = response.send(is_authenticated);
             }
-    
-            
+
             NetworkCommand::GetPeerAddresses { peer_id, response } => {
                 // Use Kademlia's routing table to get addresses
                 let mut addresses = Vec::new();
@@ -460,8 +480,9 @@ impl NetworkNode {
             // Handle PorAuth events
             NodeBehaviourEvent::PorAuth(event) => {
                 match event {
-                    xauth::behaviours::PorAuthEvent::MutualAuthSuccess {
+                    PorAuthEvent::MutualAuthSuccess {
                         peer_id,
+                        connection_id,
                         address,
                         metadata,
                     } => {
@@ -471,78 +492,150 @@ impl NetworkNode {
                         // Store authenticated peer
                         self.authenticated_peers.insert(peer_id);
 
-                        // You could also store the metadata if needed
-                        if !metadata.is_empty() {
-                            info!("📝 Peer metadata: {:?}", metadata);
-                        }
+                        // Forward the event to the main application
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::AuthEvent {
+                                event: PorAuthEvent::MutualAuthSuccess {
+                                    peer_id,
+                                    connection_id,
+                                    address,
+                                    metadata,
+                                },
+                            })
+                            .await;
                     }
-                    xauth::behaviours::PorAuthEvent::VerifyPorRequest {
+                    PorAuthEvent::VerifyPorRequest {
                         peer_id,
+                        connection_id,
                         address,
                         por,
                         metadata,
-                        response_channel,
                     } => {
-                        info!("🔐 Verifying PoR from peer {peer_id} at {address}");
+                        info!("🔐 Verification request from peer {peer_id} at {address}");
 
-                        // Validate the Proof of Representation
-                        match por.validate() {
-                            Ok(()) => {
-                                info!("🟢 PoR validation successful for {peer_id}");
+                        // Forward the verification request to the main application for decision
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::AuthEvent {
+                                event: PorAuthEvent::VerifyPorRequest {
+                                    peer_id,
+                                    connection_id,
+                                    address,
+                                    por,
+                                    metadata,
+                                },
+                            })
+                            .await;
 
-                                // Accept the authentication
-                                self.swarm
-                                    .behaviour_mut()
-                                    .por_auth
-                                    .submit_por_verification_result(
-                                        peer_id,
-                                        xauth::behaviours::AuthResult::Ok(HashMap::new()),
-                                        response_channel,
-                                    );
-                            }
-                            Err(e) => {
-                                info!("🔴 PoR validation failed for {peer_id}: {e}");
-
-                                // Reject the authentication
-                                self.swarm
-                                    .behaviour_mut()
-                                    .por_auth
-                                    .submit_por_verification_result(
-                                        peer_id,
-                                        xauth::behaviours::AuthResult::Error(format!(
-                                            "PoR validation failed: {}",
-                                            e
-                                        )),
-                                        response_channel,
-                                    );
-                            }
-                        }
+                        // The validation and decision will be made in main.rs
+                        // The main application will need to call submit_por_verification_result
                     }
-                    xauth::behaviours::PorAuthEvent::OutboundAuthSuccess { peer_id, .. } => {
-                        info!("🔹 Outbound authentication successful with {peer_id}");
-                    }
-                    xauth::behaviours::PorAuthEvent::InboundAuthSuccess { peer_id, .. } => {
-                        info!("🔸 Inbound authentication successful with {peer_id}");
-                    }
-                    xauth::behaviours::PorAuthEvent::OutboundAuthFailure {
+                    PorAuthEvent::OutboundAuthSuccess {
                         peer_id,
+                        connection_id,
+                        address,
+                        metadata,
+                    } => {
+                        info!("🔹 Outbound authentication successful with {peer_id}");
+
+                        // Forward the event to the main application
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::AuthEvent {
+                                event: PorAuthEvent::OutboundAuthSuccess {
+                                    peer_id,
+                                    connection_id,
+                                    address,
+                                    metadata,
+                                },
+                            })
+                            .await;
+                    }
+                    PorAuthEvent::InboundAuthSuccess {
+                        peer_id,
+                        connection_id,
+                        address,
+                    } => {
+                        info!("🔸 Inbound authentication successful with {peer_id}");
+
+                        // Forward the event to the main application
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::AuthEvent {
+                                event: PorAuthEvent::InboundAuthSuccess {
+                                    peer_id,
+                                    connection_id,
+                                    address,
+                                },
+                            })
+                            .await;
+                    }
+                    PorAuthEvent::OutboundAuthFailure {
+                        peer_id,
+                        connection_id,
+                        address,
                         reason,
-                        ..
                     } => {
                         info!("❌ Outbound authentication failed with {peer_id}: {reason}");
+
+                        // Forward the event to the main application
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::AuthEvent {
+                                event: PorAuthEvent::OutboundAuthFailure {
+                                    peer_id,
+                                    connection_id,
+                                    address,
+                                    reason,
+                                },
+                            })
+                            .await;
                     }
-                    xauth::behaviours::PorAuthEvent::InboundAuthFailure {
-                        peer_id, reason, ..
+                    PorAuthEvent::InboundAuthFailure {
+                        peer_id,
+                        connection_id,
+                        address,
+                        reason,
                     } => {
                         info!("❌ Inbound authentication failed with {peer_id}: {reason}");
+
+                        // Forward the event to the main application
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::AuthEvent {
+                                event: PorAuthEvent::InboundAuthFailure {
+                                    peer_id,
+                                    connection_id,
+                                    address,
+                                    reason,
+                                },
+                            })
+                            .await;
                     }
-                    xauth::behaviours::PorAuthEvent::AuthTimeout {
-                        peer_id, direction, ..
+                    PorAuthEvent::AuthTimeout {
+                        peer_id,
+                        connection_id,
+                        address,
+                        direction,
                     } => {
                         info!(
                             "⏱️ Authentication timeout with {peer_id}, direction: {:?}",
                             direction
                         );
+
+                        // Forward the event to the main application
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::AuthEvent {
+                                event: PorAuthEvent::AuthTimeout {
+                                    peer_id,
+                                    connection_id,
+                                    address,
+                                    direction,
+                                },
+                            })
+                            .await;
                     }
                 }
             }
