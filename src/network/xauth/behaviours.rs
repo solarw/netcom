@@ -6,10 +6,8 @@ use libp2p::{
     },
     PeerId, StreamProtocol,
 };
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    fmt::Debug,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -236,7 +234,7 @@ impl PorAuthBehaviour {
         }
 
         // Update connection state
-        if let Some(mut conn) = self.connections.get_mut(&connection_id) {
+        if let Some(conn) = self.connections.get_mut(&connection_id) {
             conn.touch();
 
             // Store information we need for events

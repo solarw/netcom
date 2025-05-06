@@ -1,7 +1,8 @@
 use clap::Parser;
 use network::{commander::Commander, events::NetworkEvent, node::NetworkNode, utils::make_new_key, xauth::events::PorAuthEvent};
 use network::xauth::definitions::AuthResult;
-use std::{str::FromStr, collections::HashMap};
+use network::xauth::por::por::{ProofOfRepresentation, PorUtils};
+use std::{str::FromStr, collections::HashMap, time::Duration};
 
 mod network;
 use libp2p::Multiaddr;
@@ -37,8 +38,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let args = Args::parse();
     
+    // Create the network node's keypair
     let local_key = make_new_key();
-    let (mut node, cmd_tx, mut event_rx, _peer_id) = NetworkNode::new(local_key).await?;
+    
+    // Create owner keypair for PoR authentication - moved from behaviour.rs
+    let owner_keypair = PorUtils::generate_owner_keypair();
+    
+    // Create a PoR valid for 24 hours
+    let por = ProofOfRepresentation::create(
+        &owner_keypair, 
+        local_key.public().to_peer_id(), 
+        Duration::from_secs(86400) // 24 hours
+    ).expect("Failed to create Proof of Representation");
+    
+    // Pass the PoR to the NetworkNode constructor
+    let (mut node, cmd_tx, mut event_rx, _peer_id) = NetworkNode::new(local_key, por).await?;
 
     println!("Local peer ID: {}", node.local_peer_id());
     

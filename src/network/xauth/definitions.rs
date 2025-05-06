@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::{Duration, Instant}};
 
-use libp2p::{request_response::ResponseChannel, swarm::ConnectionId, Multiaddr, PeerId};
+use libp2p::{request_response::ResponseChannel, Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 
 use super::por::por::ProofOfRepresentation;

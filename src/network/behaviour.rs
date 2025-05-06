@@ -6,8 +6,7 @@ use libp2p::{
 };
 
 use super::xauth::behaviours::PorAuthBehaviour;
-use super::xauth::por::por::{ProofOfRepresentation, PorUtils};
-use std::time::Duration;
+use super::xauth::por::por::ProofOfRepresentation;
 
 #[derive(NetworkBehaviour)]
 pub struct NodeBehaviour {
@@ -18,7 +17,7 @@ pub struct NodeBehaviour {
     pub por_auth: PorAuthBehaviour,
 }
 
-pub fn make_behaviour(key: &identity::Keypair) -> NodeBehaviour {
+pub fn make_behaviour(key: &identity::Keypair, por: ProofOfRepresentation) -> NodeBehaviour {
     let mut kad_config = kad::Config::default();
     kad_config.set_query_timeout(std::time::Duration::from_secs(300)); // 5 minutes
     kad_config.disjoint_query_paths(true);
@@ -46,8 +45,8 @@ pub fn make_behaviour(key: &identity::Keypair) -> NodeBehaviour {
     // Set up ping behavior for connection keep-alive
     let ping = ping::Behaviour::new(ping::Config::default());
 
-    // Set up PoR authentication behavior
-    let por_auth = create_por_auth_behaviour(key);
+    // Set up PoR authentication behavior with the provided PoR
+    let por_auth = PorAuthBehaviour::new(por);
 
     // Create the network behavior
     NodeBehaviour {
@@ -57,20 +56,4 @@ pub fn make_behaviour(key: &identity::Keypair) -> NodeBehaviour {
         ping,
         por_auth,
     }
-}
-
-// Helper function to create a PoR auth behaviour
-fn create_por_auth_behaviour(key: &identity::Keypair) -> PorAuthBehaviour {
-    // Create an owner keypair for signing the PoR
-    let owner_keypair = PorUtils::generate_owner_keypair();
-    
-    // Create a PoR valid for 24 hours
-    let por = ProofOfRepresentation::create(
-        &owner_keypair, 
-        key.public().to_peer_id(), 
-        Duration::from_secs(86400) // 24 hours
-    ).expect("Failed to create Proof of Representation");
-    
-    // Create the PorAuthBehaviour with the PoR
-    PorAuthBehaviour::new(por)
 }

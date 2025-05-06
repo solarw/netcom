@@ -10,8 +10,6 @@ use std::error::Error;
 
 use tracing::{info, warn};
 
-use super::xauth;
-use super::xauth::definitions::AuthResult;
 use super::xauth::events::PorAuthEvent;
 use super::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
@@ -34,6 +32,7 @@ impl NetworkNode {
     // Create a new NetworkNode with all required protocols
     pub async fn new(
         local_key: identity::Keypair,
+        por: super::xauth::por::por::ProofOfRepresentation,
     ) -> Result<
         (
             Self,
@@ -50,7 +49,7 @@ impl NetworkNode {
         let swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
             .with_quic()
-            .with_behaviour(|key| make_behaviour(key))?
+            .with_behaviour(|key| make_behaviour(key, por))?
             .with_swarm_config(|c| {
                 c.with_idle_connection_timeout(std::time::Duration::from_secs(60))
             })
