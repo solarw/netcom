@@ -1,76 +1,134 @@
 use libp2p::{
-    identity::Keypair,
+    identity::{Keypair, PublicKey},
     PeerId,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
-/// Модуль для работы с Proof of Representation
+// Create a module with serialization/deserialization logic for PublicKey
+mod public_key_serde {
+    use libp2p::identity::PublicKey;
+    use serde::{Deserializer, Serializer, de};
+    use std::fmt;
+
+    pub fn serialize<S>(key: &PublicKey, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Convert PublicKey to protobuf bytes
+        let bytes = key.encode_protobuf();
+        // Serialize the bytes
+        serializer.serialize_bytes(&bytes)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<PublicKey, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Define a visitor that accepts bytes
+        struct PublicKeyVisitor;
+
+        impl<'de> de::Visitor<'de> for PublicKeyVisitor {
+            type Value = PublicKey;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a byte array containing a protobuf-encoded PublicKey")
+            }
+
+            fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                PublicKey::try_decode_protobuf(value)
+                    .map_err(|e| de::Error::custom(format!("Invalid public key: {}", e)))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                // Collect bytes from sequence
+                let mut bytes = Vec::new();
+                while let Some(byte) = seq.next_element()? {
+                    bytes.push(byte);
+                }
+
+                PublicKey::try_decode_protobuf(&bytes)
+                    .map_err(|e| de::Error::custom(format!("Invalid public key: {}", e)))
+            }
+        }
+
+        // Use the visitor to deserialize
+        deserializer.deserialize_bytes(PublicKeyVisitor)
+    }
+}
+
+/// Module for working with Proof of Representation
 pub mod por {
     use super::*;
 
-    /// Структура Proof of Representation (POR)
-    /// Представляет собой доверенность, удостоверяющую, что узел представляет владельца
+    /// Proof of Representation (POR) structure
+    /// Represents a credential certifying that a node represents the owner
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ProofOfRepresentation {
-        /// Открытый ключ владельца в формате байтов
-        pub owner_public_key: Vec<u8>,
+        /// Owner's public key
+        #[serde(with = "public_key_serde")]
+        pub owner_public_key: PublicKey,
         
-        /// PeerId узла, который представляет владельца
+        /// PeerId of the node representing the owner
         pub peer_id: PeerId,
         
-        /// Метка времени создания доверенности (UNIX timestamp в секундах)
+        /// Timestamp of credential creation (UNIX timestamp in seconds)
         pub issued_at: u64,
         
-        /// Срок действия доверенности (UNIX timestamp в секундах)
+        /// Expiration time of the credential (UNIX timestamp in seconds)
         pub expires_at: u64,
         
-        /// Цифровая подпись, созданная закрытым ключом владельца
+        /// Digital signature created with the owner's private key
         pub signature: Vec<u8>,
     }
     
     impl ProofOfRepresentation {
-        /// Создание нового POR с действительной подписью
+        /// Create a new POR with a valid signature
         /// 
-        /// # Аргументы
-        /// * `owner_keypair` - Keypair владельца для подписи
-        /// * `peer_id` - PeerId узла, которому делегируются полномочия
-        /// * `validity_duration` - Срок действия доверенности
+        /// # Arguments
+        /// * `owner_keypair` - Owner's Keypair for signing
+        /// * `peer_id` - PeerId of the node being delegated authority
+        /// * `validity_duration` - Validity period of the credential
         /// 
-        /// # Возвращает
-        /// Новый экземпляр ProofOfRepresentation с действительной подписью
+        /// # Returns
+        /// A new ProofOfRepresentation instance with a valid signature
         pub fn create(
             owner_keypair: &Keypair,
             peer_id: PeerId,
             validity_duration: Duration,
         ) -> Result<Self, String> {
-            // Получаем текущее время
+            // Get current time
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .map_err(|e| format!("Ошибка системного времени: {}", e))?
+                .map_err(|e| format!("System time error: {}", e))?
                 .as_secs();
             
-            // Вычисляем время истечения срока действия
+            // Calculate expiration time
             let expires_at = now + validity_duration.as_secs();
             
-            // Получаем байты публичного ключа (используем непосредственно to_protobuf_encoding на keypair)
-            let public_key_bytes = owner_keypair.to_protobuf_encoding()
-                .map_err(|e| format!("Ошибка кодирования ключа: {}", e))?;
+            // Get public key
+            let public_key = owner_keypair.public();
             
-            // Подготавливаем данные для подписи
+            // Prepare data for signing
             let message = Self::prepare_message_for_signing(
-                &public_key_bytes,
+                &public_key,
                 &peer_id,
                 now,
                 expires_at,
             );
             
-            // Создаем подпись
+            // Create signature
             let signature = owner_keypair.sign(&message)
-                .map_err(|e| format!("Ошибка создания подписи: {}", e))?;
+                .map_err(|e| format!("Signature creation error: {}", e))?;
             
             Ok(Self {
-                owner_public_key: public_key_bytes,
+                owner_public_key: public_key,
                 peer_id,
                 issued_at: now,
                 expires_at,
@@ -78,31 +136,30 @@ pub mod por {
             })
         }
         
-        /// Создание POR с заданным временем начала и окончания (для тестирования)
+        /// Create POR with specified start and end times (for testing)
         pub fn create_with_times(
             owner_keypair: &Keypair,
             peer_id: PeerId,
             issued_at: u64,
             expires_at: u64,
         ) -> Result<Self, String> {
-            // Получаем байты публичного ключа (используем непосредственно to_protobuf_encoding на keypair)
-            let public_key_bytes = owner_keypair.to_protobuf_encoding()
-                .map_err(|e| format!("Ошибка кодирования ключа: {}", e))?;
+            // Get public key
+            let public_key = owner_keypair.public();
             
-            // Подготавливаем данные для подписи
+            // Prepare data for signing
             let message = Self::prepare_message_for_signing(
-                &public_key_bytes,
+                &public_key,
                 &peer_id,
                 issued_at,
                 expires_at,
             );
             
-            // Создаем подпись
+            // Create signature
             let signature = owner_keypair.sign(&message)
-                .map_err(|e| format!("Ошибка создания подписи: {}", e))?;
+                .map_err(|e| format!("Signature creation error: {}", e))?;
             
             Ok(Self {
-                owner_public_key: public_key_bytes,
+                owner_public_key: public_key,
                 peer_id,
                 issued_at,
                 expires_at,
@@ -110,42 +167,35 @@ pub mod por {
             })
         }
         
-        /// Проверка действительности POR
+        /// Validate the POR
         ///
-        /// # Возвращает
-        /// `Ok(())` если POR действителен, иначе `Err` с описанием проблемы
+        /// # Returns
+        /// `Ok(())` if POR is valid, otherwise `Err` with a description of the issue
         pub fn validate(&self) -> Result<(), String> {
-            // Проверка срока действия
+            // Check validity period
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .map_err(|e| format!("Ошибка системного времени: {}", e))?
+                .map_err(|e| format!("System time error: {}", e))?
                 .as_secs();
             
             if now < self.issued_at {
-                return Err("POR еще не вступил в силу".to_string());
+                return Err("POR not yet valid".to_string());
             }
             
             if now > self.expires_at {
-                return Err("Срок действия POR истек".to_string());
+                return Err("POR has expired".to_string());
             }
             
-            // Проверка подписи
+            // Verify signature
             self.verify_signature()
         }
         
-        /// Проверка подписи POR
+        /// Verify POR signature
         ///
-        /// # Возвращает
-        /// `Ok(())` если подпись верна, иначе `Err` с описанием проблемы
+        /// # Returns
+        /// `Ok(())` if signature is valid, otherwise `Err` with description of the issue
         fn verify_signature(&self) -> Result<(), String> {
-            // Преобразуем байты в ключ
-            let keypair = Keypair::from_protobuf_encoding(&self.owner_public_key)
-                .map_err(|e| format!("Неверный формат ключа: {}", e))?;
-            
-            // Получаем публичный ключ
-            let public_key = keypair.public();
-            
-            // Подготавливаем данные для проверки подписи
+            // Prepare data for signature verification
             let message = Self::prepare_message_for_signing(
                 &self.owner_public_key,
                 &self.peer_id,
@@ -153,53 +203,54 @@ pub mod por {
                 self.expires_at,
             );
             
-            // Проверяем подпись
-            if public_key.verify(&message, &self.signature) {
+            // Verify signature
+            if self.owner_public_key.verify(&message, &self.signature) {
                 Ok(())
             } else {
-                Err("Неверная подпись".to_string())
+                Err("Invalid signature".to_string())
             }
         }
         
-        /// Подготовка сообщения для подписи/проверки
+        /// Prepare message for signing/verification
         fn prepare_message_for_signing(
-            owner_public_key: &[u8],
+            owner_public_key: &PublicKey,
             peer_id: &PeerId,
             issued_at: u64,
             expires_at: u64,
         ) -> Vec<u8> {
-            // Конкатенируем все данные, которые должны быть подписаны
+            // Concatenate all data to be signed
             let mut message = Vec::new();
             
-            // Добавляем открытый ключ владельца
-            message.extend_from_slice(owner_public_key);
+            // Add owner's public key bytes
+            let public_key_bytes = owner_public_key.encode_protobuf();
+            message.extend_from_slice(&public_key_bytes);
             
-            // Добавляем peer_id как строку
+            // Add peer_id as string
             let peer_id_str = peer_id.to_string();
             message.extend_from_slice(peer_id_str.as_bytes());
             
-            // Добавляем issued_at и expires_at как байты
+            // Add issued_at and expires_at as bytes
             message.extend_from_slice(&issued_at.to_le_bytes());
             message.extend_from_slice(&expires_at.to_le_bytes());
             
             message
         }
         
-        /// Проверка, истёк ли срок действия POR
+        /// Check if POR has expired
         pub fn is_expired(&self) -> Result<bool, String> {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .map_err(|e| format!("Ошибка системного времени: {}", e))?
+                .map_err(|e| format!("System time error: {}", e))?
                 .as_secs();
             
             Ok(now > self.expires_at)
         }
         
-        /// Получение оставшегося времени действия в секундах
+        /// Get remaining validity time in seconds
         pub fn remaining_time(&self) -> Result<Option<u64>, String> {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .map_err(|e| format!("Ошибка системного времени: {}", e))?
+                .map_err(|e| format!("System time error: {}", e))?
                 .as_secs();
             
             if now > self.expires_at {
@@ -210,26 +261,24 @@ pub mod por {
         }
     }
     
-    /// Вспомогательные функции для работы с ключами
+    /// Helper functions for working with keys
     pub struct PorUtils;
     
     impl PorUtils {
-        /// Создание новой пары ключей для владельца
+        /// Create a new keypair for the owner
         pub fn generate_owner_keypair() -> Keypair {
             Keypair::generate_ed25519()
         }
         
-        /// Создание ключевой пары из существующего закрытого ключа в формате protobuf
+        /// Create a keypair from existing private key in protobuf format
         pub fn keypair_from_bytes(secret_key_bytes: &[u8]) -> Result<Keypair, String> {
             Keypair::from_protobuf_encoding(secret_key_bytes)
-                .map_err(|e| format!("Неверный формат ключа: {}", e))
+                .map_err(|e| format!("Invalid key format: {}", e))
         }
         
-        /// Получение PeerId из ключевой пары
+        /// Get PeerId from keypair
         pub fn peer_id_from_keypair(keypair: &Keypair) -> PeerId {
             keypair.public().to_peer_id()
         }
     }
 }
-
-

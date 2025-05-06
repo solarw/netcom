@@ -149,21 +149,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         } => {
                             println!("🔍 Received authentication request from peer {peer_id}");
                             
-                            // Here we make the authentication decision ourselves
+                            // Here we make the authentication decision
                             let auth_result = if args.accept_all_auth {
                                 // If --accept-all-auth is enabled, always accept
                                 println!("🔑 Automatically accepting auth request (--accept-all-auth enabled)");
                                 AuthResult::Ok(HashMap::new())
                             } else {
-                                // Otherwise, validate the PoR
+                                // Validate the PoR
                                 match por.validate() {
                                     Ok(()) => {
-                                        println!("✅ PoR validation successful for {peer_id}");
+                                        let owner_peer_id = por.owner_public_key.to_peer_id();
+                                        println!("✅ PoR validation successful for {peer_id} {owner_peer_id}");
                                         AuthResult::Ok(HashMap::new())
                                     }
                                     Err(e) => {
-                                        println!("❌ PoR validation failed for {peer_id}: {e}");
-                                        AuthResult::Error(format!("PoR validation failed: {}", e))
+                                        // Check specifically for public key errors
+                                        if e.contains("Invalid owner public key") {
+                                            println!("❌ PoR validation failed for {peer_id}: Invalid public key");
+                                            AuthResult::Error(format!("PoR validation failed: Invalid public key"))
+                                        } else if e.contains("expired") {
+                                            println!("❌ PoR validation failed for {peer_id}: Expired PoR");
+                                            AuthResult::Error(format!("PoR validation failed: Expired"))
+                                        } else if e.contains("not yet valid") {
+                                            println!("❌ PoR validation failed for {peer_id}: PoR not yet valid");
+                                            AuthResult::Error(format!("PoR validation failed: Not yet valid"))
+                                        } else if e.contains("Invalid signature") {
+                                            println!("❌ PoR validation failed for {peer_id}: Invalid signature");
+                                            AuthResult::Error(format!("PoR validation failed: Invalid signature"))
+                                        } else {
+                                            println!("❌ PoR validation failed for {peer_id}: {e}");
+                                            AuthResult::Error(format!("PoR validation failed: {}", e))
+                                        }
                                     }
                                 }
                             };
