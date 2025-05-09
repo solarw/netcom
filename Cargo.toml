@@ -5,25 +5,45 @@ edition = "2021"
 
 [dependencies]
 libp2p = { version = "0.55", features = [
-    "tokio", 
-    "mdns", 
-    "identify", 
-    "kad", 
-    "rendezvous", 
-    "autonat", 
-    "dcutr", 
-    "request-response", 
-    "quic", 
-    "noise", 
-    "yamux", 
-    "dns", 
-    "tcp", 
-    "ping", 
-    "cbor", 
-    "serde", 
-    "macros",
-    "relay"
+    # Транспорт: только QUIC
+    "quic",          # QUIC протокол
+    "dns",           # DNS разрешение адресов
+    
+    # Безопасность
+    "noise",         # Протокол шифрования Noise (для компонентов, которые его требуют)
+    
+    # NAT Traversal
+    "autonat",       # Автоматическое определение типа NAT
+    "dcutr",         # Direct Connection Upgrade through Relay
+    "relay",         # Поддержка ретрансляции
+    
+    # Обнаружение и связность
+    "mdns",          # Локальное обнаружение узлов
+    "kad",           # Kademlia DHT
+    "identify",      # Обмен информацией о возможностях
+    "ping",          # Проверка соединений
+    "rendezvous",    # Сервис встречи узлов
+    
+    # Протоколы взаимодействия
+    "request-response", # Протокол запрос-ответ
+    
+    # Кодирование
+    "cbor",          # Формат сериализации
+    "serde",         # Интеграция с сериализацией
+    
+    # Утилитарные функции
+    "macros",        # Макросы
+    "tokio",         # Асинхронный рантайм
+    
+    # Метрики
+    "metrics",       # Статистика соединений
 ]}
+
+
+
+
+
+
 tokio = { version = "1.35", features = ["full"] }
 futures = "0.3"
 tracing = "0.1"
