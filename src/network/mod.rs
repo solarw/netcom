@@ -6,4 +6,3 @@ pub mod utils;
 pub mod commander;
 pub mod xauth;
 pub mod xstream;
-pub mod bootstrap;

@@ -12,7 +12,6 @@ use std::error::Error;
 
 use tracing::{info, warn};
 
-use super::bootstrap::BootstrapCommand;
 use super::xauth::events::PorAuthEvent;
 use super::xstream::manager::StreamManager;
 use super::{
@@ -20,8 +19,6 @@ use super::{
     commands::NetworkCommand,
     events::NetworkEvent,
 };
-
-use super::bootstrap::{config::BootstrapServerConfig, events::BootstrapEvent, BootstrapServer};
 
 pub struct NetworkNode {
     cmd_rx: mpsc::Receiver<NetworkCommand>,
@@ -34,13 +31,6 @@ pub struct NetworkNode {
     authenticated_peers: HashSet<PeerId>,
 
     stream_manager: StreamManager,
-
-    // Добавляем опорный сервер
-    bootstrap_server: Option<BootstrapServer>,
-
-    // Канал для передачи событий опорного сервера
-    bootstrap_event_tx: mpsc::Sender<BootstrapEvent>,
-    bootstrap_event_rx: mpsc::Receiver<BootstrapEvent>,
 }
 
 impl NetworkNode {
@@ -48,7 +38,6 @@ impl NetworkNode {
     pub async fn new(
         local_key: identity::Keypair,
         por: super::xauth::por::por::ProofOfRepresentation,
-        bootstrap_config: Option<BootstrapServerConfig>,
     ) -> Result<
         (
             Self,
@@ -75,13 +64,6 @@ impl NetworkNode {
         let (event_tx, event_rx) = mpsc::channel(100);
         let stream_control = swarm.behaviour_mut().stream.new_control();
 
-        // Создаем канал для событий опорного сервера
-        let (bootstrap_event_tx, bootstrap_event_rx) = mpsc::channel(100);
-
-        // Создаем опорный сервер, если предоставлена конфигурация
-        let bootstrap_server = bootstrap_config
-            .map(|config| BootstrapServer::new(local_peer_id, config, bootstrap_event_tx.clone()));
-
         Ok((
             Self {
                 cmd_rx,
@@ -92,9 +74,6 @@ impl NetworkNode {
                 local_peer_id,
                 authenticated_peers: HashSet::new(),
                 stream_manager: StreamManager::new(stream_control),
-                bootstrap_server,
-                bootstrap_event_tx,
-                bootstrap_event_rx,
             },
             cmd_tx,
             event_rx,
@@ -104,6 +83,11 @@ impl NetworkNode {
 
     pub fn is_peer_authenticated(&self, peer_id: &PeerId) -> bool {
         self.authenticated_peers.contains(peer_id)
+    }
+
+    async fn find_peer_addresses(&mut self, peer_id: PeerId) {
+        // Инициируем поиск узла в сети
+        self.swarm.behaviour_mut().kad.get_closest_peers(peer_id);
     }
 
     // Get the local peer ID
@@ -137,53 +121,8 @@ impl NetworkNode {
                             )
                             .await;
                 }
-                Some(bootstrap_event) = self.bootstrap_event_rx.recv() => {
-                    // Преобразуем событие опорного сервера в сетевое событие
-                    let _ = self.event_tx.send(NetworkEvent::Bootstrap {
-                        event: bootstrap_event
-                    }).await;
-                }
-                // Проверяем, не пора ли синхронизироваться с опорными серверами
-                _ = tokio::time::sleep(Duration::from_secs(30)), if self.bootstrap_server.is_some() => {
-                    if let Some(ref bootstrap_server) = self.bootstrap_server {
-                        if bootstrap_server.is_active().await && bootstrap_server.should_sync().await {
-                            if let Err(e) = bootstrap_server.sync_with_bootstrap_nodes(
-                                &mut self.swarm.behaviour_mut().kad
-                            ).await {
-                                warn!("Failed to sync with bootstrap nodes: {}", e);
-                            }
-                        }
 
-                        // Очищаем устаревшие маршруты
-                        bootstrap_server.clean_expired_routes().await;
-                    }
-                }
             }
-        }
-    }
-
-    pub async fn activate_bootstrap_server(
-        &self,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref bootstrap_server) = self.bootstrap_server {
-            bootstrap_server.activate().await
-        } else {
-            Err("Bootstrap server not available".into())
-        }
-    }
-
-    pub fn get_bootstrap_server(&self) -> Option<&BootstrapServer> {
-        self.bootstrap_server.as_ref()
-    }
-
-    // Деактивация режима опорного сервера
-    pub async fn deactivate_bootstrap_server(
-        &self,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref bootstrap_server) = self.bootstrap_server {
-            bootstrap_server.deactivate().await
-        } else {
-            Err("Bootstrap server not available".into())
         }
     }
 
@@ -345,68 +284,6 @@ impl NetworkNode {
                 // Handled in the run loop
             }
 
-            NetworkCommand::Bootstrap { command } => match command {
-                BootstrapCommand::Activate { response } => {
-                    let result = if let Some(ref bootstrap_server) = self.bootstrap_server {
-                        bootstrap_server.activate().await
-                    } else {
-                        Err("Bootstrap server not available".into())
-                    };
-                    let _ = response.send(result);
-                }
-                BootstrapCommand::Deactivate { response } => {
-                    let result = if let Some(ref bootstrap_server) = self.bootstrap_server {
-                        bootstrap_server.deactivate().await
-                    } else {
-                        Err("Bootstrap server not available".into())
-                    };
-                    let _ = response.send(result);
-                }
-                BootstrapCommand::GetStats { response } => {
-                    if let Some(ref bootstrap_server) = self.bootstrap_server {
-                        let stats = bootstrap_server.get_stats().await;
-                        let _ = response.send(stats);
-                    }
-                }
-                BootstrapCommand::AddNode {
-                    peer_id,
-                    addrs,
-                    response,
-                } => {
-                    if let Some(ref bootstrap_server) = self.bootstrap_server {
-                        bootstrap_server.add_bootstrap_node(peer_id, addrs).await;
-                        let _ = response.send(Ok(()));
-                    } else {
-                        let _ = response.send(Err("Bootstrap server not available".into()));
-                    }
-                }
-                BootstrapCommand::RemoveNode { peer_id, response } => {
-                    if let Some(ref bootstrap_server) = self.bootstrap_server {
-                        bootstrap_server.remove_bootstrap_node(&peer_id).await;
-                        let _ = response.send(Ok(()));
-                    } else {
-                        let _ = response.send(Err("Bootstrap server not available".into()));
-                    }
-                }
-                BootstrapCommand::GetNodes { response } => {
-                    if let Some(ref bootstrap_server) = self.bootstrap_server {
-                        let nodes = bootstrap_server.get_bootstrap_nodes().await;
-                        let _ = response.send(nodes);
-                    } else {
-                        let _ = response.send(HashMap::new());
-                    }
-                }
-                BootstrapCommand::ForceSync { response } => {
-                    let result = if let Some(ref bootstrap_server) = self.bootstrap_server {
-                        bootstrap_server
-                            .sync_with_bootstrap_nodes(&mut self.swarm.behaviour_mut().kad)
-                            .await
-                    } else {
-                        Err("Bootstrap server not available".into())
-                    };
-                    let _ = response.send(result);
-                }
-            },
             _ => {}
         }
     }
@@ -495,11 +372,11 @@ impl NetworkNode {
                 // Создаем полный адрес с Peer ID
                 let mut full_addr = address.clone();
                 full_addr.push(libp2p::multiaddr::Protocol::P2p(self.local_peer_id.into()));
-                
+
                 info!("Listening on {} (with PeerId: {})", address, full_addr);
                 let _ = self
                     .event_tx
-                    .send(NetworkEvent::ListeningOnAddress { 
+                    .send(NetworkEvent::ListeningOnAddress {
                         addr: address,
                         full_addr: Some(full_addr),
                     })
@@ -577,14 +454,6 @@ impl NetworkNode {
             }
 
             NodeBehaviourEvent::Kad(ref kad_event) => {
-                // Передаем событие опорному серверу
-                if let Some(ref bootstrap_server) = self.bootstrap_server {
-                    if bootstrap_server.is_active().await {
-                        if let Err(e) = bootstrap_server.handle_kad_event(kad_event).await {
-                            warn!("Error handling Kad event in bootstrap server: {}", e);
-                        }
-                    }
-                }
                 match kad_event {
                     kad::Event::RoutingUpdated {
                         peer,
@@ -597,7 +466,7 @@ impl NetworkNode {
                             info!("📕 Known address: {addr}");
                         }
 
-                        // Optionally send an event about the routing update
+                        // Отправляем событие об обновлении маршрута
                         let _ = self
                             .event_tx
                             .send(NetworkEvent::KadRoutingUpdated {
@@ -609,15 +478,16 @@ impl NetworkNode {
 
                     kad::Event::PendingRoutablePeer { peer, .. } => {
                         info!("🔍 Kademlia looking for addresses of peer: {peer}");
+
+                        // Proactively trigger a search for the peer
+                        self.swarm.behaviour_mut().kad.get_closest_peers(*peer);
                     }
 
                     kad::Event::OutboundQueryProgressed { result, .. } => {
                         match result {
-                            kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders {
-                                key,
-                                providers,
-                                ..
-                            })) => {
+                            kad::QueryResult::GetProviders(Ok(
+                                kad::GetProvidersOk::FoundProviders { key, providers, .. },
+                            )) => {
                                 for peer in providers {
                                     info!("Found provider for {key:?}: {peer}");
                                 }
@@ -630,6 +500,7 @@ impl NetworkNode {
                                     info!("Found closest peers for {key:?}: {peers:?}");
                                 }
                             }
+                            
                             _ => {}
                         }
                     }
