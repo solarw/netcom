@@ -492,10 +492,17 @@ impl NetworkNode {
             }
 
             libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
-                info!("Listening on {address}");
+                // Создаем полный адрес с Peer ID
+                let mut full_addr = address.clone();
+                full_addr.push(libp2p::multiaddr::Protocol::P2p(self.local_peer_id.into()));
+                
+                info!("Listening on {} (with PeerId: {})", address, full_addr);
                 let _ = self
                     .event_tx
-                    .send(NetworkEvent::ListeningOnAddress { addr: address })
+                    .send(NetworkEvent::ListeningOnAddress { 
+                        addr: address,
+                        full_addr: Some(full_addr),
+                    })
                     .await;
             }
 

@@ -34,6 +34,7 @@ pub enum NetworkEvent {
     },
     ListeningOnAddress {
         addr: Multiaddr,
+        full_addr: Option<Multiaddr>,
     },
     StopListeningOnAddress {
         addr: Multiaddr,

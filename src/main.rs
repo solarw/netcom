@@ -262,8 +262,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         println!("⚠️ Connection error: {}", error);
                     }
                 }
-                NetworkEvent::ListeningOnAddress { addr } => {
+                NetworkEvent::ListeningOnAddress { addr, full_addr } => {
                     println!("🔊 Listening on address: {}", addr);
+                    if let Some(full) = full_addr {
+                        println!("🌍 Full address (copy to connect): {}", full);
+                    }
                 }
                 NetworkEvent::MdnsIsOn {} => {
                     println!("📡 MDNS discovery is enabled");
