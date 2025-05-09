@@ -1,7 +1,9 @@
+// Файл: ./src/network/commands.rs
+
 use libp2p::{Multiaddr, PeerId, swarm::ConnectionId};
 use std::error::Error;
 use tokio::sync::oneshot;
-use super::{xauth::definitions::AuthResult, xstream::manager::XStream};
+use super::{xauth::definitions::AuthResult, xstream::manager::XStream, bootstrap::commands::BootstrapCommand};
 
 // Add this to the NetworkCommand enum in commands.rs
 #[derive(Debug)]
@@ -77,5 +79,10 @@ pub enum NetworkCommand {
         peer_id: PeerId, 
         connection_id: Option<ConnectionId>,
         response: oneshot::Sender<Result<XStream, String>>,
-    }
+    },
+
+    // Bootstrap commands
+    Bootstrap {
+        command: BootstrapCommand,
+    },
 }

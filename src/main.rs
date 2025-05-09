@@ -1,16 +1,19 @@
+use std::str::FromStr;
 use clap::Parser;
+use network::bootstrap::{BootstrapEvent, BootstrapServerConfig};
 use network::xauth::definitions::AuthResult;
 use network::xauth::por::por::{PorUtils, ProofOfRepresentation};
 use network::{
     commander::Commander, events::NetworkEvent, node::NetworkNode, utils::make_new_key,
     xauth::events::PorAuthEvent,
 };
-use std::{collections::HashMap, str::FromStr, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 mod network;
-use libp2p::Multiaddr;
+use libp2p::{Multiaddr, PeerId};
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
+use network::bootstrap::BootstrapConnect;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -30,6 +33,69 @@ struct Args {
     /// Always accept authentication requests (for testing)
     #[arg(long, default_value_t = false)]
     accept_all_auth: bool,
+
+/// Включить режим опорного сервера
+#[arg(long, default_value_t = false)]
+bootstrap_server: bool,
+
+/// Интервал синхронизации опорного сервера (в секундах)
+#[arg(long, default_value_t = 300)]
+bootstrap_sync_interval: u64,
+
+/// Максимальное количество маршрутов в кэше опорного сервера
+#[arg(long, default_value_t = 10000)]
+bootstrap_max_routes: usize,
+
+/// Время жизни маршрута в кэше опорного сервера (в секундах)
+#[arg(long, default_value_t = 86400)]
+bootstrap_route_ttl: u64,
+
+/// Адреса опорных серверов (в формате "peer_id:addr1" или несколько через запятую)
+#[arg(long)]
+bootstrap_nodes: Option<Vec<String>>,
+
+
+#[arg(long)]
+bootstrap_connect: Option<String>,
+}
+
+fn extract_peer_id_from_multiaddr(addr_str: &str) -> Result<(PeerId, Multiaddr), Box<dyn std::error::Error + Send + Sync>> {
+    let addr = Multiaddr::from_str(addr_str)
+        .map_err(|e| format!("Invalid multiaddress '{}': {}", addr_str, e))?;
+    
+    // Найти компонент p2p (он содержит PeerId)
+    let mut components = addr.iter().collect::<Vec<_>>();
+    let mut peer_id = None;
+    let mut base_addr = addr.clone();
+    
+    // Ищем компонент p2p и извлекаем из него PeerId
+    for (i, component) in components.iter().enumerate() {
+        if let libp2p::multiaddr::Protocol::P2p(hash) = component {
+            // ИСПРАВЛЕНИЕ: правильный метод конвертации multihash в PeerId
+            if let Ok(pid) = PeerId::try_from(hash.clone()) {
+                peer_id = Some(pid);
+            } else {
+                return Err(format!("Invalid peer ID in multiaddress").into());
+            }
+            
+            // Если PeerId в конце адреса, базовый адрес не включает его
+            if i == components.len() - 1 {
+                // Создаем новый адрес без последнего компонента
+                base_addr = components[..i].iter()
+                    .fold(Multiaddr::empty(), |mut addr, proto| {
+                        addr.push(proto.clone());
+                        addr
+                    });
+            }
+            
+            break;
+        }
+    }
+    
+    match peer_id {
+        Some(pid) => Ok((pid, base_addr)),
+        None => Err("No PeerId (p2p component) found in multiaddress".into())
+    }
 }
 
 #[tokio::main]
@@ -55,12 +121,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .expect("Failed to create Proof of Representation");
 
-    // Pass the PoR to the NetworkNode constructor
-    let (mut node, cmd_tx, mut event_rx, _peer_id) = NetworkNode::new(local_key, por).await?;
 
-    println!("Local peer ID: {}", node.local_peer_id());
 
-    // Set mDNS state based on command line argument
+
+
+
+
+
+      // Создаем конфигурацию опорного сервера, если он включен
+    let bootstrap_config = if args.bootstrap_server {
+        let mut config = BootstrapServerConfig {
+            sync_interval: Duration::from_secs(args.bootstrap_sync_interval),
+            max_routes: args.bootstrap_max_routes,
+            route_ttl: Duration::from_secs(args.bootstrap_route_ttl),
+            bootstrap_nodes: Vec::new(),
+            aggressive_announce: true,
+            extended_routing: true,
+        };
+        
+        // Парсим список опорных серверов
+        if let Some(nodes) = args.bootstrap_nodes {
+            let mut bootstrap_nodes = Vec::new();
+            
+            for node_str in nodes {
+                // Формат: peer_id:multiaddr
+                let parts: Vec<&str> = node_str.split(':').collect();
+                if parts.len() == 2 {
+                    if let (Ok(peer_id), Ok(addr)) = (
+                        PeerId::from_str(parts[0]),
+                        Multiaddr::from_str(parts[1]),
+                    ) {
+                        bootstrap_nodes.push((peer_id, vec![addr]));
+                    }
+                }
+            }
+            
+            config.bootstrap_nodes = bootstrap_nodes;
+        }
+        
+        Some(config)
+    } else {
+        None
+    };
+    
+    // Создаем NetworkNode с опциональной конфигурацией опорного сервера
+    let (mut node, cmd_tx, mut event_rx, _peer_id) = NetworkNode::new(local_key, por, bootstrap_config).await?;
+    
+    let local_peer_id = node.local_peer_id(); // Сохраняем локальный peer_id
+
+    println!("Local peer ID: {}", local_peer_id);
+    
+
     if args.disable_mdns {
         println!("mDNS discovery disabled");
         cmd_tx
@@ -79,13 +190,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             })?;
     }
 
+
     // Spawn the network node task
     let node_task = tokio::spawn(async move {
         node.run().await;
     });
 
+
     // Create commander
     let cmd = Commander::new(cmd_tx.clone());
+
+    if let Some(bootstrap_addr_str) = &args.bootstrap_connect {
+        if let Err(e) = BootstrapConnect::connect_to_bootstrap_server(&cmd, bootstrap_addr_str, local_peer_id).await {
+            eprintln!("❌ Failed to connect to bootstrap server: {}", e);
+        }
+    }
+    
+     // Если режим опорного сервера включен, активируем его
+     if args.bootstrap_server {
+        if let Err(e) = cmd.activate_bootstrap_server().await {
+            eprintln!("Failed to activate bootstrap server: {}", e);
+        } else {
+            println!("🌟 Bootstrap server mode enabled");
+        }
+    }
+    
+
 
     // Listen on a random port (0 means OS will assign an available port)
     let port = 0;
@@ -303,6 +433,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     Err(e) => println!("❌ Failed to disconnect: {e}"),
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Обработка событий опорного сервера
+                NetworkEvent::Bootstrap { event } => {
+                    match event {
+                        BootstrapEvent::Activated => {
+                            println!("🌟 Bootstrap server activated");
+                        }
+                        BootstrapEvent::Deactivated => {
+                            println!("🌑 Bootstrap server deactivated");
+                        }
+                        BootstrapEvent::Synced { stats } => {
+                            println!("🔄 Bootstrap server synced with other bootstrap nodes");
+                            println!("📊 Stats: {:?}", stats);
+                        }
+                        BootstrapEvent::RouteAdded { peer_id, addr } => {
+                            println!("➕ Bootstrap server added route: {} at {}", peer_id, addr);
+                        }
+                        BootstrapEvent::RoutingUpdated { peer_id, addresses } => {
+                            println!("🔄 Bootstrap server updated routes for {}: {:?}", peer_id, addresses);
                         }
                     }
                 }

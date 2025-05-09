@@ -1,7 +1,9 @@
+// Файл: ./src/network/events.rs
+
 use std::sync::Arc;
 
 use libp2p::{swarm::ConnectionId, Multiaddr, PeerId, StreamProtocol};
-use super::{xauth::events::PorAuthEvent, xstream::manager::XStream};
+use super::{xauth::events::PorAuthEvent, xstream::manager::XStream, bootstrap::events::BootstrapEvent};
 
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
@@ -60,4 +62,8 @@ pub enum NetworkEvent {
         stream: Arc<XStream>
     },
 
+    // Bootstrap event wrapper
+    Bootstrap {
+        event: BootstrapEvent,
+    },
 }
