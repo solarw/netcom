@@ -27,6 +27,7 @@ pub fn make_behaviour(key: &identity::Keypair, por: ProofOfRepresentation) -> No
 
     // Most importantly - set bucket insertion to Manual
     kad_config.set_kbucket_inserts(BucketInserts::OnConnected);
+    kad_config.set_automatic_bootstrap_throttle(None);
 
     // Create the store
     let kad_store = kad::store::MemoryStore::new(key.public().to_peer_id());

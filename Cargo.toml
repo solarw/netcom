@@ -4,45 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-libp2p = { version = "0.55", features = [
-    # Транспорт: только QUIC
-    "quic",          # QUIC протокол
-    "dns",           # DNS разрешение адресов
-    
-    # Безопасность
-    "noise",         # Протокол шифрования Noise (для компонентов, которые его требуют)
-    
-    # NAT Traversal
-    "autonat",       # Автоматическое определение типа NAT
-    "dcutr",         # Direct Connection Upgrade through Relay
-    "relay",         # Поддержка ретрансляции
-    
-    # Обнаружение и связность
-    "mdns",          # Локальное обнаружение узлов
-    "kad",           # Kademlia DHT
-    "identify",      # Обмен информацией о возможностях
-    "ping",          # Проверка соединений
-    "rendezvous",    # Сервис встречи узлов
-    
-    # Протоколы взаимодействия
-    "request-response", # Протокол запрос-ответ
-    
-    # Кодирование
-    "cbor",          # Формат сериализации
-    "serde",         # Интеграция с сериализацией
-    
-    # Утилитарные функции
-    "macros",        # Макросы
-    "tokio",         # Асинхронный рантайм
-    
-    # Метрики
-    "metrics",       # Статистика соединений
-]}
-
-
-
-
-
+libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics']}
 
 tokio = { version = "1.35", features = ["full"] }
 futures = "0.3"
@@ -55,6 +17,7 @@ serde_json = "1.0"
 ed25519-dalek = "2.1.1"
 rand = "0.9.1"
 void = "1.0.2"
-libp2p-stream = "0.3.0-alpha"
+libp2p-stream = { path = "/home/solarw/hyperion/rust-libp2p/protocols/stream"}
+
 anyhow = "1.0.98"
 byteorder = "1.5.0"

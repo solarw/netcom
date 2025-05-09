@@ -592,16 +592,39 @@ impl NetworkNode {
 
                         // Optionally send an event about the routing update
                         let _ = self
-                        .event_tx
-                        .send(NetworkEvent::KadRoutingUpdated {
-                            peer_id: *peer,
-                            addresses: addresses.iter().cloned().collect(),
-                        })
-                        .await;
+                            .event_tx
+                            .send(NetworkEvent::KadRoutingUpdated {
+                                peer_id: *peer,
+                                addresses: addresses.iter().cloned().collect(),
+                            })
+                            .await;
                     }
 
                     kad::Event::PendingRoutablePeer { peer, .. } => {
                         info!("🔍 Kademlia looking for addresses of peer: {peer}");
+                    }
+
+                    kad::Event::OutboundQueryProgressed { result, .. } => {
+                        match result {
+                            kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders {
+                                key,
+                                providers,
+                                ..
+                            })) => {
+                                for peer in providers {
+                                    info!("Found provider for {key:?}: {peer}");
+                                }
+                            }
+                            kad::QueryResult::GetClosestPeers(Ok(kad::GetClosestPeersOk {
+                                key,
+                                peers,
+                            })) => {
+                                if !peers.is_empty() {
+                                    info!("Found closest peers for {key:?}: {peers:?}");
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     // Другие обработчики...
                     _ => {}
@@ -623,28 +646,6 @@ impl NetworkNode {
                     .any(|p| p.as_ref().starts_with("/libp2p/circuit/relay"))
                 {
                     info!("Peer {peer_id} is a relay");
-                }
-            }
-            NodeBehaviourEvent::Kad(kad::Event::OutboundQueryProgressed { result, .. }) => {
-                match result {
-                    kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders {
-                        key,
-                        providers,
-                        ..
-                    })) => {
-                        for peer in providers {
-                            info!("Found provider for {key:?}: {peer}");
-                        }
-                    }
-                    kad::QueryResult::GetClosestPeers(Ok(kad::GetClosestPeersOk {
-                        key,
-                        peers,
-                    })) => {
-                        if !peers.is_empty() {
-                            info!("Found closest peers for {key:?}: {peers:?}");
-                        }
-                    }
-                    _ => {}
                 }
             }
             // Handle PorAuth events
