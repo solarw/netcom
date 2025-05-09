@@ -6,7 +6,6 @@ use libp2p::{PeerId, Stream, StreamProtocol};
 use libp2p_stream::OpenStreamError;
 use std::sync::Arc;
 use std::time::Duration;
-use std::error::Error as StdError;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use crate::network::events::NetworkEvent;
 
