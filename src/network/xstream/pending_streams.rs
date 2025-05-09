@@ -80,14 +80,29 @@ impl PendingStreamsManager {
         header
     }
     
-    /// Читает заголовок из потока
-    pub async fn read_header(stream: &mut Stream) -> Result<StreamHeader, Box<dyn std::error::Error>> {
+    pub async fn read_header(stream: &mut Stream) -> Result<StreamHeader, String> {
+        // Заменить тип возвращаемого значения на Result<StreamHeader, String>
         let mut header_bytes = vec![0u8; HEADER_SIZE];
-        stream.read_exact(&mut header_bytes).await?;
+        
+        // Обработка ошибок сразу, без захвата переменных
+        if let Err(e) = stream.read_exact(&mut header_bytes).await {
+            return Err(format!("Ошибка чтения заголовка: {}", e));
+        }
         
         let mut cursor = Cursor::new(header_bytes);
-        let id = cursor.read_u128::<NetworkEndian>()?;
-        let is_main = cursor.read_u8()? != 0;
+        
+        // Обработка ошибок сразу
+        let id = match cursor.read_u128::<NetworkEndian>() {
+            Ok(id) => id,
+            Err(e) => return Err(format!("Ошибка при чтении ID из заголовка: {}", e)),
+        };
+        
+        let stream_type_byte = match cursor.read_u8() {
+            Ok(byte) => byte,
+            Err(e) => return Err(format!("Ошибка при чтении типа потока из заголовка: {}", e)),
+        };
+        
+        let is_main = stream_type_byte != 0;
         
         Ok(StreamHeader { id, is_main })
     }

@@ -58,5 +58,13 @@ pub enum NetworkEvent {
 
     IncomingStream {
         stream: Arc<XStream>
-    }
+    },
+    
+    // Новый вариант для таймаута потока
+    #[cfg(feature = "stream_timeout_event")]
+    StreamTimeoutEvent {
+        id: u128,
+        is_main: bool,
+        peer_id: Option<PeerId>,
+    },
 }

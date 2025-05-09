@@ -1,5 +1,4 @@
 use clap::Parser;
-use futures::AsyncReadExt;
 use network::xauth::definitions::AuthResult;
 use network::xauth::por::por::{PorUtils, ProofOfRepresentation};
 use network::{

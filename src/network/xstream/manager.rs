@@ -1,25 +1,26 @@
-use byteorder::ReadBytesExt;
-use byteorder::{NetworkEndian, WriteBytesExt};
-use futures::io::{ReadHalf, WriteHalf};
-use futures::{prelude::*, SinkExt};
-use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
+use crate::network::xstream::pending_streams::PendingStreamsManager;
+use futures::AsyncReadExt;
+use futures::AsyncWriteExt;
+use futures::StreamExt;
 use libp2p::{PeerId, Stream, StreamProtocol};
 use libp2p_stream::OpenStreamError;
-use std::collections::HashMap;
-use std::error::Error;
-use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Duration;
+use std::error::Error as StdError;
 use tokio::sync::{mpsc, Mutex, Semaphore};
-use tokio::time::sleep;
+use crate::network::events::NetworkEvent;
+
+/// Константа с протоколом для потоков XStream
 const XSTREAM_PROTOCOL: StreamProtocol = StreamProtocol::new("/xstream");
 
+/// Итератор для генерации уникальных ID
 struct IdIterator {
     current: u128,
 }
+
 impl IdIterator {
-    pub fn new() -> IdIterator {
-        return IdIterator { current: 0 };
+    pub fn new() -> Self {
+        Self { current: 0 }
     }
 }
 
@@ -28,302 +29,242 @@ impl Iterator for IdIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         let current = self.current;
-        let mut next = 0;
-        if current < u128::MAX {
-            next = current + 1;
-        }
-        self.current = next;
-
+        self.current = if current < u128::MAX { current + 1 } else { 0 };
         Some(current)
     }
 }
 
-// Define a message struct for the channel
-enum StreamMessage {
-    NewStream(u128, bool, Stream),
-    // Add other message types as needed
-}
-
-struct PendingStreamRecord {
-    stream: Stream,
-    id: u128,
-    is_main: bool,
-}
-
-#[derive(Debug)]
+/// Структура для XStream - представляет собой пару потоков для данных и ошибок
+#[derive(Debug, Clone)]
 pub struct XStream {
-    pub stream_main_read: Arc<tokio::sync::Mutex<ReadHalf<Stream>>>,
-    pub stream_main_write: Arc<tokio::sync::Mutex<WriteHalf<Stream>>>,
-    pub stream_error_read: Arc<tokio::sync::Mutex<ReadHalf<Stream>>>,
-    pub stream_error_write: Arc<tokio::sync::Mutex<WriteHalf<Stream>>>,
+    pub stream_main_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
+    pub stream_main_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
+    pub stream_error_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
+    pub stream_error_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
     pub id: u128,
     pub peer_id: PeerId,
 }
 
 impl XStream {
+    /// Создает новый XStream из компонентов
     pub fn new(
         id: u128,
         peer_id: PeerId,
-        stream_main_read: ReadHalf<Stream>,
-        stream_main_write: WriteHalf<Stream>,
-        stream_error_read: ReadHalf<Stream>,
-        stream_error_write: WriteHalf<Stream>,
-    ) -> XStream {
-        return XStream {
+        stream_main_read: futures::io::ReadHalf<Stream>,
+        stream_main_write: futures::io::WriteHalf<Stream>,
+        stream_error_read: futures::io::ReadHalf<Stream>,
+        stream_error_write: futures::io::WriteHalf<Stream>,
+    ) -> Self {
+        Self {
             stream_main_read: Arc::new(Mutex::new(stream_main_read)),
             stream_main_write: Arc::new(Mutex::new(stream_main_write)),
             stream_error_read: Arc::new(Mutex::new(stream_error_read)),
             stream_error_write: Arc::new(Mutex::new(stream_error_write)),
-            id: id,
-            peer_id: peer_id,
-        };
+            id,
+            peer_id,
+        }
     }
+
+    /// Читает точное количество байтов из основного потока
     pub async fn read_exact(&self, size: usize) -> Result<Vec<u8>, std::io::Error> {
         let mut buf = vec![0u8; size];
         let stream_main_read = self.stream_main_read.clone();
         stream_main_read.lock().await.read_exact(&mut buf).await?;
-        return Ok(buf);
+        Ok(buf)
     }
 
+    /// Читает все данные из основного потока до конца
     pub async fn read_to_end(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buf: Vec<u8> = Vec::new();
         let stream_main_read = self.stream_main_read.clone();
         stream_main_read.lock().await.read_to_end(&mut buf).await?;
-        return Ok(buf);
+        Ok(buf)
     }
 
+    /// Читает доступные данные из основного потока
     pub async fn read(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buf: Vec<u8> = Vec::new();
         let stream_main_read = self.stream_main_read.clone();
         stream_main_read.lock().await.read(&mut buf).await?;
-        return Ok(buf);
+        Ok(buf)
     }
 
+    /// Записывает все данные в основной поток
     pub async fn write_all(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
         let stream_main_write = self.stream_main_write.clone();
         let mut unlocked = stream_main_write.lock().await;
-        match unlocked.write_all(&buf).await {
-            Ok(..) => Ok(()),
-            Err(err) => Err(err),
-        }
+        unlocked.write_all(&buf).await
     }
 
+    /// Закрывает потоки
     pub async fn close(&mut self) -> Result<(), std::io::Error> {
         let stream_main_write = self.stream_main_write.clone();
         let mut unlocked = stream_main_write.lock().await;
         unlocked.close().await
     }
-
-    /*
-    pub fn error_read(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, std::io::Error>> + Send + 'static>> {
-        let (err, stream) = self._get_stream(&self.error_stream_read);
-
-        Box::pin(async move {
-            if err.is_some() {
-                return Err(err.unwrap());
-            };
-            let mut buf: Vec<u8> = Vec::new();
-            match stream.lock().await.read_to_end(&mut buf).await {
-                Ok(..) => Ok(buf),
-                Err(err) => Err(err),
-            }
-        })
-    }
-
-    pub fn error_write(
-        &self,
-        buf: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send + 'static>> {
-        let (err, stream) = self._get_stream(&self.error_stream_write);
-
-        Box::pin(async move {
-            if err.is_some() {
-                return Err(err.unwrap());
-            };
-            let mut s = stream.lock().await;
-            match s.write_all(&buf).await {
-                Ok(..) => {
-                    s.close().await?;
-                    Ok(())
-                }
-                Err(err) => Err(err),
-            }
-        })
-    }
-    */
 }
+
+/// Менеджер для управления потоками XStream
 pub struct StreamManager {
     control: libp2p_stream::Control,
-    negotiated_incoming_streams: Option<String>,
     id_iterator: IdIterator,
     listener: libp2p_stream::IncomingStreams,
-    // Use a channel sender instead of a shared HashMap
-    pending_streams: Arc<tokio::sync::Mutex<HashMap<u128, PendingStreamRecord>>>,
+    // Используем новый PendingStreamsManager вместо прямого HashMap
+    pending_manager: PendingStreamsManager,
     semaphore: Arc<Semaphore>,
     incoming_streams_sender: Arc<mpsc::Sender<XStream>>,
-    incoming_streams_receiver: Arc<tokio::sync::Mutex<mpsc::Receiver<XStream>>>,
+    incoming_streams_receiver: Arc<Mutex<mpsc::Receiver<XStream>>>,
+    // Опционально: канал для событий таймаута
+    event_tx: Option<mpsc::Sender<NetworkEvent>>,
 }
 
 impl StreamManager {
-    pub fn new(mut control: libp2p_stream::Control) -> StreamManager {
-        let listener: libp2p_stream::IncomingStreams =
-            control.accept(XSTREAM_PROTOCOL).unwrap();
-
+    /// Создает новый менеджер потоков
+    pub fn new(mut control: libp2p_stream::Control) -> Self {
+        let listener = control.accept(XSTREAM_PROTOCOL).unwrap();
         let (tx, rx) = mpsc::channel(100);
-        return StreamManager {
+        
+        Self {
             control,
-            negotiated_incoming_streams: None,
             id_iterator: IdIterator::new(),
             listener,
-            pending_streams: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            // Создаем менеджер ожидающих потоков с таймаутом 30 секунд
+            pending_manager: PendingStreamsManager::new(Duration::from_secs(30)),
             semaphore: Arc::new(Semaphore::new(1000)),
             incoming_streams_sender: Arc::new(tx),
-            incoming_streams_receiver: Arc::new(tokio::sync::Mutex::new(rx)),
-        };
+            incoming_streams_receiver: Arc::new(Mutex::new(rx)),
+            event_tx: None,
+        }
     }
+    
+    /// Добавляет канал для отправки событий
+    pub fn with_event_channel(mut self, event_tx: mpsc::Sender<NetworkEvent>) -> Self {
+        self.event_tx = Some(event_tx);
+        self
+    }
+    
+    /// Открывает новый XStream для указанного пира
     pub async fn open_stream(&mut self, peer_id: PeerId) -> Result<XStream, OpenStreamError> {
+        // Открываем два потока - основной и для ошибок
         let mut stream_main = self.control.open_stream(peer_id, XSTREAM_PROTOCOL).await?;
         let mut stream_error = self.control.open_stream(peer_id, XSTREAM_PROTOCOL).await?;
+        
+        // Генерируем уникальный ID для этой пары потоков
         let id = self.id_iterator.next().unwrap();
-        stream_main.write(make_header(id, true).as_ref()).await?;
-        stream_error.write(make_header(id, false).as_ref()).await?;
+        
+        // Используем методы PendingStreamsManager для создания заголовков
+        let main_header = PendingStreamsManager::make_header(id, true);
+        let error_header = PendingStreamsManager::make_header(id, false);
+        
+        // Отправляем заголовки
+        stream_main.write_all(&main_header).await?;
+        stream_error.write_all(&error_header).await?;
 
+        // Разделяем потоки на чтение/запись
         let (stream_main_read, stream_main_write) = stream_main.split();
         let (stream_error_read, stream_error_write) = stream_error.split();
 
-        return Ok(XStream::new(
+        // Создаем XStream
+        Ok(XStream::new(
             id,
             peer_id,
             stream_main_read,
             stream_main_write,
             stream_error_read,
             stream_error_write,
-        ));
+        ))
     }
+    
+    /// Обрабатывает входящие потоки
     pub async fn handle_incoming_stream(&mut self) -> Result<(), String> {
-        let some = self.listener.next().await;
-        if let Some((peer_id, stream)) = some {
-            let semaphore = self.semaphore.clone();
-            // wait for the slot and listen after
-            let permit = semaphore.acquire();
-            let pending_streams = self.pending_streams.clone();
-            drop(permit);
-            // Запускаем отдельную задачу для обработки каждого входящего потока
-
-            let sender = self.incoming_streams_sender.clone();
-            tokio::spawn(async move {
-                // Получаем разрешение от семафора внутри задачи
-                let permit = semaphore.acquire().await.unwrap();
-
-                // Обрабатываем заголовок потока
-                let mut stream_clone = stream; // Создаем клон для перемещения в обработчик
-                let result = match read_header(&mut stream_clone).await {
-                    Ok(value) => Ok(value),
-                    Err(e) => Err(format!("Ошибка чтения заголовка: {}", e)),
-                };
-
-                match result {
-                    Ok((id, is_main)) => {
-                        // Добавляем поток в хеш-карту под защитой мьютекса
-                        let mut streams = pending_streams.lock().await;
-
-                        println!("Обработан поток с ID: {}, is_main: {}", id, is_main);
-                        if let Some(mut pending_stream) = streams.remove(&id) {
-                            if pending_stream.is_main == is_main {
-                                // bad defined stream. close both
-                                let _ = stream_clone.close().await;
-                                let _ = pending_stream.stream.close().await;
-                            } else {
-                                let stream_main_read;
-                                let stream_main_write;
-                                let stream_error_read;
-                                let stream_error_write;
-                                if is_main {
-                                    (stream_main_read, stream_main_write) = stream_clone.split();
-                                    (stream_error_read, stream_error_write) =
-                                        pending_stream.stream.split();
-                                } else {
-                                    (stream_main_read, stream_main_write) =
-                                        pending_stream.stream.split();
-                                    (stream_error_read, stream_error_write) = stream_clone.split();
-                                }
-
-                                let xstream = XStream::new(
-                                    id,
-                                    peer_id,
-                                    stream_main_read,
-                                    stream_main_write,
-                                    stream_error_read,
-                                    stream_error_write,
-                                );
-                                let _ = sender.send(xstream).await;
-                            }
-                        } else {
-                            streams.insert(
-                                id,
-                                PendingStreamRecord {
-                                    stream: stream_clone,
-                                    id: id,
-                                    is_main: is_main,
-                                },
-                            );
-                        }
-
-                        // Здесь можно добавить дополнительную логику
-                    }
-                    Err(err) => {
-                        let _ = stream_clone.close().await;
-                        println!("{}", err);
-                    }
+        if let Some((peer_id, mut stream)) = self.listener.next().await {
+            // Получаем разрешение от семафора
+            let _permit = self.semaphore.acquire().await.unwrap();
+            
+            // Читаем заголовок с использованием PendingStreamsManager
+            let header = match PendingStreamsManager::read_header(&mut stream).await {
+                Ok(header) => header,
+                Err(e) => {
+                    // Теперь e имеет тип String, который реализует Send
+                    let _ = stream.close().await;
+                    return Err(e); // Просто возвращаем ошибку без дополнительного форматирования
                 }
-                drop(permit);
-            });
+            };
+            
+            // Проверяем, есть ли уже поток с таким ID
+            if let Some(mut pending) = self.pending_manager.take_pending_stream(header.id).await { // Добавлено mut
+                if pending.is_main == header.is_main {
+                    // Получили дубликат того же типа - это ошибка протокола
+                    let _ = stream.close().await;
+                    let _ = pending.stream.close().await;
+                    return Err(format!("Получен дубликат потока с ID: {}", header.id));
+                } else {
+                    // Получили вторую часть пары
+                    let (stream_main, stream_error) = if header.is_main {
+                        (stream, pending.stream)
+                    } else {
+                        (pending.stream, stream)
+                    };
+                    
+                    // Разделяем потоки и создаем XStream
+                    let (stream_main_read, stream_main_write) = stream_main.split();
+                    let (stream_error_read, stream_error_write) = stream_error.split();
+                    
+                    let xstream = XStream::new(
+                        header.id,
+                        peer_id,
+                        stream_main_read,
+                        stream_main_write,
+                        stream_error_read,
+                        stream_error_write,
+                    );
+                    
+                    // Отправляем XStream в канал
+                    let _ = self.incoming_streams_sender.send(xstream).await;
+                }
+            } else {
+                // Сохраняем поток как ожидающий
+                self.pending_manager.add_pending_stream(stream, header.id, header.is_main, peer_id).await;
+            }
         }
-
+        
         Ok(())
     }
-
+    
+    /// Опрашивает события и возвращает готовый XStream, если доступен
     pub async fn poll(&mut self) -> Option<XStream> {
-        let lock = self.incoming_streams_receiver.clone();
-        let mut incoming_streams_receiver = lock.lock().await;
+        let incoming_streams_receiver = self.incoming_streams_receiver.clone();
+        let mut receiver = incoming_streams_receiver.lock().await;
 
         loop {
-            // Обрабатываем входящие соединения не блокируя остальные операции
             tokio::select! {
                 result = self.handle_incoming_stream() => {
                     if let Err(e) = result {
                         println!("Ошибка при обработке входящего потока: {}", e);
                     }
                 }
-                _ = sleep(Duration::from_secs(10)) => {
-                    // Периодические задания
-                    //self.clean_timed_out_connections().await;
+                _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                    // Очищаем просроченные потоки
+                    let event_tx = self.event_tx.clone();
+                    self.pending_manager.clean_timed_out_streams(move |id, is_main, peer_id| {
+                        println!("Таймаут потока: id={}, is_main={}, peer={}", id, is_main, peer_id);
+                        
+                        // Отправляем событие таймаута, если настроен event_tx
+                        if let Some(_tx) = &event_tx {
+                            // Закомментируем условную компиляцию для избежания проблем
+                            // #[cfg(feature = "stream_timeout_event")]
+                            // let _ = tx.try_send(NetworkEvent::StreamTimeoutEvent {
+                            //     id,
+                            //     is_main,
+                            //     peer_id: Some(peer_id),
+                            // });
+                        }
+                    }).await;
                 }
-                Some(xstream) = incoming_streams_receiver.recv() => {
+                Some(xstream) = receiver.recv() => {
                     return Some(xstream)
                 }
             }
         }
     }
-}
-
-fn make_header(id: u128, main: bool) -> Vec<u8> {
-    let mut wtr = vec![];
-    wtr.write_u128::<NetworkEndian>(id).unwrap();
-    wtr.write_u8(main as u8).unwrap();
-    return wtr;
-}
-
-const HEADER_SIZE: usize = 17;
-
-async fn read_header(stream: &mut Stream) -> Result<(u128, bool), Box<dyn Error>> {
-    let mut buf = vec![0u8; HEADER_SIZE];
-    stream.read_exact(&mut buf).await?;
-    let mut rdr = Cursor::new(buf);
-    let request_id = rdr.read_u128::<NetworkEndian>().unwrap();
-    let main: bool = rdr.read_u8().unwrap() != 0;
-
-    return Ok((request_id, main));
 }
