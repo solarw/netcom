@@ -65,7 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     .expect("Failed to create Proof of Representation");
 
     // Create NetworkNode
-    let (mut node, cmd_tx, mut event_rx, _peer_id) = NetworkNode::new(local_key, por).await?;
+    let enable_mdns = false;
+    let (mut node, cmd_tx, mut event_rx, _peer_id) =
+        NetworkNode::new(local_key, por, enable_mdns).await?;
 
     let local_peer_id = node.local_peer_id(); // Save local peer_id
 
@@ -98,7 +100,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cmd = Commander::new(cmd_tx.clone());
 
     // Listen on specified port (0 means OS will assign an available port)
-    cmd.listen_port(Some("127.0.0.1".to_string()), args.port).await?;
+    cmd.listen_port(Some("127.0.0.1".to_string()), args.port)
+        .await?;
 
     // Remove the code that processes the connect option
     // let mut connect = false;
@@ -189,22 +192,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let parts: Vec<&str> = input.splitn(2, ' ').collect();
                         if parts.len() >= 2 {
                             let peer_id_str = parts[1];
-                    
+
                             match PeerId::from_str(peer_id_str) {
                                 Ok(peer_id) => {
                                     // Enable Kademlia explicitly first
                                     println!("Enabling Kademlia for search...");
-                                    
+
                                     // Use search_peer_addresses directly which will enable Kademlia internally
                                     println!("Searching for peer: {} using Kademlia DHT", peer_id);
-                    
+
                                     // Search for addresses only, don't connect
                                     match cmd_clone.search_peer_addresses(peer_id).await {
                                         Ok(addresses) => {
                                             if addresses.is_empty() {
                                                 println!("No addresses found for peer {}", peer_id);
                                             } else {
-                                                println!("Found {} addresses for peer {}:", addresses.len(), peer_id);
+                                                println!(
+                                                    "Found {} addresses for peer {}:",
+                                                    addresses.len(),
+                                                    peer_id
+                                                );
                                                 for (i, addr) in addresses.iter().enumerate() {
                                                     println!("  [{:2}] {}", i + 1, addr);
                                                 }
@@ -212,7 +219,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             }
                                         }
                                         Err(e) => {
-                                            println!("Failed to find addresses for peer {}: {}", peer_id, e);
+                                            println!(
+                                                "Failed to find addresses for peer {}: {}",
+                                                peer_id, e
+                                            );
                                         }
                                     }
                                 }
@@ -239,6 +249,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             }
                         } else {
                             println!("Usage: connect <multiaddr>");
+                        }
+                    } else if input.starts_with("bootstrap_kad") {
+                        println!("Bootstrapping Kademlia DHT...");
+
+                        match cmd_clone.bootstrap_kad().await {
+                            Ok(_) => println!("Kademlia bootstrap completed successfully"),
+                            Err(e) => println!("Failed to bootstrap Kademlia: {}", e),
                         }
                     } else if input.starts_with("help") {
                         println!("Available commands:");

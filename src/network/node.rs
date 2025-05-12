@@ -37,6 +37,7 @@ impl NetworkNode {
     pub async fn new(
         local_key: identity::Keypair,
         por: super::xauth::por::por::ProofOfRepresentation,
+        enable_mdns: bool,
     ) -> Result<
         (
             Self,
@@ -52,7 +53,7 @@ impl NetworkNode {
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
             .with_quic()
-            .with_behaviour(|key| make_behaviour(key, por))?
+            .with_behaviour(|key| make_behaviour(key, por, enable_mdns))?
             .with_swarm_config(|c| {
                 c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
             })
@@ -228,16 +229,20 @@ impl NetworkNode {
                 info!("mDNS discovery disabled");
             }
 
-            NetworkCommand::OpenListenPort { host, port, response } => {
+            NetworkCommand::OpenListenPort {
+                host,
+                port,
+                response,
+            } => {
                 let addr = Multiaddr::from_str(&format!("/ip4/{}/udp/{}/quic-v1", host, port))
                     .expect("Invalid multiaddr");
-            
+
                 match self.swarm.listen_on(addr.clone()) {
                     Ok(_) => {
                         for i in self.listening_addresses() {
                             println!("Listening on {}", i);
                         }
-            
+
                         let _ = response.send(Ok(addr));
                     }
                     Err(err) => {
@@ -286,7 +291,7 @@ impl NetworkNode {
                     warn!("Failed to bootstrap Kademlia: {}", e);
                 }
             }
-            
+
             NetworkCommand::BootstrapKad { response } => {
                 info!("Bootstrapping Kademlia DHT");
                 let result = match self.swarm.behaviour_mut().kad.bootstrap() {
@@ -319,24 +324,27 @@ impl NetworkNode {
                 ..
             } => {
                 let addr = endpoint.get_remote_address().clone();
-            
+
                 // Track this connection
                 self.connected_peers
                     .entry(peer_id)
                     .or_insert_with(Vec::new)
                     .push(addr.clone());
-            
+
                 info!("Connected to {peer_id} at {addr}");
-                
+
                 // Add the peer to Kademlia when connection is established
                 // This improves bootstrapping when using --find-peer
-                self.swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
-                
+                self.swarm
+                    .behaviour_mut()
+                    .kad
+                    .add_address(&peer_id, addr.clone());
+
                 // Explicitly bootstrap Kademlia on new connections
                 if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
                     warn!("Failed to bootstrap Kademlia on new connection: {}", e);
                 }
-            
+
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ConnectionOpened {
@@ -346,7 +354,7 @@ impl NetworkNode {
                         protocols: Vec::new(),
                     })
                     .await;
-            
+
                 // Only emit PeerConnected event if this is the first connection
                 if num_established.get() == 1 {
                     info!("First connection to peer {peer_id} established");
@@ -486,10 +494,7 @@ impl NetworkNode {
             NodeBehaviourEvent::Kad(ref kad_event) => {
                 match kad_event {
                     kad::Event::RoutingUpdated {
-                        peer,
-                        addresses,
-                        
-                        ..
+                        peer, addresses, ..
                     } => {
                         info!("📔 Kademlia routing updated for peer: {peer}");
                         for addr in addresses.iter() {
@@ -513,29 +518,35 @@ impl NetworkNode {
                         self.swarm.behaviour_mut().kad.get_closest_peers(*peer);
                     }
 
-                    kad::Event::OutboundQueryProgressed { result, .. } => {
-                        match result {
-                            kad::QueryResult::GetProviders(Ok(
-                                kad::GetProvidersOk::FoundProviders { key, providers, .. },
-                            )) => {
-                                for peer in providers {
-                                    info!("Found provider for {key:?}: {peer}");
-                                }
+                    kad::Event::OutboundQueryProgressed { result, .. } => match result {
+                        kad::QueryResult::GetProviders(Ok(
+                            kad::GetProvidersOk::FoundProviders { key, providers, .. },
+                        )) => {
+                            for peer in providers {
+                                info!("Found provider for {key:?}: {peer}");
                             }
-                            kad::QueryResult::GetClosestPeers(Ok(kad::GetClosestPeersOk {
-                                key,
-                                peers,
-                            })) => {
-                                if !peers.is_empty() {
-                                    info!("Found closest peers for {key:?}: {peers:?}");
-                                }
-                            }
-                            
-                            _ => {}
                         }
+                        kad::QueryResult::GetClosestPeers(Ok(kad::GetClosestPeersOk {
+                            key,
+                            peers,
+                        })) => {
+                            if !peers.is_empty() {
+                                info!("Found closest peers for {key:?}: {peers:?}");
+                            }
+                        }
+
+                        some => {info!("KAD OUTBOUND{result:?}");}
+                    },
+
+                    kad::Event::InboundRequest { request, .. } => {
+                        info!(
+                            "📥 Received GET_CLOSEST_PEERS request for key: {:?} from peer",
+                            request
+                        );
                     }
+
                     // Другие обработчики...
-                    _ => {}
+                    some => {info!(" OTHER KAD KAD {some:?}");}
                 }
             }
 
@@ -544,7 +555,8 @@ impl NetworkNode {
 
                 // Add peer's listening addresses to Kademlia
                 for addr in info.listen_addrs {
-                    self.swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                    self.swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
+                    info!("Address added {peer_id} {addr}");
                 }
 
                 // Check if peer supports relay protocol

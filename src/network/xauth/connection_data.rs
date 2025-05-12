@@ -132,7 +132,12 @@ impl ConnectionData {
         let conn_timeout = now.duration_since(self.last_activity) > auth_timeout * 1;
 
         // Return appropriate timeout direction
-        if conn_timeout && !self.is_fully_authenticated() {
+
+        if (matches!(self.inbound_auth, DirectionalAuthState::Failed(_))
+            || matches!(self.outbound_auth, DirectionalAuthState::Failed(_)))
+        {
+            None
+        } else if conn_timeout && !self.is_fully_authenticated() {
             println!("111111111111111111111");
             Some(AuthDirection::Both)
         } else if inbound_timeout && outbound_timeout {
