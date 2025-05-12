@@ -8,7 +8,7 @@ use super::por::por::ProofOfRepresentation;
 
 // Protocol identifier
 pub const PROTOCOL_ID: &str = "/por-auth/1.0.0";
-pub const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
+pub const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 
 // Auth verification tracking struct - new
 pub struct PendingVerification {

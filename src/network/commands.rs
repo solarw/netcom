@@ -5,7 +5,7 @@ use std::error::Error;
 use tokio::sync::oneshot;
 use super::{xauth::definitions::AuthResult, xstream::manager::XStream};
 
-// Add this to the NetworkCommand enum in commands.rs
+// Update the NetworkCommand enum in commands.rs
 #[derive(Debug)]
 pub enum NetworkCommand {
     // MDNS commands
@@ -15,9 +15,15 @@ pub enum NetworkCommand {
     // KAD commands
     EnableKad,
     DisableKad,
+    
+    // NEW: Add BootstrapKad command
+    BootstrapKad {
+        response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
+    },
 
     // Connection commands
     OpenListenPort {
+        host: String,
         port: u16,
         response: oneshot::Sender<Result<Multiaddr, Box<dyn Error + Send + Sync>>>,
     },
@@ -69,7 +75,7 @@ pub enum NetworkCommand {
         response: oneshot::Sender<bool>,
     },
     
-    // NEW: Submit PoR verification result
+    // Submit PoR verification result
     SubmitPorVerification {
         connection_id: ConnectionId,
         result: AuthResult,
@@ -80,5 +86,4 @@ pub enum NetworkCommand {
         connection_id: Option<ConnectionId>,
         response: oneshot::Sender<Result<XStream, String>>,
     },
-
 }

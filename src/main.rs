@@ -1,5 +1,7 @@
 #![allow(warnings)]
-use std::str::FromStr;
+use network::commands::NetworkCommand;
+use tokio::sync::{mpsc, oneshot};
+
 use clap::Parser;
 use network::xauth::definitions::AuthResult;
 use network::xauth::por::por::{PorUtils, ProofOfRepresentation};
@@ -7,6 +9,7 @@ use network::{
     commander::Commander, events::NetworkEvent, node::NetworkNode, utils::make_new_key,
     xauth::events::PorAuthEvent,
 };
+use std::str::FromStr;
 use std::{collections::HashMap, time::Duration};
 
 mod network;
@@ -17,14 +20,10 @@ use tracing_subscriber::{fmt, EnvFilter};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Optional peer address to connect to (e.g. "/ip4/127.0.0.1/udp/12345/quic-v1")
-    #[arg(short, long)]
-    connect: Option<String>,
-
-    /// Find and connect to a specific peer by PeerId using the Kademlia DHT
-    #[arg(long)]
-    find_peer: Option<String>,
-
+    // Remove the connect option since we're using interactive commands
+    // /// Optional peer address to connect to (e.g. "/ip4/127.0.0.1/udp/12345/quic-v1")
+    // #[arg(short, long)]
+    // connect: Option<String>,
     /// Disable mDNS discovery
     #[arg(long, default_value_t = true)]
     disable_mdns: bool,
@@ -36,7 +35,7 @@ struct Args {
     /// Always accept authentication requests (for testing)
     #[arg(long, default_value_t = false)]
     accept_all_auth: bool,
-    
+
     /// Specify the port to listen on (0 = random port)
     #[arg(short, long, default_value_t = 0)]
     port: u16,
@@ -67,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Create NetworkNode
     let (mut node, cmd_tx, mut event_rx, _peer_id) = NetworkNode::new(local_key, por).await?;
-    
+
     let local_peer_id = node.local_peer_id(); // Save local peer_id
 
     println!("Local peer ID: {}", local_peer_id);
@@ -99,85 +98,173 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cmd = Commander::new(cmd_tx.clone());
 
     // Listen on specified port (0 means OS will assign an available port)
-    cmd.listen_port(args.port).await?;
+    cmd.listen_port(Some("127.0.0.1".to_string()), args.port).await?;
 
-    // If connect argument is provided, try to connect to that peer
-    let mut connect = false;
-    if let Some(addr_str) = args.connect {
-        match Multiaddr::from_str(&addr_str) {
-            Ok(addr) => {
-                connect = true;
-                println!("Attempting to connect to peer at {}", addr);
-                if let Err(e) = cmd.connect(addr.clone()).await {
-                    eprintln!("Failed to connect to {}: {}", addr, e);
+    // Remove the code that processes the connect option
+    // let mut connect = false;
+    // if let Some(addr_str) = args.connect {
+    //     match Multiaddr::from_str(&addr_str) {
+    //         Ok(addr) => {
+    //             connect = true;
+    //             println!("Attempting to connect to peer at {}", addr);
+    //             if let Err(e) = cmd.connect(addr.clone()).await {
+    //                 eprintln!("Failed to connect to {}: {}", addr, e);
+    //             }
+    //         }
+    //         Err(e) => {
+    //             eprintln!("Invalid multiaddress format: {}", e);
+    //         }
+    //     }
+    // }
+
+    // Clone the Commander for the command input task
+    let cmd_clone = Commander::new(cmd_tx.clone());
+
+    // Set up a simple command input handling for the test
+    let cmd_input_task = tokio::spawn(async move {
+        println!("Interactive mode enabled. Type 'help' for available commands.");
+
+        loop {
+            // Use a new buffer for each iteration
+            let mut buffer = String::new();
+
+            match std::io::stdin().read_line(&mut buffer) {
+                Ok(_) => {
+                    let input = buffer.trim().to_string(); // Convert to owned String
+
+                    // Process commands
+                    if input.starts_with("stream") {
+                        // Format: stream <peer_id> <message>
+                        let parts: Vec<&str> = input.splitn(3, ' ').collect();
+                        if parts.len() >= 3 {
+                            let peer_id_str = parts[1];
+                            let message = parts[2];
+
+                            match PeerId::from_str(peer_id_str) {
+                                Ok(peer_id) => {
+                                    println!("Opening stream to {} to send: {}", peer_id, message);
+
+                                    // Use the commander to open a stream directly
+                                    match cmd_clone.open_stream(peer_id).await {
+                                        Ok(mut stream) => {
+                                            println!("Stream opened to {}", peer_id);
+
+                                            // Send the message
+                                            let message_bytes = message.as_bytes().to_vec();
+                                            println!(
+                                                "Sending {} bytes: '{}'",
+                                                message_bytes.len(),
+                                                message
+                                            );
+
+                                            match stream.write_all(message_bytes).await {
+                                                Ok(_) => {
+                                                    println!("Message sent successfully");
+
+                                                    // Wait a bit before closing the stream
+                                                    tokio::time::sleep(Duration::from_millis(500))
+                                                        .await;
+                                                }
+                                                Err(e) => println!("Failed to send message: {}", e),
+                                            }
+
+                                            // Close the stream
+                                            match stream.close().await {
+                                                Ok(_) => println!("Stream closed successfully"),
+                                                Err(e) => println!("Error closing stream: {}", e),
+                                            }
+                                        }
+                                        Err(e) => {
+                                            println!("Failed to open stream to {}: {}", peer_id, e)
+                                        }
+                                    }
+                                }
+                                Err(e) => println!("Invalid peer ID format: {}", e),
+                            }
+                        } else {
+                            println!("Usage: stream <peer_id> <message>");
+                        }
+                    } else if input.starts_with("find") {
+                        // Format: find <peer_id>
+                        let parts: Vec<&str> = input.splitn(2, ' ').collect();
+                        if parts.len() >= 2 {
+                            let peer_id_str = parts[1];
+                    
+                            match PeerId::from_str(peer_id_str) {
+                                Ok(peer_id) => {
+                                    // Enable Kademlia explicitly first
+                                    println!("Enabling Kademlia for search...");
+                                    
+                                    // Use search_peer_addresses directly which will enable Kademlia internally
+                                    println!("Searching for peer: {} using Kademlia DHT", peer_id);
+                    
+                                    // Search for addresses only, don't connect
+                                    match cmd_clone.search_peer_addresses(peer_id).await {
+                                        Ok(addresses) => {
+                                            if addresses.is_empty() {
+                                                println!("No addresses found for peer {}", peer_id);
+                                            } else {
+                                                println!("Found {} addresses for peer {}:", addresses.len(), peer_id);
+                                                for (i, addr) in addresses.iter().enumerate() {
+                                                    println!("  [{:2}] {}", i + 1, addr);
+                                                }
+                                                println!("\nUse 'connect <multiaddr>' to connect to any of these addresses");
+                                            }
+                                        }
+                                        Err(e) => {
+                                            println!("Failed to find addresses for peer {}: {}", peer_id, e);
+                                        }
+                                    }
+                                }
+                                Err(e) => println!("Invalid peer ID format: {}", e),
+                            }
+                        } else {
+                            println!("Usage: find <peer_id>");
+                        }
+                    } else if input.starts_with("connect") {
+                        // Format: connect <multiaddr>
+                        let parts: Vec<&str> = input.splitn(2, ' ').collect();
+                        if parts.len() == 2 {
+                            let addr_str = parts[1];
+
+                            match Multiaddr::from_str(addr_str) {
+                                Ok(addr) => {
+                                    println!("Connecting to {}", addr);
+                                    match cmd_clone.connect(addr.clone()).await {
+                                        Ok(_) => println!("Connected to {}", addr),
+                                        Err(e) => println!("Failed to connect to {}: {}", addr, e),
+                                    }
+                                }
+                                Err(e) => println!("Invalid multiaddress format: {}", e),
+                            }
+                        } else {
+                            println!("Usage: connect <multiaddr>");
+                        }
+                    } else if input.starts_with("help") {
+                        println!("Available commands:");
+                        println!(
+                            "  connect <multiaddr> - Connect to a peer with the given multiaddress"
+                        );
+                        println!(
+                            "  find <peer_id> - Find and connect to a peer using Kademlia DHT"
+                        );
+                        println!("  stream <peer_id> <message> - Open a stream to a peer and send a message");
+                        println!("  help - Show this help message");
+                    } else if !input.is_empty() {
+                        println!(
+                            "Unknown command: {}. Type 'help' for available commands.",
+                            input
+                        );
+                    }
                 }
-            }
-            Err(e) => {
-                eprintln!("Invalid multiaddress format: {}", e);
+                Err(e) => {
+                    eprintln!("Error reading input: {}", e);
+                    break;
+                }
             }
         }
-    }
-    
-    // If find_peer argument is provided, try to find and connect to that peer using Kademlia
-    let mut find_mode = false;
-    if let Some(peer_id_str) = args.find_peer {
-        match PeerId::from_str(&peer_id_str) {
-            Ok(peer_id) => {
-                find_mode = true;
-                println!("Will search for peer: {} using Kademlia DHT", peer_id);
-                
-                // Enable Kademlia explicitly
-                cmd_tx
-                    .send(network::commands::NetworkCommand::EnableKad)
-                    .await
-                    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                        format!("Failed to send EnableKad command: {}", e).into()
-                    })?;
-                
-                // Give time for initial connections to establish
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                
-                println!("Initiating Kademlia search for peer: {}", peer_id);
-                
-                // Attempt multiple times to find and connect
-                let mut connected = false;
-                for attempt in 1..=3 {
-                    println!("Attempt {} to find and connect to peer {}", attempt, peer_id);
-                    
-                    // Initiate a search to update the DHT with this peer's information
-                    match cmd.find_peer_addresses(peer_id).await {
-                        Ok(_) => println!("Kademlia search for {} initiated", peer_id),
-                        Err(e) => eprintln!("Failed to start Kademlia search: {}", e),
-                    }
-                    
-                    // Wait a bit for the search to propagate through the DHT
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    
-                    // Try to find and connect to the peer
-                    match cmd.find_and_connect_to_peer(peer_id).await {
-                        Ok(_) => {
-                            println!("Successfully found and connected to peer: {}", peer_id);
-                            connected = true;
-                            break;
-                        }
-                        Err(e) => {
-                            eprintln!("Attempt {} failed to find and connect to peer: {}: {}", 
-                                     attempt, peer_id, e);
-                            // Wait a bit before retrying
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-                
-                if !connected {
-                    eprintln!("Failed to find and connect to peer after multiple attempts: {}", peer_id);
-                }
-            }
-            Err(e) => {
-                eprintln!("Invalid peer ID format: {}", e);
-            }
-        }
-    }
+    });
+
     // Spawn a task to handle and display network events
     let event_task = tokio::spawn(async move {
         let mut discovered_peers = std::collections::HashSet::new();
@@ -225,15 +312,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     println!("✅✅✅✅✅✅ Stream from {peer_id}");
                     let some = stream.clone().read_to_end().await;
 
-                    let s = String::from_utf8(some.unwrap()).expect("Our bytes should be valid utf8");
+                    let s =
+                        String::from_utf8(some.unwrap()).expect("Our bytes should be valid utf8");
                     println!("111111111111111111111111111111111 We read {} ", s);
                 }
-                
+
                 // Handle Kademlia DHT events for better visibility during testing
                 NetworkEvent::KadAddressAdded { peer_id, addr } => {
                     println!("📚 Kademlia address added: {peer_id} at {addr}");
                 }
-                
+
                 NetworkEvent::KadRoutingUpdated { peer_id, addresses } => {
                     println!("📚 Kademlia routing updated for {peer_id}");
                     for addr in addresses {
@@ -256,22 +344,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             }
 
                             // Here you can trigger additional actions for authenticated peers
-                            // For example, starting data exchange, joining swarms, etc.
                             println!("✨ Peer {peer_id} is now fully authenticated and trusted");
-                            
-                            // If in find mode and we've connected to a peer, open a test stream
-                            if find_mode || connect {
-                                match cmd.open_stream(peer_id).await {
-                                    Ok(mut stream) => {
-                                        println!("✅✅✅✅✅✅ Stream for {peer_id}");
-                                        println!("sent {:?}", stream.write_all("Hello from kademlia test".into()).await);
-                                        println!("close {:?}", stream.close().await);
-                                    },
-                                    Err(e) => {
-                                        println!("⚠️ Failed to open stream to {peer_id}: {e}");
-                                    }
-                                }
-                            }
                         }
                         PorAuthEvent::VerifyPorRequest {
                             peer_id,
@@ -293,19 +366,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     Ok(()) => {
                                         let owner_peer_id = por.owner_public_key.to_peer_id();
                                         println!("✅ PoR validation successful for {peer_id} {owner_peer_id}");
-                                        
-                                        // Open test stream if we're in connect or find mode
-                                        if connect || find_mode {
-                                            match cmd.open_stream(peer_id).await {
-                                                Ok(mut stream) => {
-                                                    println!("✅✅✅✅✅✅ Stream for {peer_id} {owner_peer_id}");
-                                                    println!("sent {:?}", stream.write_all("Hello from kademlia test".into()).await);
-                                                    println!("close {:?}", stream.close().await);
-                                                },
-                                                Err(e) => println!("Failed to open stream: {e}"),
-                                            }
-                                        }
-
                                         AuthResult::Ok(HashMap::new())
                                     }
                                     Err(e) => {
@@ -435,6 +495,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     })?;
 
     // Wait for the node task to complete
-    let _ = tokio::join!(node_task, event_task);
+    let _ = tokio::join!(node_task, event_task, cmd_input_task);
     Ok(())
 }

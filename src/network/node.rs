@@ -54,7 +54,7 @@ impl NetworkNode {
             .with_quic()
             .with_behaviour(|key| make_behaviour(key, por))?
             .with_swarm_config(|c| {
-                c.with_idle_connection_timeout(std::time::Duration::from_secs(60))
+                c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
             })
             .build();
 
@@ -228,16 +228,16 @@ impl NetworkNode {
                 info!("mDNS discovery disabled");
             }
 
-            NetworkCommand::OpenListenPort { port, response } => {
-                let addr = Multiaddr::from_str(&format!("/ip4/0.0.0.0/udp/{}/quic-v1", port))
+            NetworkCommand::OpenListenPort { host, port, response } => {
+                let addr = Multiaddr::from_str(&format!("/ip4/{}/udp/{}/quic-v1", host, port))
                     .expect("Invalid multiaddr");
-
+            
                 match self.swarm.listen_on(addr.clone()) {
                     Ok(_) => {
                         for i in self.listening_addresses() {
-                            println!("listenting on {}", i);
+                            println!("Listening on {}", i);
                         }
-
+            
                         let _ = response.send(Ok(addr));
                     }
                     Err(err) => {
@@ -279,6 +279,29 @@ impl NetworkNode {
 
                 let _ = response.send(connections);
             }
+            NetworkCommand::EnableKad => {
+                info!("Kademlia discovery enabled");
+                // Try to bootstrap immediately
+                if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
+                    warn!("Failed to bootstrap Kademlia: {}", e);
+                }
+            }
+            
+            NetworkCommand::BootstrapKad { response } => {
+                info!("Bootstrapping Kademlia DHT");
+                let result = match self.swarm.behaviour_mut().kad.bootstrap() {
+                    Ok(_) => {
+                        info!("Kademlia bootstrap started successfully");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("Failed to bootstrap Kademlia: {}", e);
+                        Err(Box::new(e) as Box<dyn Error + Send + Sync>)
+                    }
+                };
+                let _ = response.send(result);
+            }
+
             NetworkCommand::Shutdown => {
                 // Handled in the run loop
             }
@@ -296,13 +319,13 @@ impl NetworkNode {
                 ..
             } => {
                 let addr = endpoint.get_remote_address().clone();
-    
+            
                 // Track this connection
                 self.connected_peers
                     .entry(peer_id)
                     .or_insert_with(Vec::new)
                     .push(addr.clone());
-    
+            
                 info!("Connected to {peer_id} at {addr}");
                 
                 // Add the peer to Kademlia when connection is established
@@ -313,7 +336,7 @@ impl NetworkNode {
                 if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
                     warn!("Failed to bootstrap Kademlia on new connection: {}", e);
                 }
-    
+            
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ConnectionOpened {
@@ -323,8 +346,8 @@ impl NetworkNode {
                         protocols: Vec::new(),
                     })
                     .await;
-    
-                // Only emit PeerConnected event if this is the first connection (num_established will be 1)
+            
+                // Only emit PeerConnected event if this is the first connection
                 if num_established.get() == 1 {
                     info!("First connection to peer {peer_id} established");
                     let _ = self
