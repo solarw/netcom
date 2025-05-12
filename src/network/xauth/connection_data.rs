@@ -133,9 +133,7 @@ impl ConnectionData {
 
         // Return appropriate timeout direction
 
-        if (matches!(self.inbound_auth, DirectionalAuthState::Failed(_))
-            || matches!(self.outbound_auth, DirectionalAuthState::Failed(_)))
-        {
+        if (self.is_some_failed()){
             None
         } else if conn_timeout && !self.is_fully_authenticated() {
             println!("111111111111111111111");
@@ -166,6 +164,10 @@ impl ConnectionData {
             self.get_combined_state(),
             CombinedAuthState::FullyAuthenticated(_)
         )
+    }
+
+    pub fn is_some_failed(&self) -> bool {
+        matches!(self.inbound_auth, DirectionalAuthState::Failed(_))  || matches!(self.outbound_auth, DirectionalAuthState::Failed(_))
     }
 
     // Check if outbound auth is not started
