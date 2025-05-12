@@ -3,7 +3,6 @@ use libp2p::futures::StreamExt;
 use libp2p::{identify, identity, kad, mdns, Multiaddr, PeerId, Swarm};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -297,15 +296,24 @@ impl NetworkNode {
                 ..
             } => {
                 let addr = endpoint.get_remote_address().clone();
-
+    
                 // Track this connection
                 self.connected_peers
                     .entry(peer_id)
                     .or_insert_with(Vec::new)
                     .push(addr.clone());
-
+    
                 info!("Connected to {peer_id} at {addr}");
-
+                
+                // Add the peer to Kademlia when connection is established
+                // This improves bootstrapping when using --find-peer
+                self.swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
+                
+                // Explicitly bootstrap Kademlia on new connections
+                if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
+                    warn!("Failed to bootstrap Kademlia on new connection: {}", e);
+                }
+    
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ConnectionOpened {
@@ -315,7 +323,7 @@ impl NetworkNode {
                         protocols: Vec::new(),
                     })
                     .await;
-
+    
                 // Only emit PeerConnected event if this is the first connection (num_established will be 1)
                 if num_established.get() == 1 {
                     info!("First connection to peer {peer_id} established");
@@ -325,7 +333,6 @@ impl NetworkNode {
                         .await;
                 }
             }
-
             libp2p::swarm::SwarmEvent::ConnectionClosed {
                 peer_id,
                 cause,
@@ -458,7 +465,7 @@ impl NetworkNode {
                     kad::Event::RoutingUpdated {
                         peer,
                         addresses,
-                        old_peer,
+                        
                         ..
                     } => {
                         info!("📔 Kademlia routing updated for peer: {peer}");

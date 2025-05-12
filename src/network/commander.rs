@@ -1,7 +1,5 @@
 // Файл: ./src/network/commander.rs
 use libp2p::{swarm::ConnectionId, Multiaddr, PeerId};
-use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
@@ -219,35 +217,79 @@ impl Commander {
         &self,
         peer_id: PeerId,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Запускаем поиск адресов пира через DHT
-        self.find_peer_addresses(peer_id).await?;
-
-        // Даем время на распространение запроса
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        // Получаем найденные адреса
-        let addresses = self.get_peer_addresses(peer_id).await?;
-
-        if addresses.is_empty() {
-            return Err("No addresses found for peer".into());
+        // First, broadcast ourselves to the network
+        println!("Broadcasting our presence to the network...");
+        match self.cmd_tx
+            .send(NetworkCommand::EnableKad)
+            .await {
+            Ok(_) => println!("Kademlia enabled"),
+            Err(e) => println!("Failed to enable Kademlia: {}", e),
         }
-
-        // Пробуем подключиться по каждому адресу
-        for addr in addresses {
-            match self.connect(addr.clone()).await {
-                Ok(_) => {
-                    return Ok(());
-                }
-                Err(e) => {
-                    println!("Failed to connect to {} at {}: {}", peer_id, addr, e);
-                    // Продолжаем с другими адресами
+        
+        // Start looking for the peer
+        println!("Initiating search for peer: {}", peer_id);
+        
+        // First, try to find any existing addresses for the peer
+        let existing_addrs = self.get_peer_addresses(peer_id).await?;
+        if !existing_addrs.is_empty() {
+            println!("Found {} existing addresses for {}", existing_addrs.len(), peer_id);
+            for addr in &existing_addrs {
+                println!("Trying existing address: {}", addr);
+                match self.connect(addr.clone()).await {
+                    Ok(_) => {
+                        println!("Connected to {} via existing address!", peer_id);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        println!("Failed to connect to {} at {}: {}", peer_id, addr, e);
+                    }
                 }
             }
         }
-
-        Err("Failed to connect to peer via any of its addresses".into())
+        
+        // Start an explicit DHT search
+        println!("No valid existing addresses, initiating Kademlia search");
+        self.find_peer_addresses(peer_id).await?;
+        
+        // Wait a bit for the search to propagate
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        
+        // Try multiple times with increasing delay
+        for attempt in 1..=5 {
+            println!("Attempt {} to find peer {} via Kademlia", attempt, peer_id);
+            
+            // Get the latest addresses
+            let addrs = self.get_peer_addresses(peer_id).await?;
+            
+            if addrs.is_empty() {
+                println!("No addresses found for peer {} on attempt {}", peer_id, attempt);
+                // Retry the search before waiting
+                self.find_peer_addresses(peer_id).await?;
+                tokio::time::sleep(Duration::from_millis(attempt * 500)).await;
+                continue;
+            }
+            
+            // Try connecting to each address
+            println!("Found {} addresses for peer {}", addrs.len(), peer_id);
+            for addr in addrs {
+                println!("Trying to connect to {} at {}", peer_id, addr);
+                match self.connect(addr.clone()).await {
+                    Ok(_) => {
+                        println!("Successfully connected to {} at {}", peer_id, addr);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        println!("Failed to connect to {} at {}: {}", peer_id, addr, e);
+                        // Continue trying other addresses
+                    }
+                }
+            }
+            
+            // If we couldn't connect, wait and try again
+            tokio::time::sleep(Duration::from_millis(attempt * 500)).await;
+        }
+        
+        Err("Failed to connect to peer via Kademlia after multiple attempts".into())
     }
-
-
 
 }

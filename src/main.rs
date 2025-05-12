@@ -1,3 +1,4 @@
+#![allow(warnings)]
 use std::str::FromStr;
 use clap::Parser;
 use network::xauth::definitions::AuthResult;
@@ -20,6 +21,10 @@ struct Args {
     #[arg(short, long)]
     connect: Option<String>,
 
+    /// Find and connect to a specific peer by PeerId using the Kademlia DHT
+    #[arg(long)]
+    find_peer: Option<String>,
+
     /// Disable mDNS discovery
     #[arg(long, default_value_t = true)]
     disable_mdns: bool,
@@ -31,6 +36,10 @@ struct Args {
     /// Always accept authentication requests (for testing)
     #[arg(long, default_value_t = false)]
     accept_all_auth: bool,
+    
+    /// Specify the port to listen on (0 = random port)
+    #[arg(short, long, default_value_t = 0)]
+    port: u16,
 }
 
 #[tokio::main]
@@ -56,21 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .expect("Failed to create Proof of Representation");
 
-
-
-
-
-
-
-
-    
-    // Создаем NetworkNode с опциональной конфигурацией опорного сервера
+    // Create NetworkNode
     let (mut node, cmd_tx, mut event_rx, _peer_id) = NetworkNode::new(local_key, por).await?;
     
-    let local_peer_id = node.local_peer_id(); // Сохраняем локальный peer_id
+    let local_peer_id = node.local_peer_id(); // Save local peer_id
 
     println!("Local peer ID: {}", local_peer_id);
-    
 
     if args.disable_mdns {
         println!("mDNS discovery disabled");
@@ -90,22 +90,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             })?;
     }
 
-
     // Spawn the network node task
     let node_task = tokio::spawn(async move {
         node.run().await;
     });
 
-
     // Create commander
     let cmd = Commander::new(cmd_tx.clone());
 
-    
-
-
-    // Listen on a random port (0 means OS will assign an available port)
-    let port = 0;
-    cmd.listen_port(port).await?;
+    // Listen on specified port (0 means OS will assign an available port)
+    cmd.listen_port(args.port).await?;
 
     // If connect argument is provided, try to connect to that peer
     let mut connect = false;
@@ -123,7 +117,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     }
-
+    
+    // If find_peer argument is provided, try to find and connect to that peer using Kademlia
+    let mut find_mode = false;
+    if let Some(peer_id_str) = args.find_peer {
+        match PeerId::from_str(&peer_id_str) {
+            Ok(peer_id) => {
+                find_mode = true;
+                println!("Will search for peer: {} using Kademlia DHT", peer_id);
+                
+                // Enable Kademlia explicitly
+                cmd_tx
+                    .send(network::commands::NetworkCommand::EnableKad)
+                    .await
+                    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                        format!("Failed to send EnableKad command: {}", e).into()
+                    })?;
+                
+                // Give time for initial connections to establish
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                
+                println!("Initiating Kademlia search for peer: {}", peer_id);
+                
+                // Attempt multiple times to find and connect
+                let mut connected = false;
+                for attempt in 1..=3 {
+                    println!("Attempt {} to find and connect to peer {}", attempt, peer_id);
+                    
+                    // Initiate a search to update the DHT with this peer's information
+                    match cmd.find_peer_addresses(peer_id).await {
+                        Ok(_) => println!("Kademlia search for {} initiated", peer_id),
+                        Err(e) => eprintln!("Failed to start Kademlia search: {}", e),
+                    }
+                    
+                    // Wait a bit for the search to propagate through the DHT
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    
+                    // Try to find and connect to the peer
+                    match cmd.find_and_connect_to_peer(peer_id).await {
+                        Ok(_) => {
+                            println!("Successfully found and connected to peer: {}", peer_id);
+                            connected = true;
+                            break;
+                        }
+                        Err(e) => {
+                            eprintln!("Attempt {} failed to find and connect to peer: {}: {}", 
+                                     attempt, peer_id, e);
+                            // Wait a bit before retrying
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+                
+                if !connected {
+                    eprintln!("Failed to find and connect to peer after multiple attempts: {}", peer_id);
+                }
+            }
+            Err(e) => {
+                eprintln!("Invalid peer ID format: {}", e);
+            }
+        }
+    }
     // Spawn a task to handle and display network events
     let event_task = tokio::spawn(async move {
         let mut discovered_peers = std::collections::HashSet::new();
@@ -174,6 +228,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let s = String::from_utf8(some.unwrap()).expect("Our bytes should be valid utf8");
                     println!("111111111111111111111111111111111 We read {} ", s);
                 }
+                
+                // Handle Kademlia DHT events for better visibility during testing
+                NetworkEvent::KadAddressAdded { peer_id, addr } => {
+                    println!("📚 Kademlia address added: {peer_id} at {addr}");
+                }
+                
+                NetworkEvent::KadRoutingUpdated { peer_id, addresses } => {
+                    println!("📚 Kademlia routing updated for {peer_id}");
+                    for addr in addresses {
+                        println!("  - Address: {addr}");
+                    }
+                }
 
                 // Handle authentication events
                 NetworkEvent::AuthEvent { event } => {
@@ -192,6 +258,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             // Here you can trigger additional actions for authenticated peers
                             // For example, starting data exchange, joining swarms, etc.
                             println!("✨ Peer {peer_id} is now fully authenticated and trusted");
+                            
+                            // If in find mode and we've connected to a peer, open a test stream
+                            if find_mode || connect {
+                                match cmd.open_stream(peer_id).await {
+                                    Ok(mut stream) => {
+                                        println!("✅✅✅✅✅✅ Stream for {peer_id}");
+                                        println!("sent {:?}", stream.write_all("Hello from kademlia test".into()).await);
+                                        println!("close {:?}", stream.close().await);
+                                    },
+                                    Err(e) => {
+                                        println!("⚠️ Failed to open stream to {peer_id}: {e}");
+                                    }
+                                }
+                            }
                         }
                         PorAuthEvent::VerifyPorRequest {
                             peer_id,
@@ -213,13 +293,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     Ok(()) => {
                                         let owner_peer_id = por.owner_public_key.to_peer_id();
                                         println!("✅ PoR validation successful for {peer_id} {owner_peer_id}");
-                                        if connect {
-                                            let mut stream = cmd.open_stream(peer_id).await.unwrap();
-                                            println!(
-                                                "✅✅✅✅✅✅ Stream for {peer_id} {owner_peer_id}"
-                                            );
-                                            println!("sent {:?}", stream.write_all("Some hello".into()).await);
-                                            println!("close {:?}", stream.close().await);
+                                        
+                                        // Open test stream if we're in connect or find mode
+                                        if connect || find_mode {
+                                            match cmd.open_stream(peer_id).await {
+                                                Ok(mut stream) => {
+                                                    println!("✅✅✅✅✅✅ Stream for {peer_id} {owner_peer_id}");
+                                                    println!("sent {:?}", stream.write_all("Hello from kademlia test".into()).await);
+                                                    println!("close {:?}", stream.close().await);
+                                                },
+                                                Err(e) => println!("Failed to open stream: {e}"),
+                                            }
                                         }
 
                                         AuthResult::Ok(HashMap::new())
@@ -326,7 +410,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                 }
 
-
                 // You can add more event handlers here as needed
                 _ => {}
             }
@@ -344,7 +427,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     // Setup ctrl+c handler to gracefully shut down
-    //let cmd_clone = cmd.clone();
     ctrlc::set_handler(move || {
         info!("Ctrl+C received, shutting down...");
         // This will be limited because we're in a different thread,
