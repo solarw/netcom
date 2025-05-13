@@ -3,7 +3,7 @@ use futures::AsyncWriteExt;
 use libp2p::{PeerId, Stream};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 
 /// XStream struct - represents a pair of streams for data transfer
 #[derive(Debug)]
@@ -24,7 +24,7 @@ impl XStream {
         stream_main_read: futures::io::ReadHalf<Stream>,
         stream_main_write: futures::io::WriteHalf<Stream>,
     ) -> Self {
-        debug!("Creating new XStream with id: {} for peer: {}", id, peer_id);
+        info!("Creating new XStream with id: {} for peer: {}", id, peer_id);
         Self {
             stream_main_read: Arc::new(Mutex::new(stream_main_read)),
             stream_main_write: Arc::new(Mutex::new(stream_main_write)),
@@ -41,7 +41,7 @@ impl XStream {
 
     /// Set a closure notifier
     pub fn set_closure_notifier(&mut self, notifier: mpsc::UnboundedSender<(PeerId, u128)>) {
-        debug!("Setting closure notifier for stream {}", self.id);
+        info!("Setting closure notifier for stream {}", self.id);
         self.closure_notifier = Some(notifier);
     }
 
@@ -79,12 +79,12 @@ impl XStream {
 
     /// Closes the streams
     pub async fn close(&mut self) -> Result<(), std::io::Error> {
-        info!("Closing XStream with id: {} for peer: {}", self.id, self.peer_id);
+        info!("[STREAM_CLOSE] Closing XStream with id: {} for peer: {}", self.id, self.peer_id);
         
         if self.has_closure_notifier() {
-            debug!("Stream {} has closure notifier before closing", self.id);
+            info!("[STREAM_CLOSE] Stream {} has closure notifier before closing", self.id);
         } else {
-            warn!("No closure notifier set for stream {} of peer {} before closing", self.id, self.peer_id);
+            warn!("[STREAM_CLOSE] No closure notifier set for stream {} of peer {} before closing", self.id, self.peer_id);
         }
         
         // Get a lock on the write stream
@@ -96,24 +96,26 @@ impl XStream {
         
         // Then close
         let result = unlocked.close().await;
-        debug!("Network stream close result: {:?}", result);
+        info!("[STREAM_CLOSE] Network stream close result: {:?}", result);
         
-        debug!("close done!!!!!");
-        debug!("quic close done1111");
+        info!("[STREAM_CLOSE] close done!!!!!");
+        info!("[STREAM_CLOSE] quic close done1111");
         
         // Send notification if notifier is set
         if let Some(notifier) = &self.closure_notifier {
-            debug!("Sending closure notification for stream {} of peer {}", self.id, self.peer_id);
+            info!("[STREAM_CLOSE] Sending closure notification for stream {} of peer {}", self.id, self.peer_id);
             
             // This is non-blocking and returns immediately
             match notifier.send((self.peer_id, self.id)) {
-                Ok(_) => debug!("Close notification sent successfully for stream {}", self.id),
-                Err(e) => warn!("Failed to send close notification for stream {}: {}", self.id, e),
+                Ok(_) => info!("[STREAM_CLOSE] Close notification sent successfully for stream {}", self.id),
+                Err(e) => error!("[STREAM_CLOSE] Failed to send close notification for stream {}: {}", self.id, e),
             }
         } else {
-            warn!("No closure notifier set for stream {} of peer {}", self.id, self.peer_id);
+            warn!("[STREAM_CLOSE] No closure notifier set for stream {} of peer {}", self.id, self.peer_id);
         }
         
+        // Add a debug print just before returning
+        info!("[STREAM_CLOSE] Stream close complete for {} - returning result: {:?}", self.id, result);
         result
     }
 }
@@ -134,7 +136,11 @@ impl Clone for XStream {
         if clone.has_closure_notifier() {
             debug!("Closure notifier was preserved in clone for stream {}", self.id);
         } else {
-            warn!("Closure notifier NOT preserved in clone for stream {}", self.id);
+            if self.has_closure_notifier() {
+                error!("ERROR: Closure notifier was LOST during clone for stream {}", self.id);
+            } else {
+                warn!("Original stream {} did not have closure notifier", self.id);
+            }
         }
         
         clone

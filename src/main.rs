@@ -135,31 +135,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     match cmd_clone.open_stream(peer_id).await {
                                         Ok(mut stream) => {
                                             println!("Stream opened to {}", peer_id);
-
+                                    
                                             // Send the message
                                             let message_bytes = message.as_bytes().to_vec();
-                                            println!(
-                                                "Sending {} bytes: '{}'",
-                                                message_bytes.len(),
-                                                message
-                                            );
-
+                                            println!("Sending {} bytes: '{}'", message_bytes.len(), message);
+                                    
+                                            // Write to the stream
                                             match stream.write_all(message_bytes).await {
                                                 Ok(_) => {
                                                     println!("Message sent successfully");
-
-                                                    // Wait a bit before closing the stream
-                                                    tokio::time::sleep(Duration::from_millis(500))
-                                                        .await;
+                                                    // Wait a bit before closing
+                                                    tokio::time::sleep(Duration::from_millis(500)).await;
                                                 }
                                                 Err(e) => println!("Failed to send message: {}", e),
                                             }
-
-                                            // Close the stream
+                                    
+                                            // Check if stream has notifier before closing
+                                            if stream.has_closure_notifier() {
+                                                println!("Stream has closure notifier set before closing");
+                                            } else {
+                                                println!("WARNING: Stream missing closure notifier before closing!");
+                                            }
+                                    
+                                            // Close the stream explicitly
                                             match stream.close().await {
                                                 Ok(_) => println!("Stream closed successfully"),
                                                 Err(e) => println!("Error closing stream: {}", e),
                                             }
+                                            
+                                            // After closing, sleep a bit to allow the closure notification to be processed
+                                            println!("Waiting for closure notification to be processed...");
+                                            tokio::time::sleep(Duration::from_secs(1)).await;
+                                            println!("Done waiting");
                                         }
                                         Err(e) => {
                                             println!("Failed to open stream to {}: {}", peer_id, e)

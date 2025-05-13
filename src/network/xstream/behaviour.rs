@@ -7,7 +7,7 @@ use libp2p::{
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use std::task::{Context, Poll};
-use tracing::{debug, warn, info, trace};
+use tracing::{debug, warn, info, trace, error};
 
 use super::events::XStreamEvent;
 use super::handler::{XStreamHandler, XStreamHandlerEvent, XStreamHandlerIn};
@@ -36,24 +36,23 @@ impl XStreamNetworkBehaviour {
         // Channel for events from dedicated task to behavior
         let (event_sender, stream_close_events) = mpsc::unbounded_channel();
         
-        // Spawn a dedicated task to process closure notifications
         tokio::spawn(async move {
-            trace!("Started dedicated stream closure monitoring task");
+            info!("[CLOSURE_TASK] Started dedicated stream closure monitoring task");
             
             while let Some((peer_id, stream_id)) = closure_receiver.recv().await {
-                info!("Closure task received notification for stream {} from peer {}", stream_id, peer_id);
+                info!("[CLOSURE_TASK] Received closure notification for stream {} from peer {}", stream_id, peer_id);
                 
                 // Send an event to the behavior
                 match event_sender.send(XStreamEvent::StreamClosed {
                     peer_id,
                     stream_id,
                 }) {
-                    Ok(_) => debug!("Sent StreamClosed event to behavior for stream {}", stream_id),
-                    Err(e) => warn!("Failed to send StreamClosed event: {}", e),
+                    Ok(_) => info!("[CLOSURE_TASK] Successfully sent StreamClosed event to behavior for stream {}", stream_id),
+                    Err(e) => error!("[CLOSURE_TASK] Failed to send StreamClosed event: {}", e),
                 }
             }
             
-            warn!("Stream closure monitoring task exited");
+            warn!("[CLOSURE_TASK] Stream closure monitoring task exited - channel closed");
         });
         
         Self {
@@ -298,44 +297,46 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
             }
         }
     }
-
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<ToSwarm<Self::ToSwarm, libp2p::swarm::THandlerInEvent<Self>>> {
-        trace!("Polling XStreamNetworkBehaviour");
+        info!("[POLL] Polling XStreamNetworkBehaviour");
         
         // First check for events from the dedicated closure task
         match self.stream_close_events.poll_recv(cx) {
             Poll::Ready(Some(event)) => {
                 if let XStreamEvent::StreamClosed { peer_id, stream_id } = &event {
-                    debug!("Received dedicated task closure notification for stream {} from peer {}", stream_id, peer_id);
+                    info!("[POLL] Received dedicated task closure notification for stream {} from peer {}", stream_id, peer_id);
                     
                     // Remove the stream from the map if it still exists
                     if self.streams.remove(&(*peer_id, *stream_id)).is_some() {
-                        debug!("Stream {} removed from map", stream_id);
+                        info!("[POLL] Stream {} removed from map", stream_id);
                     } else {
-                        debug!("Stream {} was already removed from map", stream_id);
+                        info!("[POLL] Stream {} was already removed from map", stream_id);
                     }
                 }
                 
                 // Return the event immediately
+                info!("[POLL] Returning StreamClosed event from dedicated task");
                 return Poll::Ready(ToSwarm::GenerateEvent(event));
             },
             Poll::Ready(None) => {
-                warn!("Stream close events channel closed unexpectedly");
+                error!("[POLL] Stream close events channel closed unexpectedly");
             },
             Poll::Pending => {
                 // No events from the dedicated task, continue
+                info!("[POLL] No events from dedicated closure task");
             }
         }
         
         // Check for regular events
         if let Some(event) = self.events.pop() {
-            trace!("Returning event from queue: {:?}", event);
+            info!("[POLL] Returning event from queue: {:?}", event);
             return Poll::Ready(event);
         }
         
+        info!("[POLL] No events to process, returning Pending");
         Poll::Pending
     }
 }
