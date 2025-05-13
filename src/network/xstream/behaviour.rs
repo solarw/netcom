@@ -1,18 +1,10 @@
 use super::consts::XSTREAM_PROTOCOL;
-use std::collections::HashMap;
 use libp2p::{
-    StreamProtocol,
-    Multiaddr,
-    PeerId,
-    swarm::{
-        ConnectionId, 
-        NetworkBehaviour, 
-        NotifyHandler, 
-        ToSwarm,
-        derive_prelude::*,
-    },
     core::transport::PortUse,
+    swarm::{derive_prelude::*, ConnectionId, NetworkBehaviour, NotifyHandler, ToSwarm},
+    Multiaddr, PeerId, StreamProtocol,
 };
+use std::collections::HashMap;
 use tokio::sync::oneshot;
 
 use super::events::XStreamEvent;
@@ -49,22 +41,32 @@ impl XStreamNetworkBehaviour {
     }
 
     /// Асинхронно открывает новый поток и возвращает XStream или ошибку
-    pub async fn open_stream(&mut self, peer_id: PeerId) -> Result<XStream, String> {
+    pub async fn open_stream(
+        &mut self,
+        peer_id: PeerId,
+        response: oneshot::Sender<Result<XStream, String>>,
+    ) {
         // Создаем канал для получения результата
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        
+
         // Добавляем ожидание потока в карту ожидающих потоков
         self.pending_streams.insert(peer_id, sender);
-        
+
         // Запрашиваем открытие потока
         self.request_open_stream(peer_id);
-        
-        // Ожидаем результат с таймаутом
-        match tokio::time::timeout(std::time::Duration::from_secs(10), receiver).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err("Канал был закрыт без отправки результата".to_string()),
-            Err(_) => Err("Таймаут при открытии потока".to_string()),
-        }
+
+        tokio::spawn(async move {
+            match tokio::time::timeout(std::time::Duration::from_secs(10), receiver).await {
+                Ok(Ok(result)) => {
+                    println!("stream baked!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                    response.send(result)
+                }
+                Ok(Err(_)) => {
+                    response.send(Err("Канал был закрыт без отправки результата".to_string()))
+                }
+                Err(_) => response.send(Err("Таймаут при открытии потока".to_string())),
+            };
+        });
     }
 
     /// Получает XStream по идентификатору пира и потока
@@ -78,7 +80,11 @@ impl XStreamNetworkBehaviour {
     }
 
     /// Закрывает поток с указанным идентификатором пира и потока
-    pub async fn close_stream(&mut self, peer_id: PeerId, stream_id: u128) -> Result<(), std::io::Error> {
+    pub async fn close_stream(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+    ) -> Result<(), std::io::Error> {
         if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
             let result = stream.close().await;
             // Событие о закрытии потока будет отправлено из handler'а
@@ -88,35 +94,65 @@ impl XStreamNetworkBehaviour {
     }
 
     /// Отправляет данные в указанный поток
-    pub async fn send_data(&mut self, peer_id: PeerId, stream_id: u128, data: Vec<u8>) -> Result<(), std::io::Error> {
+    pub async fn send_data(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+        data: Vec<u8>,
+    ) -> Result<(), std::io::Error> {
         if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
             return stream.write_all(data).await;
         }
-        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Stream not found"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Stream not found",
+        ))
     }
 
     /// Читает данные из указанного потока
-    pub async fn read_data(&mut self, peer_id: PeerId, stream_id: u128) -> Result<Vec<u8>, std::io::Error> {
+    pub async fn read_data(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+    ) -> Result<Vec<u8>, std::io::Error> {
         if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
             return stream.read().await;
         }
-        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Stream not found"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Stream not found",
+        ))
     }
 
     /// Читает точное количество байт из указанного потока
-    pub async fn read_exact(&mut self, peer_id: PeerId, stream_id: u128, size: usize) -> Result<Vec<u8>, std::io::Error> {
+    pub async fn read_exact(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+        size: usize,
+    ) -> Result<Vec<u8>, std::io::Error> {
         if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
             return stream.read_exact(size).await;
         }
-        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Stream not found"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Stream not found",
+        ))
     }
 
     /// Читает все данные из указанного потока до конца
-    pub async fn read_to_end(&mut self, peer_id: PeerId, stream_id: u128) -> Result<Vec<u8>, std::io::Error> {
+    pub async fn read_to_end(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+    ) -> Result<Vec<u8>, std::io::Error> {
         if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
             return stream.read_to_end().await;
         }
-        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Stream not found"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Stream not found",
+        ))
     }
 }
 
@@ -160,7 +196,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         event: libp2p::swarm::THandlerOutEvent<Self>,
     ) {
         match event {
-            XStreamHandlerEvent::StreamEstablished { stream_id, stream } => {
+            XStreamHandlerEvent::IncomingStreamEstablished{ stream_id, stream } => {
                 // Сохраняем поток в HashMap
                 self.streams.insert((peer_id, stream_id), stream.clone());
 
@@ -171,16 +207,22 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                 }
 
                 // Отправляем событие о новом потоке
-                self.events.push(ToSwarm::GenerateEvent(XStreamEvent::StreamEstablished {
-                    peer_id,
-                    stream_id,
-                }));
-                
-                // Также отправляем событие IncomingStream для обратной совместимости
-                self.events.push(ToSwarm::GenerateEvent(XStreamEvent::IncomingStream {
-                    stream,
-                }));
+                self.events
+                    .push(ToSwarm::GenerateEvent(XStreamEvent::StreamEstablished {
+                        peer_id,
+                        stream_id,
+                    }));
             }
+            XStreamHandlerEvent::OutboundStreamEstablished { stream_id, stream } => {
+                // Сохраняем поток в HashMap
+                self.streams.insert((peer_id, stream_id), stream.clone());
+                // Также отправляем событие IncomingStream для обратной совместимости
+                self.events
+                    .push(ToSwarm::GenerateEvent(XStreamEvent::IncomingStream {
+                        stream,
+                    }));
+            }
+
             XStreamHandlerEvent::StreamError { stream_id, error } => {
                 // Если известен stream_id, удаляем поток из HashMap
                 if let Some(stream_id) = stream_id {
@@ -188,21 +230,23 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                 }
 
                 // Отправляем событие об ошибке
-                self.events.push(ToSwarm::GenerateEvent(XStreamEvent::StreamError {
-                    peer_id,
-                    stream_id,
-                    error,
-                }));
+                self.events
+                    .push(ToSwarm::GenerateEvent(XStreamEvent::StreamError {
+                        peer_id,
+                        stream_id,
+                        error,
+                    }));
             }
             XStreamHandlerEvent::StreamClosed { stream_id } => {
                 // Удаляем поток из HashMap
                 self.streams.remove(&(peer_id, stream_id));
 
                 // Отправляем событие о закрытии потока
-                self.events.push(ToSwarm::GenerateEvent(XStreamEvent::StreamClosed {
-                    peer_id,
-                    stream_id,
-                }));
+                self.events
+                    .push(ToSwarm::GenerateEvent(XStreamEvent::StreamClosed {
+                        peer_id,
+                        stream_id,
+                    }));
             }
         }
     }

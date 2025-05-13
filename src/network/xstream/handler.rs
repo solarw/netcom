@@ -1,18 +1,14 @@
 use std::task::{Context, Poll};
 
 use super::xstream::XStream;
-use libp2p::{
-    PeerId,
-    Stream,
-    StreamProtocol,
-    swarm::{
-        ConnectionHandler, 
-        ConnectionHandlerEvent,
-        SubstreamProtocol,
-        handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound},
-    },
-};
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use libp2p::{
+    swarm::{
+        handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound},
+        ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
+    },
+    PeerId, Stream, StreamProtocol,
+};
 
 use super::consts::XSTREAM_PROTOCOL;
 use super::utils::IdIterator;
@@ -21,7 +17,13 @@ use super::utils::IdIterator;
 #[derive(Debug)]
 pub enum XStreamHandlerEvent {
     /// Установлен новый stream
-    StreamEstablished {
+    IncomingStreamEstablished {
+        /// Идентификатор потока
+        stream_id: u128,
+        /// Поток XStream
+        stream: XStream,
+    },
+    OutboundStreamEstablished {
         /// Идентификатор потока
         stream_id: u128,
         /// Поток XStream
@@ -102,19 +104,27 @@ impl XStreamHandler {
     fn handle_inbound_stream(&mut self, stream: Stream, protocol: StreamProtocol) {
         let stream_id = self.id_iter.next().unwrap();
         let (read, write) = AsyncReadExt::split(stream);
-        
-        let xstream = XStream::new(
-            stream_id,
-            self.peer_id,
-            read,
-            write,
-        );
-        
+
+        let xstream = XStream::new(stream_id, self.peer_id, read, write);
+
         self.streams.push(xstream.clone());
-        self.outgoing_events.push(XStreamHandlerEvent::StreamEstablished {
-            stream_id,
-            stream: xstream,
-        });
+        self.outgoing_events
+            .push(XStreamHandlerEvent::OutboundStreamEstablished {
+                stream_id,
+                stream: xstream,
+            });
+    }
+
+    fn handle_outbound_stream(&mut self, stream: Stream, protocol: StreamProtocol) {
+        let stream_id = self.id_iter.next().unwrap();
+        let (read, write) = AsyncReadExt::split(stream);
+
+        let xstream = XStream::new(stream_id, self.peer_id, read, write);
+        self.outgoing_events
+            .push(XStreamHandlerEvent:: IncomingStreamEstablished{
+                stream_id: 0,
+                stream: xstream,
+            });
     }
 
     /// Открывает новый исходящий поток
@@ -168,7 +178,7 @@ impl ConnectionHandler for XStreamHandler {
     type OutboundProtocol = XStreamProtocol;
     type InboundOpenInfo = ();
     type OutboundOpenInfo = ();
-    
+
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, Self::InboundOpenInfo> {
         // Создаем протокол с нашим StreamProtocol
         let proto = XStreamProtocol::new(XSTREAM_PROTOCOL.clone());
@@ -190,7 +200,9 @@ impl ConnectionHandler for XStreamHandler {
     fn poll(
         &mut self,
         _cx: &mut Context<'_>,
-    ) -> Poll<ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>> {
+    ) -> Poll<
+        ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>,
+    > {
         // Обрабатываем исходящие события
         if !self.outgoing_events.is_empty() {
             return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
@@ -229,7 +241,7 @@ impl ConnectionHandler for XStreamHandler {
                 info: (),
             }) => {
                 // Обрабатываем исходящий поток аналогично входящему
-                self.handle_inbound_stream(stream, protocol);
+                self.handle_outbound_stream(stream, protocol);
             }
             ConnectionEvent::ListenUpgradeError(error) => {
                 self.outgoing_events.push(XStreamHandlerEvent::StreamError {
@@ -254,17 +266,17 @@ impl ConnectionHandler for XStreamHandler {
         if !self.outgoing_events.is_empty() {
             return Poll::Ready(Some(self.outgoing_events.remove(0)));
         }
-        
+
         // Отмечаем все потоки как закрытые перед завершением
         if !self.streams.is_empty() {
             let stream_ids: Vec<u128> = self.streams.iter().map(|s| s.id).collect();
             self.streams.clear();
-            
+
             for stream_id in stream_ids {
                 return Poll::Ready(Some(XStreamHandlerEvent::StreamClosed { stream_id }));
             }
         }
-        
+
         // Иначе сигнализируем о завершении
         Poll::Ready(None)
     }

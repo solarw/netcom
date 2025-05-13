@@ -35,7 +35,7 @@ struct Args {
     /// Specify the port to listen on (0 = random port)
     #[arg(short, long, default_value_t = 0)]
     port: u16,
-    
+
     /// Run in Kademlia server mode (for relay/bootstrap nodes)
     #[arg(long, default_value_t = false)]
     kad_server: bool,

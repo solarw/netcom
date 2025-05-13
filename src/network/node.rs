@@ -11,6 +11,8 @@ use std::error::Error;
 
 use tracing::{info, warn};
 
+use crate::network::xstream::events::XStreamEvent;
+
 use super::xauth::events::PorAuthEvent;
 use super::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
@@ -122,9 +124,11 @@ impl NetworkNode {
                 connection_id: _,
                 response,
             } => {
-                self
-                .swarm
-                .behaviour_mut().xstream.open_stream(peer_id);
+                self.swarm
+                    .behaviour_mut()
+                    .xstream
+                    .open_stream(peer_id, response)
+                    .await;
             }
 
             NetworkCommand::SubmitPorVerification {
@@ -452,6 +456,20 @@ impl NetworkNode {
     // Handle events from the network behaviour
     async fn handle_behaviour_event(&mut self, event: NodeBehaviourEvent) {
         match event {
+            NodeBehaviourEvent::Xstream(event) => match event {
+                XStreamEvent::IncomingStream { stream } => {
+                    let _ = self
+                        .event_tx
+                        .send(NetworkEvent::IncomingStream {
+                            stream: Arc::new(stream),
+                        })
+                        .await;
+                }
+                rest => {
+                    println!("XSTREAM EVENT {:?}", rest);
+                }
+            },
+
             NodeBehaviourEvent::Mdns(mdns::Event::Discovered(peers)) => {
                 if self.mdns_enabled {
                     for (peer_id, addr) in peers {
