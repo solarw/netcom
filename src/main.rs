@@ -103,22 +103,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     cmd.listen_port(Some("127.0.0.1".to_string()), args.port)
         .await?;
 
-    // Remove the code that processes the connect option
-    // let mut connect = false;
-    // if let Some(addr_str) = args.connect {
-    //     match Multiaddr::from_str(&addr_str) {
-    //         Ok(addr) => {
-    //             connect = true;
-    //             println!("Attempting to connect to peer at {}", addr);
-    //             if let Err(e) = cmd.connect(addr.clone()).await {
-    //                 eprintln!("Failed to connect to {}: {}", addr, e);
-    //             }
-    //         }
-    //         Err(e) => {
-    //             eprintln!("Invalid multiaddress format: {}", e);
-    //         }
-    //     }
-    // }
 
     // Clone the Commander for the command input task
     let cmd_clone = Commander::new(cmd_tx.clone());
@@ -327,6 +311,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 NetworkEvent::IncomingStream { stream } => {
                     let peer_id = stream.peer_id;
                     println!("✅✅✅✅✅✅ Stream from {peer_id}");
+
                     let some = stream.clone().read_to_end().await;
 
                     let s =

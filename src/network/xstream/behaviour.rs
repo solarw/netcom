@@ -196,8 +196,18 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         event: libp2p::swarm::THandlerOutEvent<Self>,
     ) {
         match event {
-            XStreamHandlerEvent::IncomingStreamEstablished{ stream_id, stream } => {
+            XStreamHandlerEvent::IncomingStreamEstablished { stream_id, stream } => {
                 // Сохраняем поток в HashMap
+                self.streams.insert((peer_id, stream_id), stream.clone());
+                // Отправляем событие о новом потоке
+                self.events
+                    .push(ToSwarm::GenerateEvent(XStreamEvent::IncomingStream {
+                        stream,
+                    }));
+            }
+            XStreamHandlerEvent::OutboundStreamEstablished { stream_id, stream } => {
+                // Сохраняем поток в HashMap
+
                 self.streams.insert((peer_id, stream_id), stream.clone());
 
                 // Проверяем, есть ли ожидающий отправитель для этого пира
@@ -206,20 +216,11 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                     let _ = sender.send(Ok(stream.clone()));
                 }
 
-                // Отправляем событие о новом потоке
+                // Также отправляем событие IncomingStream для обратной совместимости
                 self.events
                     .push(ToSwarm::GenerateEvent(XStreamEvent::StreamEstablished {
                         peer_id,
                         stream_id,
-                    }));
-            }
-            XStreamHandlerEvent::OutboundStreamEstablished { stream_id, stream } => {
-                // Сохраняем поток в HashMap
-                self.streams.insert((peer_id, stream_id), stream.clone());
-                // Также отправляем событие IncomingStream для обратной совместимости
-                self.events
-                    .push(ToSwarm::GenerateEvent(XStreamEvent::IncomingStream {
-                        stream,
                     }));
             }
 

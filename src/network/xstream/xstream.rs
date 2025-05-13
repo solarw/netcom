@@ -61,13 +61,15 @@ impl XStream {
     pub async fn write_all(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
         let stream_main_write = self.stream_main_write.clone();
         let mut unlocked = stream_main_write.lock().await;
-        unlocked.write_all(&buf).await
+        unlocked.write_all(&buf).await?;
+        unlocked.flush().await
     }
 
     /// Закрывает потоки
     pub async fn close(&mut self) -> Result<(), std::io::Error> {
         let stream_main_write = self.stream_main_write.clone();
         let mut unlocked = stream_main_write.lock().await;
+        unlocked.flush().await?;
         unlocked.close().await
     }
 }
