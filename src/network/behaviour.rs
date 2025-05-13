@@ -9,7 +9,7 @@ use libp2p::{
 
 use libp2p_stream;
 
-use super::xauth::behaviours::PorAuthBehaviour;
+use super::{xauth::behaviours::PorAuthBehaviour, xstream::behaviour::XStreamNetworkBehaviour};
 use super::xauth::por::por::ProofOfRepresentation;
 
 // In the NodeBehaviour struct, use Toggle for mdns
@@ -21,7 +21,7 @@ pub struct NodeBehaviour {
     pub mdns: Toggle<mdns::tokio::Behaviour>,
     pub ping: ping::Behaviour,
     pub por_auth: PorAuthBehaviour,
-    pub stream: libp2p_stream::Behaviour,
+    pub xstream: XStreamNetworkBehaviour,
 }
 
 // Update the make_behaviour function to use Toggle
@@ -103,7 +103,7 @@ pub fn make_behaviour(
     let por_auth = PorAuthBehaviour::new(por);
 
     // Set up stream behavior
-    let stream = libp2p_stream::Behaviour::new();
+    let xstream = XStreamNetworkBehaviour::new();
 
     // Create the network behavior
     NodeBehaviour {
@@ -112,6 +112,6 @@ pub fn make_behaviour(
         mdns,
         ping,
         por_auth,
-        stream,
+        xstream,
     }
 }

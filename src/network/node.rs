@@ -12,7 +12,6 @@ use std::error::Error;
 use tracing::{info, warn};
 
 use super::xauth::events::PorAuthEvent;
-use super::xstream::manager::StreamManager;
 use super::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
     commands::NetworkCommand,
@@ -28,8 +27,6 @@ pub struct NetworkNode {
     local_peer_id: PeerId,
     // New field for tracking authenticated peers
     authenticated_peers: HashSet<PeerId>,
-
-    stream_manager: StreamManager,
 }
 
 impl NetworkNode {
@@ -63,7 +60,6 @@ impl NetworkNode {
         // Set up communication channels
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
         let (event_tx, event_rx) = mpsc::channel(100);
-        let stream_control = swarm.behaviour_mut().stream.new_control();
 
         Ok((
             Self {
@@ -74,7 +70,6 @@ impl NetworkNode {
                 connected_peers: HashMap::new(),
                 local_peer_id,
                 authenticated_peers: HashSet::new(),
-                stream_manager: StreamManager::new(stream_control),
             },
             cmd_tx,
             event_rx,
@@ -115,14 +110,6 @@ impl NetworkNode {
                 event = self.swarm.select_next_some() => {
                     self.handle_swarm_event(event).await;
                 }
-                Some(incoming_stream) = self.stream_manager.poll() => {
-                    let _ = self
-                            .event_tx
-                            .send(NetworkEvent::IncomingStream { stream: Arc::new(incoming_stream) }
-                            )
-                            .await;
-                }
-
             }
         }
     }
@@ -134,14 +121,11 @@ impl NetworkNode {
                 peer_id,
                 connection_id: _,
                 response,
-            } => match self.stream_manager.open_stream(peer_id).await {
-                Ok(stream) => {
-                    response.send(Ok(stream));
-                }
-                Err(e) => {
-                    response.send(Err("some".to_string()));
-                }
-            },
+            } => {
+                self
+                .swarm
+                .behaviour_mut().xstream.open_stream(peer_id);
+            }
 
             NetworkCommand::SubmitPorVerification {
                 connection_id,
@@ -536,7 +520,9 @@ impl NetworkNode {
                             }
                         }
 
-                        some => {info!("KAD OUTBOUND{result:?}");}
+                        some => {
+                            info!("KAD OUTBOUND{result:?}");
+                        }
                     },
 
                     kad::Event::InboundRequest { request, .. } => {
@@ -547,7 +533,9 @@ impl NetworkNode {
                     }
 
                     // Другие обработчики...
-                    some => {info!(" OTHER KAD KAD {some:?}");}
+                    some => {
+                        info!(" OTHER KAD KAD {some:?}");
+                    }
                 }
             }
 
@@ -556,7 +544,10 @@ impl NetworkNode {
 
                 // Add peer's listening addresses to Kademlia
                 for addr in info.listen_addrs {
-                    self.swarm.behaviour_mut().kad.add_address(&peer_id, addr.clone());
+                    self.swarm
+                        .behaviour_mut()
+                        .kad
+                        .add_address(&peer_id, addr.clone());
                     info!("Address added {peer_id} {addr}");
                 }
 

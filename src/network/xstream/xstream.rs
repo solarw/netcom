@@ -12,8 +12,6 @@ use tokio::sync::Mutex;
 pub struct XStream {
     pub stream_main_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
     pub stream_main_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
-    pub stream_error_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
-    pub stream_error_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
     pub id: u128,
     pub peer_id: PeerId,
 }
@@ -25,14 +23,11 @@ impl XStream {
         peer_id: PeerId,
         stream_main_read: futures::io::ReadHalf<Stream>,
         stream_main_write: futures::io::WriteHalf<Stream>,
-        stream_error_read: futures::io::ReadHalf<Stream>,
-        stream_error_write: futures::io::WriteHalf<Stream>,
+        
     ) -> Self {
         Self {
             stream_main_read: Arc::new(Mutex::new(stream_main_read)),
             stream_main_write: Arc::new(Mutex::new(stream_main_write)),
-            stream_error_read: Arc::new(Mutex::new(stream_error_read)),
-            stream_error_write: Arc::new(Mutex::new(stream_error_write)),
             id,
             peer_id,
         }
