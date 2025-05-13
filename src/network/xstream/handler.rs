@@ -199,6 +199,7 @@ impl ConnectionHandler for XStreamHandler {
     fn connection_keep_alive(&self) -> bool {
         !self.streams.is_empty() // Uncomment this line
     }
+
     fn poll(
         &mut self,
         _cx: &mut Context<'_>,

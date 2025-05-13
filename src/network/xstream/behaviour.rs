@@ -5,33 +5,68 @@ use libp2p::{
     Multiaddr, PeerId, StreamProtocol,
 };
 use std::collections::HashMap;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
+use std::task::{Context, Poll};
+use tracing::{debug, warn, info, trace};
 
 use super::events::XStreamEvent;
 use super::handler::{XStreamHandler, XStreamHandlerEvent, XStreamHandlerIn};
 use super::xstream::XStream;
 
-/// NetworkBehaviour для работы с XStream
+/// NetworkBehaviour for working with XStream
 pub struct XStreamNetworkBehaviour {
-    /// Отображение (peer_id, stream_id) -> XStream
+    /// Mapping (peer_id, stream_id) -> XStream
     streams: HashMap<(PeerId, u128), XStream>,
-    /// События, ожидающие обработки
+    /// Events waiting to be processed
     events: Vec<ToSwarm<XStreamEvent, XStreamHandlerIn>>,
-    /// Ожидающие открытия потоки
+    /// Pending stream openings
     pending_streams: HashMap<PeerId, oneshot::Sender<Result<XStream, String>>>,
+    /// Channel for stream closure notifications - sender only
+    closure_sender: mpsc::UnboundedSender<(PeerId, u128)>,
+    /// Receiver for events from the dedicated closure task
+    stream_close_events: mpsc::UnboundedReceiver<XStreamEvent>,
 }
 
 impl XStreamNetworkBehaviour {
-    /// Создает новый XStreamNetworkBehaviour
+    /// Creates a new XStreamNetworkBehaviour
     pub fn new() -> Self {
+        // Channel for closure notifications
+        let (closure_sender, mut closure_receiver) = mpsc::unbounded_channel();
+        
+        // Channel for events from dedicated task to behavior
+        let (event_sender, stream_close_events) = mpsc::unbounded_channel();
+        
+        // Spawn a dedicated task to process closure notifications
+        tokio::spawn(async move {
+            trace!("Started dedicated stream closure monitoring task");
+            
+            while let Some((peer_id, stream_id)) = closure_receiver.recv().await {
+                info!("Closure task received notification for stream {} from peer {}", stream_id, peer_id);
+                
+                // Send an event to the behavior
+                match event_sender.send(XStreamEvent::StreamClosed {
+                    peer_id,
+                    stream_id,
+                }) {
+                    Ok(_) => debug!("Sent StreamClosed event to behavior for stream {}", stream_id),
+                    Err(e) => warn!("Failed to send StreamClosed event: {}", e),
+                }
+            }
+            
+            warn!("Stream closure monitoring task exited");
+        });
+        
         Self {
             streams: HashMap::new(),
             events: Vec::new(),
             pending_streams: HashMap::new(),
+            closure_sender,
+            stream_close_events,
         }
     }
 
-    /// Открывает новый поток к указанному пиру
+
+    /// Requests to open a new stream to the specified peer
     pub fn request_open_stream(&mut self, peer_id: PeerId) {
         self.events.push(ToSwarm::NotifyHandler {
             peer_id,
@@ -40,36 +75,32 @@ impl XStreamNetworkBehaviour {
         });
     }
 
-    /// Асинхронно открывает новый поток и возвращает XStream или ошибку
+    /// Asynchronously opens a new stream and returns XStream or an error
     pub async fn open_stream(
         &mut self,
         peer_id: PeerId,
         response: oneshot::Sender<Result<XStream, String>>,
     ) {
-        // Создаем канал для получения результата
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        // Add to pending streams map
+        self.pending_streams.insert(peer_id, response);
 
-        // Добавляем ожидание потока в карту ожидающих потоков
-        self.pending_streams.insert(peer_id, sender);
-
-        // Запрашиваем открытие потока
+        // Request stream opening
         self.request_open_stream(peer_id);
-
-        tokio::spawn(async move {
-            match tokio::time::timeout(std::time::Duration::from_secs(10), receiver).await {
-                Ok(Ok(result)) => {
-                    println!("stream baked!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                    response.send(result)
-                }
-                Ok(Err(_)) => {
-                    response.send(Err("Канал был закрыт без отправки результата".to_string()))
-                }
-                Err(_) => response.send(Err("Таймаут при открытии потока".to_string())),
-            };
-        });
     }
 
+    /// Gets an XStream by peer ID and stream ID
+    pub fn get_stream(&self, peer_id: PeerId, stream_id: u128) -> Option<&XStream> {
+        self.streams.get(&(peer_id, stream_id))
+    }
+
+    /// Gets a mutable XStream by peer ID and stream ID
+    pub fn get_stream_mut(&mut self, peer_id: PeerId, stream_id: u128) -> Option<&mut XStream> {
+        self.streams.get_mut(&(peer_id, stream_id))
+    }
+
+    /// Notifies that a stream is closed
     pub fn notify_stream_closed(&mut self, peer_id: PeerId, stream_id: u128) {
+        debug!("Manual notification of stream closure: {}", stream_id);
         // Remove the stream from the active streams map
         self.streams.remove(&(peer_id, stream_id));
         
@@ -80,21 +111,82 @@ impl XStreamNetworkBehaviour {
         }));
     }
 
+    /// Closes a stream
     pub async fn close_stream(
         &mut self,
         peer_id: PeerId,
         stream_id: u128,
     ) -> Result<(), std::io::Error> {
+        debug!("Closing stream {} with peer {}", stream_id, peer_id);
         if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            // First close the actual stream
+            // The stream will send notification via the closure_notifier channel
             let result = stream.close().await;
-            
-            // Then manually generate the closure event
-            self.notify_stream_closed(peer_id, stream_id);
-            
+            debug!("Stream.close() result for stream {}: {:?}", stream_id, result);
             return result;
         }
         Ok(())
+    }
+
+    /// Sends data to the specified stream
+    pub async fn send_data(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+        data: Vec<u8>,
+    ) -> Result<(), std::io::Error> {
+        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
+            return stream.write_all(data).await;
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Stream not found",
+        ))
+    }
+
+    /// Reads data from the specified stream
+    pub async fn read_data(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+    ) -> Result<Vec<u8>, std::io::Error> {
+        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
+            return stream.read().await;
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Stream not found",
+        ))
+    }
+
+    /// Reads exact number of bytes from the specified stream
+    pub async fn read_exact(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+        size: usize,
+    ) -> Result<Vec<u8>, std::io::Error> {
+        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
+            return stream.read_exact(size).await;
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Stream not found",
+        ))
+    }
+
+    /// Reads all data from the specified stream to the end
+    pub async fn read_to_end(
+        &mut self,
+        peer_id: PeerId,
+        stream_id: u128,
+    ) -> Result<Vec<u8>, std::io::Error> {
+        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
+            return stream.read_to_end().await;
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Stream not found",
+        ))
     }
 }
 
@@ -110,7 +202,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         _remote_addr: &Multiaddr,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         let mut handler = XStreamHandler::new();
-        // Сразу устанавливаем peer_id в handler
+        // Set peer ID in handler immediately
         handler.set_peer_id(peer);
         Ok(handler)
     }
@@ -124,7 +216,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         _port_use: PortUse,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         let mut handler = XStreamHandler::new();
-        // Сразу устанавливаем peer_id в handler
+        // Set peer ID in handler immediately
         handler.set_peer_id(peer);
         Ok(handler)
     }
@@ -138,41 +230,53 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         event: libp2p::swarm::THandlerOutEvent<Self>,
     ) {
         match event {
-            XStreamHandlerEvent::IncomingStreamEstablished { stream_id, stream } => {
-                // Сохраняем поток в HashMap
+            XStreamHandlerEvent::IncomingStreamEstablished { stream_id, mut stream } => {
+                // Add the stream with its closure notifier
+                debug!("Adding stream {} with peer {} and setting closure notifier", stream_id, peer_id);
+        
+                // Set the closure notifier
+                stream.set_closure_notifier(self.closure_sender.clone());
+                
+                debug!("Closure notifier set for stream {}", stream_id);
                 self.streams.insert((peer_id, stream_id), stream.clone());
-                // Отправляем событие о новом потоке
+                
+                // Send event about the new stream
                 self.events
                     .push(ToSwarm::GenerateEvent(XStreamEvent::IncomingStream {
-                        stream,
+                        stream: stream.clone(),
                     }));
-            }
-            XStreamHandlerEvent::OutboundStreamEstablished { stream_id, stream } => {
-                // Сохраняем поток в HashMap
-
+            },
+            XStreamHandlerEvent::OutboundStreamEstablished { stream_id, mut stream } => {
+                // Add the stream with its closure notifier
+                debug!("Adding stream {} with peer {} and setting closure notifier", stream_id, peer_id);
+        
+                // Set the closure notifier
+                stream.set_closure_notifier(self.closure_sender.clone());
+                
+                debug!("Closure notifier set for stream {}", stream_id);
                 self.streams.insert((peer_id, stream_id), stream.clone());
-
-                // Проверяем, есть ли ожидающий отправитель для этого пира
+                
+                // Check if there's a waiting sender for this peer
                 if let Some(sender) = self.pending_streams.remove(&peer_id) {
-                    // Отправляем успешный результат
+                    // Send successful result
                     let _ = sender.send(Ok(stream.clone()));
                 }
-
-                // Также отправляем событие IncomingStream для обратной совместимости
+                
+                // Also send StreamEstablished event for backward compatibility
                 self.events
                     .push(ToSwarm::GenerateEvent(XStreamEvent::StreamEstablished {
                         peer_id,
                         stream_id,
                     }));
-            }
+            },
 
             XStreamHandlerEvent::StreamError { stream_id, error } => {
-                // Если известен stream_id, удаляем поток из HashMap
+                // If stream_id is known, remove the stream from HashMap
                 if let Some(stream_id) = stream_id {
                     self.streams.remove(&(peer_id, stream_id));
                 }
 
-                // Отправляем событие об ошибке
+                // Send error event
                 self.events
                     .push(ToSwarm::GenerateEvent(XStreamEvent::StreamError {
                         peer_id,
@@ -181,10 +285,11 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                     }));
             }
             XStreamHandlerEvent::StreamClosed { stream_id } => {
-                // Удаляем поток из HashMap
+                debug!("Handler reported stream closed: {}", stream_id);
+                // Remove the stream from HashMap
                 self.streams.remove(&(peer_id, stream_id));
 
-                // Отправляем событие о закрытии потока
+                // Send stream closed event
                 self.events
                     .push(ToSwarm::GenerateEvent(XStreamEvent::StreamClosed {
                         peer_id,
@@ -196,12 +301,41 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
 
     fn poll(
         &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<ToSwarm<Self::ToSwarm, libp2p::swarm::THandlerInEvent<Self>>> {
-        if let Some(event) = self.events.pop() {
-            return std::task::Poll::Ready(event);
+        cx: &mut Context<'_>,
+    ) -> Poll<ToSwarm<Self::ToSwarm, libp2p::swarm::THandlerInEvent<Self>>> {
+        trace!("Polling XStreamNetworkBehaviour");
+        
+        // First check for events from the dedicated closure task
+        match self.stream_close_events.poll_recv(cx) {
+            Poll::Ready(Some(event)) => {
+                if let XStreamEvent::StreamClosed { peer_id, stream_id } = &event {
+                    debug!("Received dedicated task closure notification for stream {} from peer {}", stream_id, peer_id);
+                    
+                    // Remove the stream from the map if it still exists
+                    if self.streams.remove(&(*peer_id, *stream_id)).is_some() {
+                        debug!("Stream {} removed from map", stream_id);
+                    } else {
+                        debug!("Stream {} was already removed from map", stream_id);
+                    }
+                }
+                
+                // Return the event immediately
+                return Poll::Ready(ToSwarm::GenerateEvent(event));
+            },
+            Poll::Ready(None) => {
+                warn!("Stream close events channel closed unexpectedly");
+            },
+            Poll::Pending => {
+                // No events from the dedicated task, continue
+            }
         }
-
-        std::task::Poll::Pending
+        
+        // Check for regular events
+        if let Some(event) = self.events.pop() {
+            trace!("Returning event from queue: {:?}", event);
+            return Poll::Ready(event);
+        }
+        
+        Poll::Pending
     }
 }
