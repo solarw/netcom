@@ -3,7 +3,28 @@ use futures::AsyncWriteExt;
 use libp2p::{PeerId, Stream};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicU8, Ordering};
 use tracing::{debug, info, warn, error};
+
+/// Stream closure states
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum XStreamState {
+    Open = 0,
+    LocalClosed = 1,
+    RemoteClosed = 2,
+    FullyClosed = 3, // Both sides closed
+}
+
+impl From<u8> for XStreamState {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => XStreamState::LocalClosed,
+            2 => XStreamState::RemoteClosed,
+            3 => XStreamState::FullyClosed,
+            _ => XStreamState::Open,
+        }
+    }
+}
 
 /// XStream struct - represents a pair of streams for data transfer
 #[derive(Debug)]
@@ -14,6 +35,8 @@ pub struct XStream {
     pub peer_id: PeerId,
     // Simple Option for closure notifier
     closure_notifier: Option<mpsc::UnboundedSender<(PeerId, u128)>>,
+    // Stream state (atomic for thread safety)
+    state: Arc<AtomicU8>,
 }
 
 impl XStream {
@@ -31,7 +54,76 @@ impl XStream {
             id,
             peer_id,
             closure_notifier: None,
+            state: Arc::new(AtomicU8::new(XStreamState::Open as u8)),
         }
+    }
+
+    /// Get current stream state
+    pub fn state(&self) -> XStreamState {
+        let value = self.state.load(Ordering::Acquire);
+        XStreamState::from(value)
+    }
+
+    /// Set the stream state with a specific value
+    fn set_state(&self, new_state: XStreamState) {
+        let current_state = self.state();
+        
+        // Apply state transition rules
+        let final_state = match (current_state, new_state) {
+            // If already fully closed, stay closed
+            (XStreamState::FullyClosed, _) => XStreamState::FullyClosed,
+            
+            // If local closed and remote closes, become fully closed
+            (XStreamState::LocalClosed, XStreamState::RemoteClosed) => XStreamState::FullyClosed,
+            
+            // If remote closed and local closes, become fully closed
+            (XStreamState::RemoteClosed, XStreamState::LocalClosed) => XStreamState::FullyClosed,
+            
+            // Otherwise, use the new state
+            (_, new_state) => new_state,
+        };
+        
+        // Update the state
+        self.state.store(final_state as u8, Ordering::Release);
+        info!("Stream {} state changed: {:?} -> {:?}", self.id, current_state, final_state);
+    }
+
+    /// Mark the stream as locally closed
+    fn mark_local_closed(&self) {
+        let current = self.state();
+        match current {
+            XStreamState::Open => self.set_state(XStreamState::LocalClosed),
+            XStreamState::RemoteClosed => self.set_state(XStreamState::FullyClosed),
+            _ => {} // Already locally closed or fully closed
+        }
+    }
+
+    /// Mark the stream as remotely closed
+    fn mark_remote_closed(&self) {
+        let current = self.state();
+        match current {
+            XStreamState::Open => self.set_state(XStreamState::RemoteClosed),
+            XStreamState::LocalClosed => self.set_state(XStreamState::FullyClosed),
+            _ => {} // Already remotely closed or fully closed
+        }
+    }
+
+    /// Check if the stream is closed (either locally, remotely, or both)
+    pub fn is_closed(&self) -> bool {
+        match self.state() {
+            XStreamState::Open => false,
+            _ => true,
+        }
+    }
+
+    /// Check if the stream is closed locally
+    pub fn is_local_closed(&self) -> bool {
+        matches!(self.state(), XStreamState::LocalClosed | XStreamState::FullyClosed)
+    }
+
+    /// Check if the stream is closed remotely 
+    pub fn is_remote_closed(&self) -> bool {
+        matches!(self.state(), XStreamState::RemoteClosed | XStreamState::FullyClosed)
     }
 
     /// Check if a closure notifier is set
@@ -45,77 +137,285 @@ impl XStream {
         self.closure_notifier = Some(notifier);
     }
 
+    /// Helper method to send closure notification when EOF or connection error is detected
+    fn notify_eof(&self, reason: &str) {
+        // Mark as remotely closed first
+        self.mark_remote_closed();
+        
+        if let Some(notifier) = &self.closure_notifier {
+            info!("Sending closure notification for stream {} due to: {}", self.id, reason);
+            
+            match notifier.send((self.peer_id, self.id)) {
+                Ok(_) => info!("Closure notification sent successfully for stream {}", self.id),
+                Err(e) => warn!("Failed to send closure notification for stream {}: {}", self.id, e),
+            }
+        } else {
+            warn!("No closure notifier set for stream {} when closed by: {}", self.id, reason);
+        }
+    }
+
+    /// Validate that the stream is in a valid state for reading
+    fn check_readable(&self) -> Result<(), std::io::Error> {
+        if self.is_remote_closed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                format!("Cannot read from stream {}: remotely closed", self.id)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validate that the stream is in a valid state for writing
+    fn check_writable(&self) -> Result<(), std::io::Error> {
+        if self.is_local_closed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                format!("Cannot write to stream {}: locally closed", self.id)
+            ));
+        }
+        if self.is_remote_closed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                format!("Cannot write to stream {}: remotely closed", self.id)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Checks if an error indicates that the connection was closed by remote
+    fn is_connection_closed_error(&self, e: &std::io::Error) -> bool {
+        matches!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe |
+            std::io::ErrorKind::ConnectionReset |
+            std::io::ErrorKind::ConnectionAborted
+        )
+    }
+
     /// Reads exact number of bytes from the main stream
     pub async fn read_exact(&self, size: usize) -> Result<Vec<u8>, std::io::Error> {
+        // First check if we can read
+        self.check_readable()?;
+        
         let mut buf = vec![0u8; size];
         let stream_main_read = self.stream_main_read.clone();
-        stream_main_read.lock().await.read_exact(&mut buf).await?;
-        Ok(buf)
+        
+        // Acquire the lock and perform the read operation
+        let read_result = {
+            let mut guard = stream_main_read.lock().await;
+            guard.read_exact(&mut buf).await
+        };
+        
+        // Process the result
+        match read_result {
+            Ok(_) => Ok(buf),
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::UnexpectedEof || self.is_connection_closed_error(&e) {
+                    info!("Detected EOF/connection error while reading exact bytes from stream {}: {:?}", self.id, e.kind());
+                    self.notify_eof(&format!("read_exact error: {:?}", e.kind()));
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Reads all data from the main stream to the end
     pub async fn read_to_end(&self) -> Result<Vec<u8>, std::io::Error> {
+        // First check if we can read
+        self.check_readable()?;
+        
         let mut buf: Vec<u8> = Vec::new();
         let stream_main_read = self.stream_main_read.clone();
-        stream_main_read.lock().await.read_to_end(&mut buf).await?;
-        Ok(buf)
+        
+        // Acquire the lock and perform the read operation
+        let read_result = {
+            let mut guard = stream_main_read.lock().await;
+            guard.read_to_end(&mut buf).await
+        };
+        
+        match read_result {
+            Ok(bytes_read) => {
+                info!("Read {} bytes to end from stream {}", bytes_read, self.id);
+                
+                // If we read zero bytes and this is the first read, it might be an EOF
+                if bytes_read == 0 && buf.is_empty() {
+                    info!("Stream {} was already at EOF", self.id);
+                    self.notify_eof("read_to_end returned 0 bytes");
+                }
+                self.notify_eof("read_to_end all");
+                Ok(buf)
+                
+            },
+            Err(e) => {
+                if self.is_connection_closed_error(&e) {
+                    info!("Detected connection error during read_to_end for stream {}: {:?}", self.id, e.kind());
+                    self.notify_eof(&format!("read_to_end error: {:?}", e.kind()));
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Reads available data from the main stream
     pub async fn read(&self) -> Result<Vec<u8>, std::io::Error> {
+        // First check if we can read
+        self.check_readable()?;
+        
         let mut buf: Vec<u8> = Vec::new();
         let stream_main_read = self.stream_main_read.clone();
-        stream_main_read.lock().await.read(&mut buf).await?;
-        Ok(buf)
+        
+        // Acquire the lock and perform the read operation
+        let read_result = {
+            let mut guard = stream_main_read.lock().await;
+            guard.read(&mut buf).await
+        };
+        
+        match read_result {
+            Ok(bytes_read) => {
+                // Check for EOF condition (remote side closed the stream)
+                if bytes_read == 0 {
+                    info!("Detected EOF while reading from stream {}", self.id);
+                    self.notify_eof("read returned 0 bytes");
+                    
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "Remote closed connection"
+                    ));
+                }
+                
+                Ok(buf)
+            },
+            Err(e) => {
+                if self.is_connection_closed_error(&e) {
+                    info!("Detected connection error during read for stream {}: {:?}", self.id, e.kind());
+                    self.notify_eof(&format!("read error: {:?}", e.kind()));
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Writes all data to the main stream
     pub async fn write_all(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
+        // First check if we can write
+        self.check_writable()?;
+        
         let stream_main_write = self.stream_main_write.clone();
-        let mut unlocked = stream_main_write.lock().await;
-        unlocked.write_all(&buf).await?;
-        unlocked.flush().await
+        
+        // Acquire lock, write data, and flush
+        let mut guard = stream_main_write.lock().await;
+        
+        // Try to write
+        match guard.write_all(&buf).await {
+            Ok(_) => {
+                // Write succeeded, try to flush
+                match guard.flush().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        // Check if the error indicates a broken pipe or connection reset
+                        if self.is_connection_closed_error(&e) {
+                            info!("Detected remote closure during flush for stream {}", self.id);
+                            self.notify_eof(&format!("flush error: {:?}", e.kind()));
+                        }
+                        Err(e)
+                    }
+                }
+            },
+            Err(e) => {
+                // Check if the error indicates a broken pipe or connection reset
+                if self.is_connection_closed_error(&e) {
+                    info!("Detected remote closure during write for stream {}", self.id);
+                    self.notify_eof(&format!("write error: {:?}", e.kind()));
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Closes the streams
     pub async fn close(&mut self) -> Result<(), std::io::Error> {
-        info!("[STREAM_CLOSE] Closing XStream with id: {} for peer: {}", self.id, self.peer_id);
+        info!("Closing XStream with id: {} for peer: {}", self.id, self.peer_id);
         
-        if self.has_closure_notifier() {
-            info!("[STREAM_CLOSE] Stream {} has closure notifier before closing", self.id);
-        } else {
-            warn!("[STREAM_CLOSE] No closure notifier set for stream {} of peer {} before closing", self.id, self.peer_id);
+        // If already closed locally, return early
+        if self.is_local_closed() {
+            debug!("Stream {} already locally closed", self.id);
+            return Ok(());
         }
         
-        // Get a lock on the write stream
+        // Mark as locally closed
+        self.mark_local_closed();
+        
+        if self.has_closure_notifier() {
+            debug!("Stream {} has closure notifier before closing", self.id);
+        } else {
+            warn!("No closure notifier set for stream {} of peer {} before closing", self.id, self.peer_id);
+        }
+        
+        // Get a lock on the write stream and close it
         let stream_main_write = self.stream_main_write.clone();
-        let mut unlocked = stream_main_write.lock().await;
         
-        // Flush first
-        unlocked.flush().await?;
+        // Try to flush and close, catching potential errors that indicate closed connection
+        let result = {
+            let mut guard = stream_main_write.lock().await;
+            
+            // Try to flush
+            match guard.flush().await {
+                Ok(_) => {
+                    // Flush worked, try to close
+                    match guard.close().await {
+                        Ok(_) => Ok(()),
+                        Err(e) => {
+                            // Check if error indicates the stream was already closed by remote
+                            if self.is_connection_closed_error(&e) {
+                                info!("Remote already closed connection during close() for stream {}", self.id);
+                                self.mark_remote_closed();
+                                // Return success if remote already closed it
+                                Ok(())
+                            } else {
+                                Err(e)
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    // Check if error indicates the stream was already closed by remote
+                    if self.is_connection_closed_error(&e) {
+                        info!("Remote already closed connection during flush for stream {}", self.id);
+                        self.mark_remote_closed();
+                        // Return success if remote already closed it
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                }
+            }
+        };
         
-        // Then close
-        let result = unlocked.close().await;
-        info!("[STREAM_CLOSE] Network stream close result: {:?}", result);
+        debug!("Network stream close result: {:?}", result);
         
-        info!("[STREAM_CLOSE] close done!!!!!");
-        info!("[STREAM_CLOSE] quic close done1111");
+        // If we detected a connection error, mark it as remotely closed
+        if let Err(ref e) = result {
+            if self.is_connection_closed_error(e) {
+                self.mark_remote_closed();
+            }
+        }
         
-        // Send notification if notifier is set
+        // Send closure notification if notifier is set
         if let Some(notifier) = &self.closure_notifier {
-            info!("[STREAM_CLOSE] Sending closure notification for stream {} of peer {}", self.id, self.peer_id);
+            debug!("Sending closure notification for stream {} of peer {}", self.id, self.peer_id);
             
             // This is non-blocking and returns immediately
             match notifier.send((self.peer_id, self.id)) {
-                Ok(_) => info!("[STREAM_CLOSE] Close notification sent successfully for stream {}", self.id),
-                Err(e) => error!("[STREAM_CLOSE] Failed to send close notification for stream {}: {}", self.id, e),
+                Ok(_) => debug!("Close notification sent successfully for stream {}", self.id),
+                Err(e) => warn!("Failed to send close notification for stream {}: {}", self.id, e),
             }
         } else {
-            warn!("[STREAM_CLOSE] No closure notifier set for stream {} of peer {}", self.id, self.peer_id);
+            warn!("No closure notifier set for stream {} of peer {}", self.id, self.peer_id);
         }
         
         // Add a debug print just before returning
-        info!("[STREAM_CLOSE] Stream close complete for {} - returning result: {:?}", self.id, result);
+        debug!("Stream close complete for {} - state: {:?}, result: {:?}", 
+               self.id, self.state(), result);
         result
     }
 }
@@ -131,6 +431,7 @@ impl Clone for XStream {
             id: self.id,
             peer_id: self.peer_id,
             closure_notifier: self.closure_notifier.clone(),
+            state: self.state.clone(),
         };
         
         if clone.has_closure_notifier() {

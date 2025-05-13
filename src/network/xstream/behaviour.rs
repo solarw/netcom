@@ -37,22 +37,22 @@ impl XStreamNetworkBehaviour {
         let (event_sender, stream_close_events) = mpsc::unbounded_channel();
         
         tokio::spawn(async move {
-            info!("[CLOSURE_TASK] Started dedicated stream closure monitoring task");
+            trace!("[CLOSURE_TASK] Started dedicated stream closure monitoring task");
             
             while let Some((peer_id, stream_id)) = closure_receiver.recv().await {
-                info!("[CLOSURE_TASK] Received closure notification for stream {} from peer {}", stream_id, peer_id);
+                trace!("[CLOSURE_TASK] Received closure notification for stream {} from peer {}", stream_id, peer_id);
                 
                 // Send an event to the behavior
                 match event_sender.send(XStreamEvent::StreamClosed {
                     peer_id,
                     stream_id,
                 }) {
-                    Ok(_) => info!("[CLOSURE_TASK] Successfully sent StreamClosed event to behavior for stream {}", stream_id),
+                    Ok(_) => trace!("[CLOSURE_TASK] Successfully sent StreamClosed event to behavior for stream {}", stream_id),
                     Err(e) => error!("[CLOSURE_TASK] Failed to send StreamClosed event: {}", e),
                 }
             }
             
-            warn!("[CLOSURE_TASK] Stream closure monitoring task exited - channel closed");
+            trace!("[CLOSURE_TASK] Stream closure monitoring task exited - channel closed");
         });
         
         Self {
@@ -301,24 +301,24 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<ToSwarm<Self::ToSwarm, libp2p::swarm::THandlerInEvent<Self>>> {
-        info!("[POLL] Polling XStreamNetworkBehaviour");
+        trace!("[POLL] Polling XStreamNetworkBehaviour");
         
         // First check for events from the dedicated closure task
         match self.stream_close_events.poll_recv(cx) {
             Poll::Ready(Some(event)) => {
                 if let XStreamEvent::StreamClosed { peer_id, stream_id } = &event {
-                    info!("[POLL] Received dedicated task closure notification for stream {} from peer {}", stream_id, peer_id);
+                    trace!("[POLL] Received dedicated task closure notification for stream {} from peer {}", stream_id, peer_id);
                     
                     // Remove the stream from the map if it still exists
                     if self.streams.remove(&(*peer_id, *stream_id)).is_some() {
-                        info!("[POLL] Stream {} removed from map", stream_id);
+                        trace!("[POLL] Stream {} removed from map", stream_id);
                     } else {
-                        info!("[POLL] Stream {} was already removed from map", stream_id);
+                        trace!("[POLL] Stream {} was already removed from map", stream_id);
                     }
                 }
                 
                 // Return the event immediately
-                info!("[POLL] Returning StreamClosed event from dedicated task");
+                trace!("[POLL] Returning StreamClosed event from dedicated task");
                 return Poll::Ready(ToSwarm::GenerateEvent(event));
             },
             Poll::Ready(None) => {
@@ -326,17 +326,17 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
             },
             Poll::Pending => {
                 // No events from the dedicated task, continue
-                info!("[POLL] No events from dedicated closure task");
+                trace!("[POLL] No events from dedicated closure task");
             }
         }
         
         // Check for regular events
         if let Some(event) = self.events.pop() {
-            info!("[POLL] Returning event from queue: {:?}", event);
+            trace!("[POLL] Returning event from queue: {:?}", event);
             return Poll::Ready(event);
         }
         
-        info!("[POLL] No events to process, returning Pending");
+        trace!("[POLL] No events to process, returning Pending");
         Poll::Pending
     }
 }
