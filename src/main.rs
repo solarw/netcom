@@ -20,10 +20,6 @@ use tracing_subscriber::{fmt, EnvFilter};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    // Remove the connect option since we're using interactive commands
-    // /// Optional peer address to connect to (e.g. "/ip4/127.0.0.1/udp/12345/quic-v1")
-    // #[arg(short, long)]
-    // connect: Option<String>,
     /// Disable mDNS discovery
     #[arg(long, default_value_t = true)]
     disable_mdns: bool,
@@ -39,6 +35,10 @@ struct Args {
     /// Specify the port to listen on (0 = random port)
     #[arg(short, long, default_value_t = 0)]
     port: u16,
+    
+    /// Run in Kademlia server mode (for relay/bootstrap nodes)
+    #[arg(long, default_value_t = false)]
+    kad_server: bool,
 }
 
 #[tokio::main]
@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create NetworkNode
     let enable_mdns = false;
     let (mut node, cmd_tx, mut event_rx, _peer_id) =
-        NetworkNode::new(local_key, por, enable_mdns).await?;
+        NetworkNode::new(local_key, por, enable_mdns, args.kad_server).await?;
 
     let local_peer_id = node.local_peer_id(); // Save local peer_id
 

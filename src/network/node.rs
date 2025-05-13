@@ -38,6 +38,7 @@ impl NetworkNode {
         local_key: identity::Keypair,
         por: super::xauth::por::por::ProofOfRepresentation,
         enable_mdns: bool,
+        kad_server_mode: bool, // Add parameter
     ) -> Result<
         (
             Self,
@@ -53,7 +54,7 @@ impl NetworkNode {
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
             .with_quic()
-            .with_behaviour(|key| make_behaviour(key, por, enable_mdns))?
+            .with_behaviour(|key| make_behaviour(key, por, enable_mdns, kad_server_mode))?
             .with_swarm_config(|c| {
                 c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
             })
