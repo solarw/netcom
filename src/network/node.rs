@@ -384,7 +384,6 @@ impl NetworkNode {
                     })
                     .await;
 
-                println!("111111111111111111111111111111 {}", num_established);
 
                 // If no connections remain, emit PeerDisconnected
                 if num_established == 0 {
@@ -743,8 +742,8 @@ impl NetworkNode {
                     }
                 }
             }
-            rest => {
-                println!("rest ndide events {:?}", rest);
+            _ => {
+             
             }
         }
     }

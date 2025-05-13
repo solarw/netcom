@@ -136,10 +136,8 @@ impl ConnectionData {
         if (self.is_some_failed()){
             None
         } else if conn_timeout && !self.is_fully_authenticated() {
-            println!("111111111111111111111");
             Some(AuthDirection::Both)
         } else if inbound_timeout && outbound_timeout {
-            println!("22222222222222222222222");
             Some(AuthDirection::Both)
         } else if inbound_timeout {
             Some(AuthDirection::Inbound)

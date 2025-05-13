@@ -14,7 +14,7 @@ use std::{collections::HashMap, time::Duration};
 
 mod network;
 use libp2p::{Multiaddr, PeerId};
-use tracing::info;
+use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[derive(Parser, Debug)]
@@ -126,57 +126,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         if parts.len() >= 3 {
                             let peer_id_str = parts[1];
                             let message = parts[2];
-
+                    
                             match PeerId::from_str(peer_id_str) {
                                 Ok(peer_id) => {
-                                    println!("Opening stream to {} to send: {}", peer_id, message);
-
-                                    // Use the commander to open a stream directly
+                                    info!("🔗 Opening stream to {} to send message", peer_id);
+                    
+                                    // Используем commander для открытия потока
                                     match cmd_clone.open_stream(peer_id).await {
                                         Ok(mut stream) => {
-                                            println!("Stream opened to {}", peer_id);
-                                    
-                                            // Send the message
+                                            info!("📤 Stream opened to {}", peer_id);
+                    
+                                            // Отправляем сообщение
                                             let message_bytes = message.as_bytes().to_vec();
-                                            println!("Sending {} bytes: '{}'", message_bytes.len(), message);
-                                    
-                                            // Write to the stream
+                                            info!("📄 Sending message to {}: '{}'", peer_id, message);
+                    
                                             match stream.write_all(message_bytes).await {
                                                 Ok(_) => {
-                                                    println!("Message sent successfully");
-                                                    // Wait a bit before closing
-                                                    tokio::time::sleep(Duration::from_millis(500)).await;
+                                                    info!("✅ Message sent successfully to {}", peer_id);
+                    
+                                                    // Ждем немного перед закрытием потока
+                                                    tokio::time::sleep(Duration::from_millis(100)).await;
                                                 }
-                                                Err(e) => println!("Failed to send message: {}", e),
+                                                Err(e) => error!("❌ Failed to send message: {}", e),
                                             }
-                                    
-                                            // Check if stream has notifier before closing
-                                            if stream.has_closure_notifier() {
-                                                println!("Stream has closure notifier set before closing");
-                                            } else {
-                                                println!("WARNING: Stream missing closure notifier before closing!");
-                                            }
-                                    
-                                            // Close the stream explicitly
+                    
+                                            // Закрываем поток
                                             match stream.close().await {
-                                                Ok(_) => println!("Stream closed successfully"),
-                                                Err(e) => println!("Error closing stream: {}", e),
+                                                Ok(_) => info!("🔒 Stream closed successfully"),
+                                                Err(e) => warn!("⚠️ Error closing stream: {}", e),
                                             }
-                                            
-                                            // After closing, sleep a bit to allow the closure notification to be processed
-                                            println!("Waiting for closure notification to be processed...");
-                                            tokio::time::sleep(Duration::from_secs(1)).await;
-                                            println!("Done waiting");
                                         }
                                         Err(e) => {
-                                            println!("Failed to open stream to {}: {}", peer_id, e)
+                                            error!("❌ Failed to open stream to {}: {}", peer_id, e)
                                         }
                                     }
                                 }
-                                Err(e) => println!("Invalid peer ID format: {}", e),
+                                Err(e) => error!("❌ Invalid peer ID format: {}", e),
                             }
                         } else {
-                            println!("Usage: stream <peer_id> <message>");
+                            info!("ℹ️ Usage: stream <peer_id> <message>");
                         }
                     } else if input.starts_with("find") {
                         // Format: find <peer_id>
@@ -317,13 +305,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
                 NetworkEvent::IncomingStream { stream } => {
                     let peer_id = stream.peer_id;
-                    println!("✅✅✅✅✅✅ Stream from {peer_id}");
-
-                    let some = stream.clone().read_to_end().await;
-
-                    let s =
-                        String::from_utf8(some.unwrap()).expect("Our bytes should be valid utf8");
-                    println!("111111111111111111111111111111111 We read {} ", s);
+                    let stream_id = stream.id;
+                    
+                    // Чистый, понятный вывод с эмодзи
+                    info!("📥 Received stream from {} (id: {})", peer_id, stream_id);
+                
+                    // Используем клон для чтения
+                    let stream_clone = stream.clone();
+                    
+                    // Запускаем чтение в отдельной задаче
+                    tokio::spawn(async move {
+                        // Читаем данные из потока
+                        match stream_clone.read_to_end().await {
+                            Ok(data) => {
+                                // Преобразуем данные в UTF-8 строку, если возможно
+                                match String::from_utf8(data.clone()) {
+                                    Ok(message) => {
+                                        // Чистый современный формат с эмодзи
+                                        info!("📩 Message received from {}: '{}'", peer_id, message.trim());
+                                    },
+                                    Err(_) => {
+                                        info!("📦 Binary data received from {}: {} bytes", peer_id, data.len());
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                warn!("❌ Error reading from stream {}: {}", stream_id, e);
+                            }
+                        }
+                        
+                        // Поток закроется автоматически при выходе из области видимости
+                        info!("🔒 Finished processing stream {} from {}", stream_id, peer_id);
+                    });
                 }
 
                 // Handle Kademlia DHT events for better visibility during testing

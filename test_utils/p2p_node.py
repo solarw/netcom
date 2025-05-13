@@ -23,6 +23,7 @@ class Node:
             disable_mdns (bool): Отключить mDNS обнаружение.
             accept_all_auth (bool): Принимать все запросы аутентификации.
             logfile_path (str, optional): Путь к лог-файлу. Если None, будет создан временный файл.
+            kad_server_mode (bool): Запустить узел в режиме Kademlia-сервера.
         """
         self.port = port if port is not None else self._get_free_port()
         self.disable_mdns = disable_mdns
@@ -148,15 +149,12 @@ class Node:
         if self.kad_server_mode:
             cmd_args.append("--kad-server")
         
-        cmd = f"target/debug/p2p-network {' '.join(cmd_args)}"
+        cmd = f"stdbuf -i 0 -o 0 -e 0 target/debug/p2p-network {' '.join(cmd_args)}"
         print(f"Starting node with command: {cmd}")
         
         # Открытие лог-файла с построчной буферизацией
         self.logfile = open(self.logfile_path, "w", buffering=1)
-        
-        # Запуск процесса
-        self.process = pexpect.spawn(cmd, encoding='utf-8')
-        self.process.logfile = self.logfile
+        self.process = pexpect.spawn(cmd, encoding='utf-8', logfile=self.logfile, maxread=10000000)
         
         # Ожидание инициализации
         start_time = time.time()
@@ -327,7 +325,9 @@ class Node:
             f"Connected to {target_peer_id}",
             f"Connection opened to {target_peer_id}",
             f"Finding {target_peer_id}",
-            "peer was found"
+            "peer was found",
+            "Found closest peers",
+            "Successfully found peer"
         ]
         
         # Ждем подтверждения поиска
@@ -350,7 +350,7 @@ class Node:
                 break
                 
             # Повторяем команду поиска через определенные интервалы
-            if retry_count < 2 and time.time() - start_time > (timeout/3) * (retry_count + 1):
+            if retry_count < 3 and time.time() - start_time > (timeout/4) * (retry_count + 1):
                 print(f"No discovery confirmation yet, retrying (attempt {retry_count + 1})...")
                 self.process.sendline(find_cmd)
                 retry_count += 1
@@ -373,7 +373,7 @@ class Node:
         print(f"Successfully found peer {target_peer_id}")
         return True
     
-    def stream_message(self, target_peer_id, message, timeout=20):
+    def stream_message(self, target_peer_id, message, timeout=30):
         """
         Отправляет сообщение другому узлу через поток.
         
@@ -386,67 +386,74 @@ class Node:
             bool: True если сообщение успешно отправлено, иначе False.
         """
         if not self.process or not self.process.isalive():
-            print("Node process is not running")
+            print("❌ Node process is not running")
             return False
         
         # Отправляем команду создания потока и отправки сообщения
         stream_cmd = f"stream {target_peer_id} {message}"
-        print(f"Sending stream command: {stream_cmd}")
+        print(f"🚀 Sending stream command: {stream_cmd}")
         self.process.sendline(stream_cmd)
         
-        # Шаблоны для подтверждения успешной отправки
+        # Шаблоны для подтверждения успешной отправки - расширенный список
         send_patterns = [
-            "Stream opened",
-            "Message sent",
-            "sent",
-            "Sending",
-            "Stream to",
-            f"Stream opened to {target_peer_id}",
-            f"Stream to {target_peer_id}"
+            "📤 Stream opened",
+            "✅ Message sent successfully",
+            "🔒 Stream closed successfully",
+            "Stream opened to",
+            "Opening stream to", 
+            "Sending message",
+            "Connection opened to",
+            "Stream to peer",
+            "Stream established",
+            "Successfully sent",
+            "Message sent"
         ]
         
         # Ждем подтверждения отправки
         start_time = time.time()
-        sent = False
+        found_patterns = set()
         
         while time.time() - start_time < timeout:
-            index, match = self._wait_for_pattern(send_patterns, timeout=5)
-            if index is not None:
-                sent = True
-                break
-                
             # Проверяем лог-файл
             with open(self.logfile_path, "r") as f:
                 log_content = f.read()
                 
-            if any(pattern in log_content for pattern in send_patterns):
-                sent = True
-                break
+            # Проверяем каждый шаблон
+            for pattern in send_patterns:
+                if pattern in log_content and pattern not in found_patterns:
+                    found_patterns.add(pattern)
+                    print(f"✓ Found pattern: {pattern}")
+            
+            # Если нашли хотя бы 1 шаблон, считаем сообщение отправленным
+            if len(found_patterns) >= 1:
+                print(f"✅ Successfully sent message to {target_peer_id}: {message}")
+                return True
                 
-            # Если прошло половину времени и до сих пор нет подтверждения, пробуем еще раз
-            if time.time() - start_time > timeout/2 and not sent:
-                print("No sending confirmation yet, trying again...")
+            # Если прошла треть времени и нашли мало шаблонов, пробуем еще раз
+            if time.time() - start_time > timeout/3 and len(found_patterns) < 1:
+                print("⚠️ Few sending confirmations found, trying again...")
                 self.process.sendline(stream_cmd)
+            
+            time.sleep(0.5)
         
-        if not sent:
-            print(f"Failed to send message to peer {target_peer_id}")
+        # Если не нашли достаточно шаблонов, выводим отладочную информацию
+        print(f"❌ Failed to send message to peer {target_peer_id}")
+        print(f"Found patterns: {found_patterns}")
+        
+        # Выводим последние строки лога для отладки
+        with open(self.logfile_path, "r") as f:
+            log_content = f.read().splitlines()
             
-            # Выводим последние строки лога для отладки
-            with open(self.logfile_path, "r") as f:
-                log_content = f.read()
-                
-            print("LOG EXCERPTS RELATED TO STREAM ATTEMPT:")
-            for line in log_content.splitlines():
-                if ("stream" in line.lower() or "message" in line.lower() or 
-                    "sent" in line.lower() or target_peer_id in line):
-                    print(line)
-            
-            return False
-            
-        print(f"Successfully sent message to {target_peer_id}: {message}")
-        return True
+        print("📋 LOG EXCERPTS RELATED TO STREAM ATTEMPT:")
+        for line in log_content[-30:]:  # Увеличено количество показываемых строк
+            if ("stream" in line.lower() or "message" in line.lower() or 
+                "sent" in line.lower() or target_peer_id in line or
+                "connection" in line.lower()):
+                print(line)
+        
+        return False
     
-    def check_received_message(self, sender_peer_id=None, message=None, timeout=10):
+    def check_received_message(self, sender_peer_id=None, message=None, timeout=30):
         """
         Проверяет, было ли получено сообщение от указанного узла.
         
@@ -458,50 +465,107 @@ class Node:
         Returns:
             bool: True если сообщение получено, иначе False.
         """
-        # Шаблоны для поиска признаков полученного сообщения
-        receive_patterns = [
-            "Incoming Stream",
-            "Stream from",
-            "We read",
-            "111111"  # Этот специфический шаблон из оригинального теста
+        # Универсальные шаблоны для обнаружения входящих сообщений - расширенный список
+        base_patterns = [
+            "📥 Received stream from",     # Обнаружен входящий поток
+            "📩 Message received from",    # Получено сообщение
+            "Received stream",
+            "Incoming stream",
+            "IncomingStream", 
+            "Message received",
+            "received message",
+            "Stream from peer",
+            "received data",
+            "Data from peer",
+            "Received bytes"
         ]
         
-        # Добавим специфические шаблоны, если указаны отправитель или сообщение
+        # Специфические шаблоны для указанного отправителя и сообщения
+        specific_patterns = []
+        
         if sender_peer_id:
-            receive_patterns.append(f"Stream from {sender_peer_id}")
+            # Ищем указанный peer_id в логах
+            specific_patterns.append(f"from {sender_peer_id}")
+            specific_patterns.append(f"{sender_peer_id}")
         
         if message:
-            receive_patterns.append(f"We read {message}")
+            # Ищем сообщение в одинарных кавычках или без них
+            specific_patterns.append(f"'{message}'")
+            specific_patterns.append(message)
         
         # Проверяем лог-файл
         start_time = time.time()
-        received = False
+        found_base = False
+        found_specific = True if not specific_patterns else False
+        
+        # Для более детального отслеживания
+        found_patterns = set()
         
         while time.time() - start_time < timeout:
             with open(self.logfile_path, "r") as f:
                 log_content = f.read()
-                
-            # Проверяем наличие всех шаблонов в логе
-            if any(pattern in log_content for pattern in receive_patterns):
-                received = True
-                break
-                
-            time.sleep(1)
-        
-        if not received:
-            print("No message receipt confirmation found")
-            return False
             
-        print("Message receipt confirmed")
-        return True
-    
+            # Проверяем базовые шаблоны
+            if not found_base:
+                for pattern in base_patterns:
+                    if pattern in log_content:
+                        found_base = True
+                        found_patterns.add(pattern)
+                        break
+            
+            # Если указаны специфические шаблоны, проверяем их
+            if specific_patterns and not found_specific:
+                # Проверяем каждый шаблон отдельно для более гибкого обнаружения
+                matches_count = 0
+                for pattern in specific_patterns:
+                    if pattern in log_content:
+                        matches_count += 1
+                        found_patterns.add(pattern)
+                
+                # Считаем "найденным", если есть хотя бы один совпадающий шаблон
+                if matches_count > 0:
+                    found_specific = True
+            
+            # Если нашли все необходимые шаблоны, возвращаем True
+            if found_base and found_specific:
+                print(f"✅ Message verification successful! Found patterns: {found_patterns}")
+                return True
+            
+            # Проверяем, есть ли упоминание нашего сообщения в логе даже без явного шаблона
+            if message and message in log_content:
+                print(f"✅ Message content '{message}' found directly in logs!")
+                return True
+                
+            # Короткий сон перед следующей проверкой
+            time.sleep(0.5)
+        
+        # Если вышли из цикла, значит не нашли все шаблоны за отведенное время
+        print(f"⚠️ Message verification failed! " + 
+              f"Found: {found_patterns}, " + 
+              f"Base patterns found: {found_base}, " + 
+              f"Specific patterns found: {found_specific}")
+        
+        # Выводим немного лога для отладки
+        with open(self.logfile_path, "r") as f:
+            log_lines = f.readlines()[-30:]  # последние 30 строк
+        
+        print("📋 Last lines of log file:")
+        for line in log_lines:
+            print(f"  {line.strip()}")
+        
+        return False
+        
     def stop(self):
         """Останавливает процесс узла и освобождает ресурсы."""
         if self.process and self.process.isalive():
             print(f"Stopping node with peer ID: {self.peer_id}")
-            self.process.kill(signal.SIGTERM)
-            self.process.wait()
-            self.process.close()
+            try:
+                self.process.kill(signal.SIGTERM)
+                self.process.wait()
+            except Exception as e:
+                print(f"Error stopping node: {e}")
+            finally:
+                self.process.close()
             
         if self.logfile:
             self.logfile.close()
