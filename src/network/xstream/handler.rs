@@ -110,7 +110,7 @@ impl XStreamHandler {
 
         self.streams.push(xstream.clone());
         self.outgoing_events
-            .push(XStreamHandlerEvent:: IncomingStreamEstablished {
+            .push(XStreamHandlerEvent::IncomingStreamEstablished {
                 stream_id,
                 stream: xstream,
             });
@@ -120,11 +120,12 @@ impl XStreamHandler {
         println!("OUTBOUND");
         let stream_id = self.id_iter.next().unwrap();
         let (read, write) = AsyncReadExt::split(stream);
-
+    
         let xstream = XStream::new(stream_id, self.peer_id, read, write);
+        self.streams.push(xstream.clone());
         self.outgoing_events
-            .push(XStreamHandlerEvent:: OutboundStreamEstablished{
-                stream_id: 0,
+            .push(XStreamHandlerEvent::OutboundStreamEstablished {
+                stream_id, // Use the correct stream_id instead of 0
                 stream: xstream,
             });
     }
@@ -196,10 +197,8 @@ impl ConnectionHandler for XStreamHandler {
     }
 
     fn connection_keep_alive(&self) -> bool {
-        //!self.streams.is_empty()
-        true
+        !self.streams.is_empty() // Uncomment this line
     }
-
     fn poll(
         &mut self,
         _cx: &mut Context<'_>,

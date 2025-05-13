@@ -69,90 +69,32 @@ impl XStreamNetworkBehaviour {
         });
     }
 
-    /// Получает XStream по идентификатору пира и потока
-    pub fn get_stream(&self, peer_id: PeerId, stream_id: u128) -> Option<&XStream> {
-        self.streams.get(&(peer_id, stream_id))
+    pub fn notify_stream_closed(&mut self, peer_id: PeerId, stream_id: u128) {
+        // Remove the stream from the active streams map
+        self.streams.remove(&(peer_id, stream_id));
+        
+        // Generate the appropriate event
+        self.events.push(ToSwarm::GenerateEvent(XStreamEvent::StreamClosed {
+            peer_id,
+            stream_id,
+        }));
     }
 
-    /// Получает изменяемый XStream по идентификатору пира и потока
-    pub fn get_stream_mut(&mut self, peer_id: PeerId, stream_id: u128) -> Option<&mut XStream> {
-        self.streams.get_mut(&(peer_id, stream_id))
-    }
-
-    /// Закрывает поток с указанным идентификатором пира и потока
     pub async fn close_stream(
         &mut self,
         peer_id: PeerId,
         stream_id: u128,
     ) -> Result<(), std::io::Error> {
         if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
+            // First close the actual stream
             let result = stream.close().await;
-            // Событие о закрытии потока будет отправлено из handler'а
+            
+            // Then manually generate the closure event
+            self.notify_stream_closed(peer_id, stream_id);
+            
             return result;
         }
         Ok(())
-    }
-
-    /// Отправляет данные в указанный поток
-    pub async fn send_data(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: u128,
-        data: Vec<u8>,
-    ) -> Result<(), std::io::Error> {
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            return stream.write_all(data).await;
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Stream not found",
-        ))
-    }
-
-    /// Читает данные из указанного потока
-    pub async fn read_data(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: u128,
-    ) -> Result<Vec<u8>, std::io::Error> {
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            return stream.read().await;
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Stream not found",
-        ))
-    }
-
-    /// Читает точное количество байт из указанного потока
-    pub async fn read_exact(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: u128,
-        size: usize,
-    ) -> Result<Vec<u8>, std::io::Error> {
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            return stream.read_exact(size).await;
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Stream not found",
-        ))
-    }
-
-    /// Читает все данные из указанного потока до конца
-    pub async fn read_to_end(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: u128,
-    ) -> Result<Vec<u8>, std::io::Error> {
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            return stream.read_to_end().await;
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Stream not found",
-        ))
     }
 }
 
