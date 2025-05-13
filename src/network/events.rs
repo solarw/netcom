@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use libp2p::{swarm::ConnectionId, Multiaddr, PeerId, StreamProtocol};
-use super::{xauth::events::PorAuthEvent, xstream::manager::XStream};
+use super::{xauth::events::PorAuthEvent, xstream::xstream::XStream};
 
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {

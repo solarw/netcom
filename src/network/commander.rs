@@ -4,7 +4,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::commands::NetworkCommand;
 use super::xauth::definitions::AuthResult;
-use super::xstream::manager::XStream;
+use super::xstream::xstream::XStream;
+
 
 pub struct Commander {
     cmd_tx: mpsc::Sender<NetworkCommand>,

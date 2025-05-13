@@ -9,99 +9,10 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use crate::network::events::NetworkEvent;
 
-/// Константа с протоколом для потоков XStream
-const XSTREAM_PROTOCOL: StreamProtocol = StreamProtocol::new("/xstream");
+use super::consts::XSTREAM_PROTOCOL;
+use super::utils::IdIterator;
+use super::xstream::XStream;
 
-/// Итератор для генерации уникальных ID
-struct IdIterator {
-    current: u128,
-}
-
-impl IdIterator {
-    pub fn new() -> Self {
-        Self { current: 0 }
-    }
-}
-
-impl Iterator for IdIterator {
-    type Item = u128;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current;
-        self.current = if current < u128::MAX { current + 1 } else { 0 };
-        Some(current)
-    }
-}
-
-/// Структура для XStream - представляет собой пару потоков для данных и ошибок
-#[derive(Debug, Clone)]
-pub struct XStream {
-    pub stream_main_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
-    pub stream_main_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
-    pub stream_error_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
-    pub stream_error_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
-    pub id: u128,
-    pub peer_id: PeerId,
-}
-
-impl XStream {
-    /// Создает новый XStream из компонентов
-    pub fn new(
-        id: u128,
-        peer_id: PeerId,
-        stream_main_read: futures::io::ReadHalf<Stream>,
-        stream_main_write: futures::io::WriteHalf<Stream>,
-        stream_error_read: futures::io::ReadHalf<Stream>,
-        stream_error_write: futures::io::WriteHalf<Stream>,
-    ) -> Self {
-        Self {
-            stream_main_read: Arc::new(Mutex::new(stream_main_read)),
-            stream_main_write: Arc::new(Mutex::new(stream_main_write)),
-            stream_error_read: Arc::new(Mutex::new(stream_error_read)),
-            stream_error_write: Arc::new(Mutex::new(stream_error_write)),
-            id,
-            peer_id,
-        }
-    }
-
-    /// Читает точное количество байтов из основного потока
-    pub async fn read_exact(&self, size: usize) -> Result<Vec<u8>, std::io::Error> {
-        let mut buf = vec![0u8; size];
-        let stream_main_read = self.stream_main_read.clone();
-        stream_main_read.lock().await.read_exact(&mut buf).await?;
-        Ok(buf)
-    }
-
-    /// Читает все данные из основного потока до конца
-    pub async fn read_to_end(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut buf: Vec<u8> = Vec::new();
-        let stream_main_read = self.stream_main_read.clone();
-        stream_main_read.lock().await.read_to_end(&mut buf).await?;
-        Ok(buf)
-    }
-
-    /// Читает доступные данные из основного потока
-    pub async fn read(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut buf: Vec<u8> = Vec::new();
-        let stream_main_read = self.stream_main_read.clone();
-        stream_main_read.lock().await.read(&mut buf).await?;
-        Ok(buf)
-    }
-
-    /// Записывает все данные в основной поток
-    pub async fn write_all(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
-        let stream_main_write = self.stream_main_write.clone();
-        let mut unlocked = stream_main_write.lock().await;
-        unlocked.write_all(&buf).await
-    }
-
-    /// Закрывает потоки
-    pub async fn close(&mut self) -> Result<(), std::io::Error> {
-        let stream_main_write = self.stream_main_write.clone();
-        let mut unlocked = stream_main_write.lock().await;
-        unlocked.close().await
-    }
-}
 
 /// Менеджер для управления потоками XStream
 pub struct StreamManager {
