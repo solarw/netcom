@@ -100,7 +100,6 @@ impl NetworkNode {
 
     pub async fn run(&mut self) {
         loop {
-            println!("loop");
             tokio::select! {
                 Some(cmd) = self.cmd_rx.recv() => {
                     if let NetworkCommand::Shutdown = cmd {

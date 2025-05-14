@@ -11,6 +11,8 @@ classifiers = [
 [tool.poetry.dependencies]
 python = "^3.8"
 maturin = "^1.0.0"
+prompt-toolkit = "^3.0.51"
+patchelf = "^0.17.2.2"
 
 [build-system]
 requires = ["maturin>=1.0.0"]

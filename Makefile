@@ -7,7 +7,7 @@ VENV := $(shell poetry env info -p 2>/dev/null)
 # Check if Maturin is available in the venv
 MATURIN := $(shell poetry run command -v maturin 2> /dev/null)
 
-.PHONY: all setup clean build develop test examples install-deps check-deps update-deps docs
+.PHONY: all setup clean build develop test examples install-deps check-deps update-deps docs run run_server check_prompt_toolkit
 
 # Default target - build the project
 all: build
@@ -46,6 +46,8 @@ ifndef MATURIN
 	@echo "🔄 Maturin not found, installing..."
 	@poetry add --dev maturin
 endif
+	@echo "🔄 Installing prompt_toolkit for interactive console..."
+	@poetry add prompt_toolkit
 	@echo "✅ Dependencies installed"
 
 # Build the project
@@ -57,7 +59,13 @@ build:
 # Development build (for local testing)
 develop:
 	@echo "🔨 Building development version with Maturin..."
-	@poetry run maturin develop
+	@PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 poetry run maturin develop
+	@echo "Making p2p_network module available..."
+	@mkdir -p p2p_network
+	@if [ ! -f p2p_network/__init__.py ]; then \
+		cp -f $(shell find . -name "__init__.py" -path "*/p2p_network/*" | head -n1) p2p_network/ 2>/dev/null || \
+		echo 'from p2p_network_py import *' > p2p_network/__init__.py; \
+	fi
 	@echo "✅ Development build complete"
 
 # Run tests
@@ -71,6 +79,26 @@ examples: develop
 	@echo "🚀 Running examples..."
 	@echo "  - To run async node example: poetry run python examples/async_node.py"
 	@echo "  - To run interactive node example: poetry run python examples/interactive_node.py"
+
+# Run the interactive node application
+run: develop check_prompt_toolkit
+	@echo "🚀 Running interactive node application..."
+	@poetry run python examples/interactive_node.py
+
+# Run the interactive node application in Kademlia server mode
+run_server: develop check_prompt_toolkit
+	@echo "🚀 Running interactive node application in Kademlia server mode..."
+	@poetry run python examples/interactive_node.py --kad-server --port 33333 --disable-mdns
+
+# Check if prompt_toolkit is installed and install if not
+check_prompt_toolkit:
+	@echo "🔍 Checking for prompt_toolkit..."
+	@if ! poetry run python -c "import prompt_toolkit" 2>/dev/null; then \
+		echo "🔄 Installing prompt_toolkit..."; \
+		poetry add prompt_toolkit; \
+	else \
+		echo "✅ prompt_toolkit is already installed"; \
+	fi
 
 # Check for outdated dependencies
 check-deps:

@@ -1,5 +1,3 @@
-# p2p_network/__init__.py
-
 from p2p_network_py import Node, PeerId, KeyPair, generate_keypair, peer_id_from_keypair
 
 __version__ = "0.1.0"
