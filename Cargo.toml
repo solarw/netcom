@@ -31,6 +31,7 @@ byteorder = "1.5.0"
 # PyO3 dependencies for Python bindings
 pyo3 = { version = "^0.20", features = ["extension-module"] }
 pyo3-asyncio = { version = "0.20.0", features = ["async-channel", "tokio", "attributes", "tokio-runtime", "clap", "async-std", "async-std-runtime"] }
+base64 = "0.22.1"
 
 
 

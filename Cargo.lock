@@ -2589,6 +2589,7 @@ name = "p2p-network"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "byteorder",
  "clap 4.5.37",
  "ctrlc",
