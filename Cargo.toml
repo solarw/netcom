@@ -3,6 +3,11 @@ name = "p2p-network"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "p2p_network_py"
+crate-type = ["cdylib"]
+
+
 [dependencies]
 libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics']}
 
@@ -21,3 +26,17 @@ libp2p-stream = { path = "/home/solarw/hyperion/rust-libp2p/protocols/stream"}
 
 anyhow = "1.0.98"
 byteorder = "1.5.0"
+
+
+# PyO3 dependencies for Python bindings
+pyo3 = { version = "^0.20", features = ["extension-module"] }
+pyo3-asyncio = { version = "0.20.0", features = ["async-channel", "tokio", "attributes", "tokio-runtime", "clap", "async-std", "async-std-runtime"] }
+
+
+
+
+# Keep libp2p-stream but as a local path dependency if needed
+# libp2p-stream = { path = "/home/solarw/hyperion/rust-libp2p/protocols/stream" }
+
+[package.metadata.maturin]
+name = "p2p_network_py"

@@ -1,20 +1,18 @@
 [tool.poetry]
-name = "p2p-kad-tests"
+name = "p2p-network"
 version = "0.1.0"
-description = "Kademlia discovery testing for P2P network"
+description = "Python bindings for p2p-network Rust library"
 authors = ["Your Name <your.email@example.com>"]
-package-mode = false
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-pytest = "^7.4.0"
-pexpect = "^4.8.0"
-
-[poetry.group.dev.dependencies]
+maturin = "^1.0.0"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["maturin>=1.0.0"]
+build-backend = "maturin"
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
