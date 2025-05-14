@@ -181,7 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     println!("Searching for peer: {} using Kademlia DHT", peer_id);
 
                                     // Search for addresses only, don't connect
-                                    match cmd_clone.search_peer_addresses(peer_id).await {
+                                    match cmd_clone.search_peer_addresses(peer_id, Some(1)).await {
                                         Ok(addresses) => {
                                             if addresses.is_empty() {
                                                 println!("No addresses found for peer {}", peer_id);

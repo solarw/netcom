@@ -385,6 +385,7 @@ impl Node {
         &self,
         py: Python<'py>,
         peer_id: &PyPeerId,
+        timeout_secs: Option<u64>
     ) -> PyResult<&'py PyAny> {
         let commander = self.commander.clone();
         let peer_id = peer_id.inner.clone();
@@ -399,7 +400,7 @@ impl Node {
             };
 
             // Call search_peer_addresses on the commander
-            match cmd.search_peer_addresses(peer_id).await {
+            match cmd.search_peer_addresses(peer_id, timeout_secs).await {
                 Ok(addresses) => {
                     let addr_strings: Vec<String> =
                         addresses.iter().map(|addr| addr.to_string()).collect();
