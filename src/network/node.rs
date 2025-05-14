@@ -448,8 +448,7 @@ impl NetworkNode {
                 self.handle_behaviour_event(event).await;
             }
 
-            rest => {
-                println!("!!! Rest sawrm {:?} ", rest);
+            _ => {
             }
         }
     }

@@ -38,7 +38,7 @@ pub struct Node {
     /// Queue of received events
     event_queue: Arc<Mutex<VecDeque<NetworkEvent>>>,
     /// Local peer ID
-    peer_id: Option<PyPeerId>,
+    peer_id: PyPeerId,
     /// Is the node running?
     running: Arc<Mutex<bool>>,
     /// Keypair for the node
@@ -58,7 +58,7 @@ impl Node {
             commander: Arc::new(Mutex::new(None)),
             cmd_tx: Arc::new(Mutex::new(None)),
             event_queue: Arc::new(Mutex::new(VecDeque::new())),
-            peer_id: None,
+            peer_id: key_pair.to_peer_id(),
             running: Arc::new(Mutex::new(false)),
             key_pair,
         }
@@ -478,16 +478,13 @@ impl Node {
     }
     
     /// Get the local peer ID
-    fn peer_id(&self) -> PyResult<Option<PyPeerId>> {
+    fn peer_id(&self) -> PyResult<PyPeerId> {
         Ok(self.peer_id.clone())
     }
     
     /// Get info about the node
     fn info(&self) -> PyResult<String> {
-        let peer_id = match &self.peer_id {
-            Some(id) => id.to_string(),
-            None => "Not started".to_string(),
-        };
+        let peer_id = self.peer_id.to_string();
         
         let running = self.runtime.block_on(async {
             *self.running.lock().await

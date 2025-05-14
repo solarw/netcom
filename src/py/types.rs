@@ -19,7 +19,7 @@ impl KeyPair {
         }
     }
     
-    fn to_peer_id(&self) -> PeerId {
+    pub fn to_peer_id(&self) -> PeerId {
         PeerId {
             inner: self.inner.public().to_peer_id(),
         }
