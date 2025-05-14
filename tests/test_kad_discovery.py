@@ -201,7 +201,7 @@ class NodeTool:
         await self.node.find(peer_id)
         
         # Ждем немного, чтобы поиск успел выполниться
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         
         # Получаем найденные адреса
         addresses = await self.node.search_peer_addresses(peer_id)
@@ -465,7 +465,7 @@ async def test_p2p_network():
         assert await node3.connect_and_wait_auth(node2_address, node2_peer_id), "Node 3 не смог подключиться и аутентифицироваться с Node 2"
         
         # Проверяем успешную взаимную аутентификацию между node3 и node2
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.1)
         assert node3.is_mutually_authenticated(node2_peer_id), "Node 3 не завершил взаимную аутентификацию с Node 2"
         assert node2.is_mutually_authenticated(node3_peer_id), "Node 2 не завершил взаимную аутентификацию с Node 3"
         
