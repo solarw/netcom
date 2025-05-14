@@ -79,15 +79,6 @@ impl NetworkNode {
         ))
     }
 
-    pub fn is_peer_authenticated(&self, peer_id: &PeerId) -> bool {
-        self.authenticated_peers.contains(peer_id)
-    }
-
-    async fn find_peer_addresses(&mut self, peer_id: PeerId) {
-        // Инициируем поиск узла в сети
-        self.swarm.behaviour_mut().kad.get_closest_peers(peer_id);
-    }
-
     // Get the local peer ID
     pub fn local_peer_id(&self) -> PeerId {
         self.local_peer_id
@@ -324,6 +315,8 @@ impl NetworkNode {
 
                 // Add the peer to Kademlia when connection is established
                 // This improves bootstrapping when using --find-peer
+
+                /*
                 self.swarm
                     .behaviour_mut()
                     .kad
@@ -333,6 +326,7 @@ impl NetworkNode {
                 if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
                     warn!("Failed to bootstrap Kademlia on new connection: {}", e);
                 }
+                 */
 
                 let _ = self
                     .event_tx
@@ -382,7 +376,6 @@ impl NetworkNode {
                         connection_id,
                     })
                     .await;
-
 
                 // If no connections remain, emit PeerDisconnected
                 if num_established == 0 {
@@ -448,8 +441,7 @@ impl NetworkNode {
                 self.handle_behaviour_event(event).await;
             }
 
-            _ => {
-            }
+            _ => {}
         }
     }
 
@@ -518,7 +510,7 @@ impl NetworkNode {
                         info!("🔍 Kademlia looking for addresses of peer: {peer}");
 
                         // Proactively trigger a search for the peer
-                        self.swarm.behaviour_mut().kad.get_closest_peers(*peer);
+                        //self.swarm.behaviour_mut().kad.get_closest_peers(*peer);
                     }
 
                     kad::Event::OutboundQueryProgressed { result, .. } => match result {
@@ -533,14 +525,11 @@ impl NetworkNode {
                             key,
                             peers,
                         })) => {
-                            if !peers.is_empty() {
-                                info!("Found closest peers for {key:?}: {peers:?}");
+                            for peer in peers {
+                                info!("Found peer info {} {:?}", peer.peer_id, peer.addrs);
                             }
                         }
-
-                        some => {
-                            info!("KAD OUTBOUND{result:?}");
-                        }
+                        _ => {}
                     },
 
                     kad::Event::InboundRequest { request, .. } => {
@@ -740,9 +729,7 @@ impl NetworkNode {
                     }
                 }
             }
-            _ => {
-             
-            }
+            _ => {}
         }
     }
 }

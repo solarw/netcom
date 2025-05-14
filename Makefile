@@ -89,7 +89,14 @@ run_server: develop
 	@echo "🚀 Running interactive node application in Kademlia server mode..."
 	@PYTHONPATH=$(PWD) poetry run python examples/interactive_node.py --kad-server --port 33333 --disable-mdns
 
+start: 
+	@echo "🚀 Running interactive node application..."
+	@PYTHONPATH=$(PWD) poetry run python examples/interactive_node.py
 	
+start_server:
+	@echo "🚀 Running interactive node application in Kademlia server mode..."
+	@PYTHONPATH=$(PWD) poetry run python examples/interactive_node.py --kad-server --port 33333 --disable-mdns
+
 # Check if prompt_toolkit is installed and install if not
 check_prompt_toolkit:
 	@echo "🔍 Checking for prompt_toolkit..."

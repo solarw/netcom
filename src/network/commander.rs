@@ -241,6 +241,7 @@ impl Commander {
         }
 
         // Bootstrap Kademlia to announce our presence to the network
+        /*
         let (response_tx, response_rx) = oneshot::channel();
         match self
             .cmd_tx
@@ -258,15 +259,12 @@ impl Commander {
             },
             Err(e) => println!("Failed to send bootstrap command: {}", e),
         }
-
+        */
         // Start looking for the peer
         println!("Initiating search for peer: {}", peer_id);
 
         // Start an explicit DHT search
         self.find_peer_addresses(peer_id).await?;
-
-        // Wait a bit longer for the search to propagate (3 seconds instead of 1)
-        tokio::time::sleep(Duration::from_secs(3)).await;
 
         // Try multiple times with increasing delay
         for attempt in 1..=5 {

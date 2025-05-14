@@ -62,12 +62,23 @@ pub fn make_behaviour(
         kad_config.set_query_timeout(std::time::Duration::from_secs(30));
     }
 
+    kad_config.set_kbucket_inserts(BucketInserts::Manual);
+
+    // 2. Disable periodic bootstrap (set to None)
+    kad_config.set_periodic_bootstrap_interval(None);
+    
+    // 3. Disable automatic bootstrap
+    kad_config.set_automatic_bootstrap_throttle(None);
+
     // Create the store
     let kad_store = kad::store::MemoryStore::new(key.public().to_peer_id());
+    // 1. Set bucket inserts to manual
 
     // Create the Kademlia behavior with the custom config
     let mut kad_behaviour =
         kad::Behaviour::with_config(key.public().to_peer_id(), kad_store, kad_config);
+    
+    
     if kad_server_mode {
         kad_behaviour.set_mode(Some(kad::Mode::Server));
     } else {
