@@ -80,16 +80,16 @@ examples: develop
 	@echo "  - To run async node example: poetry run python examples/async_node.py"
 	@echo "  - To run interactive node example: poetry run python examples/interactive_node.py"
 
-# Run the interactive node application
-run: develop check_prompt_toolkit
+run: develop
 	@echo "🚀 Running interactive node application..."
-	@poetry run python examples/interactive_node.py
+	@PYTHONPATH=$(PWD) poetry run python examples/interactive_node.py
 
 # Run the interactive node application in Kademlia server mode
-run_server: develop check_prompt_toolkit
+run_server: develop
 	@echo "🚀 Running interactive node application in Kademlia server mode..."
-	@poetry run python examples/interactive_node.py --kad-server --port 33333 --disable-mdns
+	@PYTHONPATH=$(PWD) poetry run python examples/interactive_node.py --kad-server --port 33333 --disable-mdns
 
+	
 # Check if prompt_toolkit is installed and install if not
 check_prompt_toolkit:
 	@echo "🔍 Checking for prompt_toolkit..."

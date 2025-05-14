@@ -1,6 +1,7 @@
 // src/py/xstream.rs
 use pyo3::prelude::*;
 use pyo3::exceptions::PyIOError;
+use pyo3::types::PyBytes;
 use std::sync::{Arc};
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex as TokioMutex;
@@ -114,13 +115,18 @@ impl XStream {
                 stream.read().await
             };
             
-            // Return the data
-            match result {
-                Ok(data) => Ok(data),
-                Err(e) => Err(PyErr::new::<PyIOError, _>(
-                    format!("Failed to read from stream: {}", e)
-                )),
-            }
+            // Convert Vec<u8> to PyBytes and return
+            Python::with_gil(|py| {
+                match result {
+                    Ok(data) => {
+                        let py_bytes = PyBytes::new(py, &data);
+                        Ok(py_bytes.to_object(py))
+                    },
+                    Err(e) => Err(PyErr::new::<PyIOError, _>(
+                        format!("Failed to read from stream: {}", e)
+                    )),
+                }
+            })
         })
     }
     
@@ -146,13 +152,18 @@ impl XStream {
                 stream.read_exact(size).await
             };
             
-            // Return the data
-            match result {
-                Ok(data) => Ok(data),
-                Err(e) => Err(PyErr::new::<PyIOError, _>(
-                    format!("Failed to read exact bytes from stream: {}", e)
-                )),
-            }
+            // Convert Vec<u8> to PyBytes and return
+            Python::with_gil(|py| {
+                match result {
+                    Ok(data) => {
+                        let py_bytes = PyBytes::new(py, &data);
+                        Ok(py_bytes.to_object(py))
+                    },
+                    Err(e) => Err(PyErr::new::<PyIOError, _>(
+                        format!("Failed to read exact bytes from stream: {}", e)
+                    )),
+                }
+            })
         })
     }
     
@@ -178,13 +189,18 @@ impl XStream {
                 stream.read_to_end().await
             };
             
-            // Return the data
-            match result {
-                Ok(data) => Ok(data),
-                Err(e) => Err(PyErr::new::<PyIOError, _>(
-                    format!("Failed to read to end of stream: {}", e)
-                )),
-            }
+            // Convert Vec<u8> to PyBytes and return
+            Python::with_gil(|py| {
+                match result {
+                    Ok(data) => {
+                        let py_bytes = PyBytes::new(py, &data);
+                        Ok(py_bytes.to_object(py))
+                    },
+                    Err(e) => Err(PyErr::new::<PyIOError, _>(
+                        format!("Failed to read to end of stream: {}", e)
+                    )),
+                }
+            })
         })
     }
     

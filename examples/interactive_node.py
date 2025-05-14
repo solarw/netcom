@@ -18,7 +18,7 @@ from prompt_toolkit.history import InMemoryHistory
 from typing import Optional, List, Dict, Set, Tuple
 
 # Import from the correct module name
-from p2p_network_py import Node, PeerId, KeyPair, generate_keypair
+from p2p_network import Node, PeerId, KeyPair, generate_keypair, ProofOfRepresentation
 
 # Set up logging
 logging.basicConfig(
@@ -157,6 +157,10 @@ class InteractiveP2PApp:
                 self.discovered_peers.remove(peer_id)
                 logger.info(f"Disconnected from peer: {peer_id}")
                 
+                # Also remove from authenticated peers if present
+                if peer_id in self.authenticated_peers:
+                    self.authenticated_peers.remove(peer_id)
+                
         elif event_type == "IncomingStream":
             stream = event.get("stream")
             if stream:
@@ -173,10 +177,10 @@ class InteractiveP2PApp:
                             "peer_id": peer_id,
                             "message": message.strip()
                         })
-                        
-                        # Send a reply
-                        reply = f"Echo: {message.strip()}"
-                        await self.node.stream_message(peer_id, reply)
+                        if not message.startswith("Echo: "):
+                            # Send a reply if not echo
+                            reply = f"Echo: {message.strip()}"
+                            await self.node.stream_message(peer_id, reply, timeout=30)
                     except UnicodeDecodeError:
                         logger.info(f"Binary data from {peer_id}: {len(data)} bytes")
                     finally:
@@ -202,16 +206,66 @@ class InteractiveP2PApp:
             auth_event = event.get("auth_event", {})
             auth_type = auth_event.get("type", "Unknown")
             
-            if "MutualAuthSuccess" in auth_type:
+            if auth_type == "MutualAuthSuccess":
                 peer_id = auth_event.get("peer_id")
                 if peer_id:
                     self.authenticated_peers.add(peer_id)
                     logger.info(f"✅ Mutual authentication successful with peer: {peer_id}")
 
-            if "VerifyPorRequest" in auth_type:
-                # do por check
+            elif auth_type == "VerifyPorRequest":
+                # Handle POR verification request
+                peer_id = auth_event.get("peer_id")
+                connection_id = auth_event.get("connection_id")
+                address = auth_event.get("address")
+                por = auth_event.get("por")
+                metadata = auth_event.get("metadata", {})
+                
+                # Always auto-accept authentication requests
+                logger.info(f"🔍 Received authentication request from peer {peer_id} - auto-accepting")
+                
+                # Immediately accept the authentication request
+                await self.auto_accept_auth(connection_id, peer_id)
             
-            # Additional auth event handling could be added here
+            # Additional auth event types
+            elif auth_type == "OutboundAuthSuccess":
+                peer_id = auth_event.get("peer_id")
+                logger.info(f"🔹 Outbound authentication successful with {peer_id}")
+                
+            elif auth_type == "InboundAuthSuccess":
+                peer_id = auth_event.get("peer_id")
+                logger.info(f"🔸 Inbound authentication successful with {peer_id}")
+                
+            elif auth_type == "OutboundAuthFailure":
+                peer_id = auth_event.get("peer_id")
+                reason = auth_event.get("reason", "Unknown reason")
+                logger.info(f"❌ Outbound authentication failed with {peer_id}: {reason}")
+                
+            elif auth_type == "InboundAuthFailure":
+                peer_id = auth_event.get("peer_id")
+                reason = auth_event.get("reason", "Unknown reason")
+                logger.info(f"❌ Inbound authentication failed with {peer_id}: {reason}")
+                
+            elif auth_type == "AuthTimeout":
+                peer_id = auth_event.get("peer_id")
+                direction = auth_event.get("direction", "Unknown")
+                logger.info(f"⏱️ Authentication timed out with peer {peer_id}, direction: {direction}")
+
+    async def auto_accept_auth(self, connection_id, peer_id):
+        """Automatically accept an authentication request"""
+        try:
+            # Create empty metadata dict for the response
+            metadata = {}
+            logger.info(f"✅ Auto-accepting authentication from {peer_id}")
+            
+            # Submit the verification result (OK)
+            success = await self.node.submit_por_verification(connection_id, True, metadata)
+            
+            if success:
+                logger.info(f"✅ Successfully accepted authentication for peer {peer_id}")
+            else:
+                logger.error(f"❌ Failed to accept authentication for peer {peer_id}")
+        except Exception as e:
+            logger.error(f"Error auto-accepting authentication: {e}")
     
     async def command_loop(self):
         """Run the interactive command loop."""
@@ -339,7 +393,7 @@ class InteractiveP2PApp:
                     try:
                         peer_id = PeerId(peer_id_str)
                         print(f"Sending message to {peer_id}: '{message}'")
-                        success = await self.node.stream_message(peer_id, message)
+                        success = await self.node.stream_message(peer_id, message, 10)
                         
                         if success:
                             print(f"Message sent successfully to {peer_id}")
@@ -389,7 +443,7 @@ class InteractiveP2PApp:
             return
             
         print("\nNode Status:")
-        print(f"  Peer ID: {self.node.peer_id}")
+        print(f"  Peer ID: {self.node.peer_id()}")
         print(f"  Discovered Peers: {len(self.discovered_peers)}")
         print(f"  Authenticated Peers: {len(self.authenticated_peers)}")
         print(f"  Received Messages: {len(self.received_messages)}")
@@ -406,7 +460,6 @@ async def main():
     parser.add_argument("--port", type=int, default=0, help="Port to listen on (0 = random port)")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to listen on (default: all interfaces)")
     parser.add_argument("--disable-mdns", action="store_true", help="Disable mDNS discovery")
-    parser.add_argument("--accept-all-auth", action="store_true", help="Accept all authentication requests")
     parser.add_argument("--kad-server", action="store_true", help="Run in Kademlia server mode")
     args = parser.parse_args()
     
