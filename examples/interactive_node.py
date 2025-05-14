@@ -207,6 +207,9 @@ class InteractiveP2PApp:
                 if peer_id:
                     self.authenticated_peers.add(peer_id)
                     logger.info(f"✅ Mutual authentication successful with peer: {peer_id}")
+
+            if "VerifyPorRequest" in auth_type:
+                # do por check
             
             # Additional auth event handling could be added here
     

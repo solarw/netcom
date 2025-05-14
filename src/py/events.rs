@@ -12,6 +12,7 @@ use crate::network::xauth::events::PorAuthEvent;
 use crate::network::xauth::por::por::ProofOfRepresentation;
 use crate::py::xstream::XStream as PyXStream;
 
+use super::types::rust_por_to_py_por;
 use super::types::ProofOfRepresentation as PyProofOfRepresentation;
 
 /// Convert a NetworkEvent to a Python dictionary
@@ -124,7 +125,9 @@ fn auth_event_to_dict(py: Python, event: &PorAuthEvent) -> PyResult<PyObject> {
             auth_dict.set_item("peer_id", peer_id.to_string())?;
             auth_dict.set_item("connection_id", format!("{:?}", connection_id))?;
             auth_dict.set_item("address", address.to_string())?;
-            //auth_dict.set_item("por", pypor_from_por(por.clone()).to)?;
+            
+            let py_por = rust_por_to_py_por(py, por.clone())?;
+            auth_dict.set_item("por", py_por)?;
             
             // Convert metadata HashMap to a Python dict
             let metadata_dict = PyDict::new(py);
