@@ -45,12 +45,14 @@ pub struct Node {
     running: Arc<Mutex<bool>>,
     /// Keypair for the node
     key_pair: KeyPair,
+    enable_mdns: bool,
+    kad_server_mode: bool
 }
 
 #[pymethods]
 impl Node {
     #[new]
-    fn new(key_pair: KeyPair, _enable_mdns: bool, _kad_server_mode: bool) -> Self {
+    fn new(key_pair: KeyPair, enable_mdns: bool, kad_server_mode: bool) -> Self {
         // Create a new tokio runtime
         let runtime = Runtime::new().expect("Failed to create tokio runtime");
 
@@ -63,6 +65,8 @@ impl Node {
             peer_id: key_pair.to_peer_id(),
             running: Arc::new(Mutex::new(false)),
             key_pair,
+            enable_mdns,
+            kad_server_mode
         }
     }
 
@@ -76,7 +80,7 @@ impl Node {
 
         // Clone the key_pair
         let key_pair = self.key_pair.inner.clone();
-
+        let kad_server_mode = self.kad_server_mode;
         future_into_py(py, async move {
             // Check if already running
             let is_running = *running.lock().await;
@@ -95,7 +99,7 @@ impl Node {
 
             // Create the network node
             let enable_mdns = false; // We'll control this with explicit commands
-            let kad_server_mode = false; // We'll control this with explicit commands
+             // We'll control this with explicit commands
 
             let result = NetworkNode::new(key_pair, por, enable_mdns, kad_server_mode).await;
 

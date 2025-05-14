@@ -89,8 +89,8 @@ class InteractiveP2PApp:
             # Create the node with renamed parameters
             self.node = Node(
                 key_pair=key_pair,
-                _enable_mdns=not self.args.disable_mdns,
-                _kad_server_mode=self.args.kad_server
+                enable_mdns=False,
+                kad_server_mode=self.args.kad_server
             )
             
             # Start the node
