@@ -33,8 +33,8 @@ pub struct XStream {
     pub stream_main_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
     pub id: u128,
     pub peer_id: PeerId,
-    // Simple Option for closure notifier
-    closure_notifier: Option<mpsc::UnboundedSender<(PeerId, u128)>>,
+    // Closure notifier is now mandatory
+    closure_notifier: mpsc::UnboundedSender<(PeerId, u128)>,
     // Stream state (atomic for thread safety)
     state: Arc<AtomicU8>,
 }
@@ -46,6 +46,7 @@ impl XStream {
         peer_id: PeerId,
         stream_main_read: futures::io::ReadHalf<Stream>,
         stream_main_write: futures::io::WriteHalf<Stream>,
+        closure_notifier: mpsc::UnboundedSender<(PeerId, u128)>,
     ) -> Self {
         info!("Creating new XStream with id: {} for peer: {}", id, peer_id);
         Self {
@@ -53,7 +54,7 @@ impl XStream {
             stream_main_write: Arc::new(Mutex::new(stream_main_write)),
             id,
             peer_id,
-            closure_notifier: None,
+            closure_notifier,
             state: Arc::new(AtomicU8::new(XStreamState::Open as u8)),
         }
     }
@@ -126,31 +127,16 @@ impl XStream {
         matches!(self.state(), XStreamState::RemoteClosed | XStreamState::FullyClosed)
     }
 
-    /// Check if a closure notifier is set
-    pub fn has_closure_notifier(&self) -> bool {
-        self.closure_notifier.is_some()
-    }
-
-    /// Set a closure notifier
-    pub fn set_closure_notifier(&mut self, notifier: mpsc::UnboundedSender<(PeerId, u128)>) {
-        info!("Setting closure notifier for stream {}", self.id);
-        self.closure_notifier = Some(notifier);
-    }
-
     /// Helper method to send closure notification when EOF or connection error is detected
     fn notify_eof(&self, reason: &str) {
         // Mark as remotely closed first
         self.mark_remote_closed();
         
-        if let Some(notifier) = &self.closure_notifier {
-            info!("Sending closure notification for stream {} due to: {}", self.id, reason);
-            
-            match notifier.send((self.peer_id, self.id)) {
-                Ok(_) => info!("Closure notification sent successfully for stream {}", self.id),
-                Err(e) => warn!("Failed to send closure notification for stream {}: {}", self.id, e),
-            }
-        } else {
-            warn!("No closure notifier set for stream {} when closed by: {}", self.id, reason);
+        info!("Sending closure notification for stream {} due to: {}", self.id, reason);
+        
+        match self.closure_notifier.send((self.peer_id, self.id)) {
+            Ok(_) => info!("Closure notification sent successfully for stream {}", self.id),
+            Err(e) => warn!("Failed to send closure notification for stream {}: {}", self.id, e),
         }
     }
 
@@ -345,12 +331,6 @@ impl XStream {
         // Mark as locally closed
         self.mark_local_closed();
         
-        if self.has_closure_notifier() {
-            debug!("Stream {} has closure notifier before closing", self.id);
-        } else {
-            warn!("No closure notifier set for stream {} of peer {} before closing", self.id, self.peer_id);
-        }
-        
         // Get a lock on the write stream and close it
         let stream_main_write = self.stream_main_write.clone();
         
@@ -400,17 +380,13 @@ impl XStream {
             }
         }
         
-        // Send closure notification if notifier is set
-        if let Some(notifier) = &self.closure_notifier {
-            debug!("Sending closure notification for stream {} of peer {}", self.id, self.peer_id);
-            
-            // This is non-blocking and returns immediately
-            match notifier.send((self.peer_id, self.id)) {
-                Ok(_) => debug!("Close notification sent successfully for stream {}", self.id),
-                Err(e) => warn!("Failed to send close notification for stream {}: {}", self.id, e),
-            }
-        } else {
-            warn!("No closure notifier set for stream {} of peer {}", self.id, self.peer_id);
+        // Send closure notification
+        debug!("Sending closure notification for stream {} of peer {}", self.id, self.peer_id);
+        
+        // This is non-blocking and returns immediately
+        match self.closure_notifier.send((self.peer_id, self.id)) {
+            Ok(_) => debug!("Close notification sent successfully for stream {}", self.id),
+            Err(e) => warn!("Failed to send close notification for stream {}: {}", self.id, e),
         }
         
         // Add a debug print just before returning
@@ -424,26 +400,14 @@ impl Clone for XStream {
     fn clone(&self) -> Self {
         debug!("Cloning XStream with id: {} for peer: {}", self.id, self.peer_id);
         
-        // IMPORTANT: Preserve the closure notifier when cloning
-        let clone = Self {
+        // Clone the stream with all its components
+        Self {
             stream_main_read: self.stream_main_read.clone(),
             stream_main_write: self.stream_main_write.clone(),
             id: self.id,
             peer_id: self.peer_id,
             closure_notifier: self.closure_notifier.clone(),
             state: self.state.clone(),
-        };
-        
-        if clone.has_closure_notifier() {
-            debug!("Closure notifier was preserved in clone for stream {}", self.id);
-        } else {
-            if self.has_closure_notifier() {
-                error!("ERROR: Closure notifier was LOST during clone for stream {}", self.id);
-            } else {
-                warn!("Original stream {} did not have closure notifier", self.id);
-            }
         }
-        
-        clone
     }
 }

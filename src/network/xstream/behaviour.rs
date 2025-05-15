@@ -203,6 +203,8 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         let mut handler = XStreamHandler::new();
         // Set peer ID in handler immediately
         handler.set_peer_id(peer);
+        // Provide closure sender to the handler
+        handler.set_closure_sender(self.closure_sender.clone());
         Ok(handler)
     }
 
@@ -217,6 +219,8 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         let mut handler = XStreamHandler::new();
         // Set peer ID in handler immediately
         handler.set_peer_id(peer);
+        // Provide closure sender to the handler
+        handler.set_closure_sender(self.closure_sender.clone());
         Ok(handler)
     }
 
@@ -229,14 +233,9 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         event: libp2p::swarm::THandlerOutEvent<Self>,
     ) {
         match event {
-            XStreamHandlerEvent::IncomingStreamEstablished { stream_id, mut stream } => {
-                // Add the stream with its closure notifier
-                debug!("Adding stream {} with peer {} and setting closure notifier", stream_id, peer_id);
-        
-                // Set the closure notifier
-                stream.set_closure_notifier(self.closure_sender.clone());
-                
-                debug!("Closure notifier set for stream {}", stream_id);
+            XStreamHandlerEvent::IncomingStreamEstablished { stream_id, stream } => {
+                // Add the stream to the streams map (closure notifier is already set in the handler)
+                debug!("Adding stream {} with peer {}", stream_id, peer_id);
                 self.streams.insert((peer_id, stream_id), stream.clone());
                 
                 // Send event about the new stream
@@ -245,14 +244,9 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                         stream: stream.clone(),
                     }));
             },
-            XStreamHandlerEvent::OutboundStreamEstablished { stream_id, mut stream } => {
-                // Add the stream with its closure notifier
-                debug!("Adding stream {} with peer {} and setting closure notifier", stream_id, peer_id);
-        
-                // Set the closure notifier
-                stream.set_closure_notifier(self.closure_sender.clone());
-                
-                debug!("Closure notifier set for stream {}", stream_id);
+            XStreamHandlerEvent::OutboundStreamEstablished { stream_id, stream } => {
+                // Add the stream to the streams map (closure notifier is already set in the handler)
+                debug!("Adding stream {} with peer {}", stream_id, peer_id);
                 self.streams.insert((peer_id, stream_id), stream.clone());
                 
                 // Check if there's a waiting sender for this peer

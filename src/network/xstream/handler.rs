@@ -9,6 +9,7 @@ use libp2p::{
     },
     PeerId, Stream, StreamProtocol,
 };
+use tokio::sync::mpsc;
 
 use super::consts::XSTREAM_PROTOCOL;
 use super::utils::IdIterator;
@@ -75,6 +76,8 @@ pub struct XStreamHandler {
     pending_commands: Vec<XStreamHandlerIn>,
     /// Peer ID для потоков
     peer_id: PeerId,
+    /// Sender for closure notifications
+    closure_sender: Option<mpsc::UnboundedSender<(PeerId, u128)>>,
 }
 
 impl XStreamHandler {
@@ -87,12 +90,18 @@ impl XStreamHandler {
             outgoing_events: Vec::new(),
             pending_commands: Vec::new(),
             peer_id: PeerId::random(),
+            closure_sender: None,
         }
     }
 
     /// Устанавливает peer_id для handler
     pub fn set_peer_id(&mut self, peer_id: PeerId) {
         self.peer_id = peer_id;
+    }
+    
+    /// Sets the closure sender
+    pub fn set_closure_sender(&mut self, sender: mpsc::UnboundedSender<(PeerId, u128)>) {
+        self.closure_sender = Some(sender);
     }
 
     /// Получает изменяемый XStream по его ID
@@ -106,7 +115,19 @@ impl XStreamHandler {
         let stream_id = self.id_iter.next().unwrap();
         let (read, write) = AsyncReadExt::split(stream);
 
-        let xstream = XStream::new(stream_id, self.peer_id, read, write);
+        // Get closure_sender, or early return if none
+        let closure_sender = match &self.closure_sender {
+            Some(sender) => sender.clone(),
+            None => {
+                self.outgoing_events.push(XStreamHandlerEvent::StreamError {
+                    stream_id: Some(stream_id),
+                    error: "No closure sender available for stream creation".to_string(),
+                });
+                return;
+            }
+        };
+
+        let xstream = XStream::new(stream_id, self.peer_id, read, write, closure_sender);
 
         self.streams.push(xstream.clone());
         self.outgoing_events
@@ -121,11 +142,23 @@ impl XStreamHandler {
         let stream_id = self.id_iter.next().unwrap();
         let (read, write) = AsyncReadExt::split(stream);
     
-        let xstream = XStream::new(stream_id, self.peer_id, read, write);
+        // Get closure_sender, or early return if none
+        let closure_sender = match &self.closure_sender {
+            Some(sender) => sender.clone(),
+            None => {
+                self.outgoing_events.push(XStreamHandlerEvent::StreamError {
+                    stream_id: Some(stream_id),
+                    error: "No closure sender available for stream creation".to_string(),
+                });
+                return;
+            }
+        };
+        
+        let xstream = XStream::new(stream_id, self.peer_id, read, write, closure_sender);
         self.streams.push(xstream.clone());
         self.outgoing_events
             .push(XStreamHandlerEvent::OutboundStreamEstablished {
-                stream_id, // Use the correct stream_id instead of 0
+                stream_id,
                 stream: xstream,
             });
     }
