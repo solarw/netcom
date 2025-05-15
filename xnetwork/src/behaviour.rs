@@ -9,8 +9,9 @@ use libp2p::{
 
 use libp2p_stream;
 
-use super::xauth::por::por::ProofOfRepresentation;
-use super::{xauth::behaviours::PorAuthBehaviour, xstream::behaviour::XStreamNetworkBehaviour};
+use xauth::por::por::ProofOfRepresentation;
+use xauth::behaviours::PorAuthBehaviour;
+use xstream::behaviour::XStreamNetworkBehaviour;
 
 // In the NodeBehaviour struct, use Toggle for mdns
 #[derive(NetworkBehaviour)]

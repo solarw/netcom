@@ -1,19 +1,13 @@
 [package]
-name = "p2p-network"
+name = "inter"
 version = "0.1.0"
-edition = "2021"
-
-[lib]
-name = "p2p_network_py"
-crate-type = ["cdylib"]
-
+edition = "2024"
 
 [dependencies]
 libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics']}
 
 tokio = { version = "1.35", features = ["full"] }
 futures = "0.3"
-tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -28,20 +22,7 @@ anyhow = "1.0.98"
 byteorder = "1.5.0"
 
 
-# PyO3 dependencies for Python bindings
-pyo3 = { version = "^0.20", features = ["extension-module"] }
-pyo3-asyncio = { version = "0.20.0", features = ["async-channel", "tokio", "attributes", "tokio-runtime", "clap", "async-std", "async-std-runtime"] }
-base64 = "0.22.1"
-
-
-
-
-# Keep libp2p-stream but as a local path dependency if needed
-# libp2p-stream = { path = "/home/solarw/hyperion/rust-libp2p/protocols/stream" }
-
-[package.metadata.maturin]
-name = "p2p_network_py"
-
-[[test]]
-name = "error_stream_test"
-path = "tests/test_error_stream_rust.rs"
+tracing = "0.1"
+xauth = { path = "/home/solarw/hyperion/netcom/protocols/xauth" }
+xstream = { path = "/home/solarw/hyperion/netcom/protocols/xstream" }
+xnetwork = { path = "/home/solarw/hyperion/netcom/xnetwork" }

@@ -3,8 +3,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 use super::commands::NetworkCommand;
-use super::xauth::definitions::AuthResult;
-use super::xstream::xstream::XStream;
+use xauth::definitions::AuthResult;
+use xstream::xstream::XStream;
 
 pub struct Commander {
     cmd_tx: mpsc::Sender<NetworkCommand>,

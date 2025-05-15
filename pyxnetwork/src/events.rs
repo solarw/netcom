@@ -7,10 +7,10 @@ use std::sync::Arc;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 
-use crate::network::events::NetworkEvent;
-use crate::network::xauth::events::PorAuthEvent;
-use crate::network::xauth::por::por::ProofOfRepresentation;
-use crate::py::xstream::XStream as PyXStream;
+use xnetwork::events::NetworkEvent;
+use xauth::events::PorAuthEvent;
+use xauth::por::por::ProofOfRepresentation;
+use crate::xstream::XStream as PyXStream;
 
 use super::types::rust_por_to_py_por;
 use super::types::ProofOfRepresentation as PyProofOfRepresentation;

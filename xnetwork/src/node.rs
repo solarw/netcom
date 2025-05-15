@@ -11,9 +11,9 @@ use std::error::Error;
 
 use tracing::{info, warn};
 
-use crate::network::xstream::events::XStreamEvent;
+use xstream::events::XStreamEvent;
 
-use super::xauth::events::PorAuthEvent;
+use xauth::events::PorAuthEvent;
 use super::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
     commands::NetworkCommand,
@@ -35,7 +35,7 @@ impl NetworkNode {
     // Create a new NetworkNode with all required protocols
     pub async fn new(
         local_key: identity::Keypair,
-        por: super::xauth::por::por::ProofOfRepresentation,
+        por: xauth::por::por::ProofOfRepresentation,
         enable_mdns: bool,
         kad_server_mode: bool, // Add parameter
     ) -> Result<

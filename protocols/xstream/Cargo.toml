@@ -1,0 +1,13 @@
+[package]
+name = "xstream"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics']}
+
+tokio = { version = "1.35", features = ["full"] }
+futures = "0.3"
+tracing = "0.1"
+byteorder = "1.5.0"
+

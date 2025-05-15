@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use super::{xauth::events::PorAuthEvent, xstream::xstream::XStream};
+use {xauth::events::PorAuthEvent};
+use  xstream::xstream::XStream;
 use libp2p::{swarm::ConnectionId, Multiaddr, PeerId, StreamProtocol};
 
 #[derive(Debug, Clone)]

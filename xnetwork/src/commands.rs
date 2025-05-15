@@ -1,9 +1,10 @@
 // Файл: ./src/network/commands.rs
 
-use super::{xauth::definitions::AuthResult, xstream::xstream::XStream};
+use xstream::xstream::XStream;
 use libp2p::{swarm::ConnectionId, Multiaddr, PeerId};
 use std::error::Error;
 use tokio::sync::oneshot;
+use xauth::definitions::AuthResult;
 
 // Update the NetworkCommand enum in commands.rs
 #[derive(Debug)]
