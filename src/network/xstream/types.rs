@@ -27,26 +27,34 @@ impl From<u8> for SubstreamRole {
         }
     }
 }
-
-/// Stream closure states
+/// Stream states for XStream
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum XStreamState {
     /// Stream is open in both directions
     Open = 0,
-    /// Stream is locally closed (can still receive data)
-    LocalClosed = 1,
-    /// Stream is remotely closed (can still send data)
-    RemoteClosed = 2,
+    /// Stream's write direction is locally closed (EOF sent)
+    WriteLocalClosed = 1,
+    /// Stream's read direction has received EOF from remote
+    ReadRemoteClosed = 2,
+    /// Stream is locally closed (both read and write)
+    LocalClosed = 3,
+    /// Stream is remotely closed (both read and write)
+    RemoteClosed = 4,
     /// Stream is fully closed in both directions
-    FullyClosed = 3,
+    FullyClosed = 5,
+    /// Stream has encountered an error
+    Error = 6,
 }
 
 impl From<u8> for XStreamState {
     fn from(value: u8) -> Self {
         match value {
-            1 => XStreamState::LocalClosed,
-            2 => XStreamState::RemoteClosed,
-            3 => XStreamState::FullyClosed,
+            1 => XStreamState::WriteLocalClosed,
+            2 => XStreamState::ReadRemoteClosed,
+            3 => XStreamState::LocalClosed,
+            4 => XStreamState::RemoteClosed,
+            5 => XStreamState::FullyClosed,
+            6 => XStreamState::Error,
             _ => XStreamState::Open,
         }
     }

@@ -71,6 +71,7 @@ impl XStreamNetworkBehaviour {
                     stream_id,
                     peer_id
                 );
+                println!("111111111111111111111111111 CLOSURE TASK!!!!");
 
                 // Send an event to the behavior
                 match event_sender.send(XStreamEvent::StreamClosed {
@@ -258,26 +259,12 @@ impl XStreamNetworkBehaviour {
         self.pending_outgoing_streams.insert(stream_id, response);
     }
 
-    /// Gets an XStream by peer ID and stream ID
-    pub fn get_stream(&self, peer_id: PeerId, stream_id: XStreamID) -> Option<&XStream> {
-        self.streams.get(&(peer_id, stream_id))
-    }
-
-    /// Gets a mutable XStream by peer ID and stream ID
-    pub fn get_stream_mut(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: XStreamID,
-    ) -> Option<&mut XStream> {
-        self.streams.get_mut(&(peer_id, stream_id))
-    }
-
     /// Notifies that a stream is closed
     pub fn notify_stream_closed(&mut self, peer_id: PeerId, stream_id: XStreamID) {
         debug!("Manual notification of stream closure: {:?}", stream_id);
         // Remove the stream from the active streams map
         self.streams.remove(&(peer_id, stream_id));
-
+        println!("11111111111111 notify_stream_closed");
         // Generate the appropriate event
         self.events
             .push(ToSwarm::GenerateEvent(XStreamEvent::StreamClosed {
@@ -286,86 +273,8 @@ impl XStreamNetworkBehaviour {
             }));
     }
 
-    /// Closes a stream
-    pub async fn close_stream(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: XStreamID,
-    ) -> Result<(), std::io::Error> {
-        debug!("Closing stream {:?} with peer {}", stream_id, peer_id);
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            // The stream will send notification via the closure_notifier channel
-            let result = stream.close().await;
-            debug!(
-                "Stream.close() result for stream {:?}: {:?}",
-                stream_id, result
-            );
-            return result;
-        }
-        Ok(())
-    }
 
-    /// Sends data to the specified stream
-    pub async fn send_data(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: XStreamID,
-        data: Vec<u8>,
-    ) -> Result<(), std::io::Error> {
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            return stream.write_all(data).await;
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Stream not found",
-        ))
-    }
 
-    /// Reads data from the specified stream
-    pub async fn read_data(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: XStreamID,
-    ) -> Result<Vec<u8>, std::io::Error> {
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            return stream.read().await;
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Stream not found",
-        ))
-    }
-
-    /// Reads exact number of bytes from the specified stream
-    pub async fn read_exact(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: XStreamID,
-        size: usize,
-    ) -> Result<Vec<u8>, std::io::Error> {
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            return stream.read_exact(size).await;
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Stream not found",
-        ))
-    }
-
-    /// Reads all data from the specified stream to the end
-    pub async fn read_to_end(
-        &mut self,
-        peer_id: PeerId,
-        stream_id: XStreamID,
-    ) -> Result<Vec<u8>, std::io::Error> {
-        if let Some(stream) = self.streams.get_mut(&(peer_id, stream_id)) {
-            return stream.read_to_end().await;
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Stream not found",
-        ))
-    }
 }
 
 // Need to add new variants to XStreamHandlerEvent to handle raw streams
@@ -490,6 +399,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
             XStreamHandlerEvent::StreamClosed { stream_id } => {
                 debug!("Handler reported stream closed: {:?}", stream_id);
                 // Remove the stream from HashMap
+                println!("11111111111111111Handler reported stram closed StreamClosed");
                 self.streams.remove(&(peer_id, stream_id));
 
                 // Send stream closed event

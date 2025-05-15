@@ -370,6 +370,7 @@ impl ConnectionHandler for XStreamHandler {
             self.streams.clear();
 
             for stream_id in stream_ids {
+                println!("1111111111111111111111, poll close");
                 return Poll::Ready(Some(XStreamHandlerEvent::StreamClosed { stream_id }));
             }
         }

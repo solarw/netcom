@@ -70,6 +70,10 @@ impl XStream {
         let final_state = match (current_state, new_state) {
             // If already fully closed, stay closed
             (XStreamState::FullyClosed, _) => XStreamState::FullyClosed,
+            
+            // If write locally closed and read remotely closed, become fully closed
+            (XStreamState::WriteLocalClosed, XStreamState::ReadRemoteClosed) => XStreamState::FullyClosed,
+            (XStreamState::ReadRemoteClosed, XStreamState::WriteLocalClosed) => XStreamState::FullyClosed,
 
             // If local closed and remote closes, become fully closed
             (XStreamState::LocalClosed, XStreamState::RemoteClosed) => XStreamState::FullyClosed,
@@ -87,6 +91,26 @@ impl XStream {
             "Stream {:?} state changed: {:?} -> {:?}",
             self.id, current_state, final_state
         );
+    }
+
+    /// Mark the stream as write locally closed (EOF sent)
+    fn mark_write_local_closed(&self) {
+        let current = self.state();
+        match current {
+            XStreamState::Open => self.set_state(XStreamState::WriteLocalClosed),
+            XStreamState::ReadRemoteClosed => self.set_state(XStreamState::FullyClosed),
+            _ => {} // Already in a more restrictive closed state
+        }
+    }
+
+    /// Mark the stream as read remotely closed (EOF received)
+    fn mark_read_remote_closed(&self) {
+        let current = self.state();
+        match current {
+            XStreamState::Open => self.set_state(XStreamState::ReadRemoteClosed),
+            XStreamState::WriteLocalClosed => self.set_state(XStreamState::FullyClosed),
+            _ => {} // Already in a more restrictive closed state
+        }
     }
 
     /// Mark the stream as locally closed
@@ -112,7 +136,7 @@ impl XStream {
     /// Check if the stream is closed (either locally, remotely, or both)
     pub fn is_closed(&self) -> bool {
         match self.state() {
-            XStreamState::Open => false,
+            XStreamState::Open | XStreamState::WriteLocalClosed | XStreamState::ReadRemoteClosed => false,
             _ => true,
         }
     }
@@ -133,16 +157,32 @@ impl XStream {
         )
     }
 
+    /// Check if the stream's write direction is closed locally
+    pub fn is_write_local_closed(&self) -> bool {
+        matches!(
+            self.state(),
+            XStreamState::WriteLocalClosed | XStreamState::LocalClosed | XStreamState::FullyClosed
+        )
+    }
+
+    /// Check if the stream's read direction has received EOF
+    pub fn is_read_remote_closed(&self) -> bool {
+        matches!(
+            self.state(),
+            XStreamState::ReadRemoteClosed | XStreamState::RemoteClosed | XStreamState::FullyClosed
+        )
+    }
+
     /// Helper method to send closure notification when EOF or connection error is detected
     fn notify_eof(&self, reason: &str) {
         // Mark as remotely closed first
-        self.mark_remote_closed();
+        return;
+        self.mark_read_remote_closed();
 
         info!(
             "Sending closure notification for stream {:?} due to: {}",
             self.id, reason
         );
-
         match self.closure_notifier.send((self.peer_id, self.id)) {
             Ok(_) => info!(
                 "Closure notification sent successfully for stream {:?}",
@@ -157,10 +197,17 @@ impl XStream {
 
     /// Validate that the stream is in a valid state for reading
     fn check_readable(&self) -> Result<(), std::io::Error> {
-        if self.is_remote_closed() {
+        return Ok(());
+        if self.is_read_remote_closed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("Cannot read from stream {:?}: EOF received", self.id),
+            ));
+        }
+        if self.is_remote_closed() || self.is_local_closed() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotConnected,
-                format!("Cannot read from stream {:?}: remotely closed", self.id),
+                format!("Cannot read from stream {:?}: stream closed", self.id),
             ));
         }
         Ok(())
@@ -168,6 +215,13 @@ impl XStream {
 
     /// Validate that the stream is in a valid state for writing
     fn check_writable(&self) -> Result<(), std::io::Error> {
+        return Ok(());
+        if self.is_write_local_closed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                format!("Cannot write to stream {:?}: write half closed", self.id),
+            ));
+        }
         if self.is_local_closed() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotConnected,
@@ -193,8 +247,6 @@ impl XStream {
         )
     }
 
-    /// Check if error stream is available
-
     /// Reads exact number of bytes from the main stream
     pub async fn read_exact(&self, size: usize) -> Result<Vec<u8>, std::io::Error> {
         // First check if we can read
@@ -217,6 +269,7 @@ impl XStream {
                     || self.is_connection_closed_error(&e)
                 {
                     info!("Detected EOF/connection error while reading exact bytes from stream {:?}: {:?}", self.id, e.kind());
+                    self.mark_read_remote_closed();
                     self.notify_eof(&format!("read_exact error: {:?}", e.kind()));
                 }
                 Err(e)
@@ -245,6 +298,7 @@ impl XStream {
                 // If we read zero bytes and this is the first read, it might be an EOF
                 if bytes_read == 0 && buf.is_empty() {
                     info!("Stream {:?} was already at EOF", self.id);
+                    self.mark_read_remote_closed();
                     self.notify_eof("read_to_end returned 0 bytes");
                 }
                 self.notify_eof("read_to_end all");
@@ -257,6 +311,7 @@ impl XStream {
                         self.id,
                         e.kind()
                     );
+                    self.mark_read_remote_closed();
                     self.notify_eof(&format!("read_to_end error: {:?}", e.kind()));
                 }
                 Err(e)
@@ -269,7 +324,7 @@ impl XStream {
         // First check if we can read
         self.check_readable()?;
 
-        let mut buf: Vec<u8> = Vec::new();
+        let mut buf: Vec<u8> = vec![0; 4096]; // Use a reasonable buffer size
         let stream_main_read = self.stream_main_read.clone();
 
         // Acquire the lock and perform the read operation
@@ -283,14 +338,17 @@ impl XStream {
                 // Check for EOF condition (remote side closed the stream)
                 if bytes_read == 0 {
                     info!("Detected EOF while reading from stream {:?}", self.id);
+                    self.mark_read_remote_closed();
                     self.notify_eof("read returned 0 bytes");
 
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::UnexpectedEof,
-                        "Remote closed connection",
+                        "End of file",
                     ));
                 }
 
+                // Resize the buffer to the actual bytes read
+                buf.truncate(bytes_read);
                 Ok(buf)
             }
             Err(e) => {
@@ -300,6 +358,7 @@ impl XStream {
                         self.id,
                         e.kind()
                     );
+                    self.mark_read_remote_closed();
                     self.notify_eof(&format!("read error: {:?}", e.kind()));
                 }
                 Err(e)
@@ -330,6 +389,8 @@ impl XStream {
                                 "Detected remote closure during flush for stream {:?}",
                                 self.id
                             );
+                            println!("111111111111111 2");
+                            self.mark_remote_closed();
                             self.notify_eof(&format!("flush error: {:?}", e.kind()));
                         }
                         Err(e)
@@ -343,7 +404,60 @@ impl XStream {
                         "Detected remote closure during write for stream {:?}",
                         self.id
                     );
+                    println!("111111111111111 3");
+                    self.mark_remote_closed();
                     self.notify_eof(&format!("write error: {:?}", e.kind()));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Closes only the write half of the main stream, sending EOF
+    /// This allows the peer to know all data has been sent
+    /// while still allowing us to read their response
+    pub async fn write_eof(&self) -> Result<(), std::io::Error> {
+        // Check if the write half is already closed
+        if self.is_write_local_closed() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                format!("Cannot write EOF to stream {:?}: write half already closed", self.id),
+            ));
+        }
+
+        let stream_main_write = self.stream_main_write.clone();
+
+        // Acquire lock on the write half
+        let mut guard = stream_main_write.lock().await;
+
+        // Flush any pending data first
+        if let Err(e) = guard.flush().await {
+            if self.is_connection_closed_error(&e) {
+                info!("Detected remote closure during flush for stream {:?}", self.id);
+                println!("111111111111111 4");
+                self.mark_remote_closed();
+                self.notify_eof(&format!("flush error: {:?}", e.kind()));
+            }
+            return Err(e);
+        }
+
+        // Shutdown only the write half (this is different from close())
+        match guard.close().await {
+            Ok(_) => {
+                info!("Stream {:?} write half shutdown (EOF sent)", self.id);
+                // Mark the write half as closed but keep read half open
+                self.mark_write_local_closed();
+                Ok(())
+            }
+            Err(e) => {
+                if self.is_connection_closed_error(&e) {
+                    info!("Detected remote closure during shutdown for stream {:?}", self.id);
+                    println!("111111111111111 5");
+                    self.mark_remote_closed();
+                    self.notify_eof(&format!("shutdown error: {:?}", e.kind()));
+                    // Remote already closed, consider EOF sent
+                    self.mark_write_local_closed();
+                    return Ok(());
                 }
                 Err(e)
             }
@@ -384,7 +498,6 @@ impl XStream {
                 "Only inbound streams can write to error stream",
             ));
         }
-
         // Get the error stream write handle
         let stream_error_write = self.stream_error_write.clone();
         let mut error_stream = stream_error_write.lock().await;
@@ -438,7 +551,7 @@ impl XStream {
             // Close the error stream
             let stream_error_write = self.stream_error_write.clone();
             let mut error_stream = stream_error_write.lock().await;
-            //let _ = error_stream.close().await;
+            let _ = error_stream.close().await;
         }
 
         // Mark as locally closed
@@ -461,6 +574,7 @@ impl XStream {
                             // Check if error indicates the stream was already closed by remote
                             if self.is_connection_closed_error(&e) {
                                 info!("Remote already closed connection during close() for stream {:?}", self.id);
+                                println!("111111111111111 6");
                                 self.mark_remote_closed();
                                 // Return success if remote already closed it
                                 Ok(())
@@ -477,6 +591,7 @@ impl XStream {
                             "Remote already closed connection during flush for stream {:?}",
                             self.id
                         );
+                        println!("111111111111111 7");
                         self.mark_remote_closed();
                         // Return success if remote already closed it
                         Ok(())
@@ -495,6 +610,7 @@ impl XStream {
                 self.mark_remote_closed();
             }
         }
+        return result;
 
         // Send closure notification
         debug!(
