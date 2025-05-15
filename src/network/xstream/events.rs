@@ -1,4 +1,5 @@
 use libp2p::PeerId;
+use super::types::XStreamID;
 
 /// События, генерируемые XStreamNetworkBehaviour
 #[derive(Debug)]
@@ -8,14 +9,14 @@ pub enum XStreamEvent {
         /// Идентификатор пира
         peer_id: PeerId,
         /// Идентификатор потока
-        stream_id: u128,
+        stream_id: XStreamID,
     },
     /// Ошибка при работе с потоком XStream
     StreamError {
         /// Идентификатор пира
         peer_id: PeerId,
         /// Идентификатор потока
-        stream_id: Option<u128>,
+        stream_id: Option<XStreamID>,
         /// Ошибка
         error: String,
     },
@@ -24,7 +25,7 @@ pub enum XStreamEvent {
         /// Идентификатор пира
         peer_id: PeerId,
         /// Идентификатор потока
-        stream_id: u128,
+        stream_id: XStreamID,
     },
     /// Входящий поток (для обратной совместимости)
     IncomingStream {

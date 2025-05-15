@@ -7,36 +7,80 @@ use tokio::runtime::Runtime;
 use tokio::sync::Mutex as TokioMutex;
 use std::time::Duration;
 use pyo3_asyncio::tokio::future_into_py;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use libp2p::PeerId;
 
 use crate::network::xstream::xstream::XStream as RustXStream;
-use crate::py::types::PeerId;
+use crate::network::xstream::types::{XStreamID, XStreamDirection};
+use crate::network::xstream::events::XStreamEvent;
+use crate::py::types::PeerId as PyPeerId;
+
+#[pyclass]
+#[derive(Clone, Copy)]
+pub enum StreamDirection {
+    Inbound = 0,
+    Outbound = 1,
+}
+
+#[pymethods]
+impl StreamDirection {
+    fn __str__(&self) -> String {
+        match self {
+            StreamDirection::Inbound => "Inbound".to_string(),
+            StreamDirection::Outbound => "Outbound".to_string(),
+        }
+    }
+}
+
+impl From<XStreamDirection> for StreamDirection {
+    fn from(dir: XStreamDirection) -> Self {
+        match dir {
+            XStreamDirection::Inbound => StreamDirection::Inbound,
+            XStreamDirection::Outbound => StreamDirection::Outbound,
+        }
+    }
+}
+
+impl From<StreamDirection> for XStreamDirection {
+    fn from(dir: StreamDirection) -> Self {
+        match dir {
+            StreamDirection::Inbound => XStreamDirection::Inbound,
+            StreamDirection::Outbound => XStreamDirection::Outbound,
+        }
+    }
+}
 
 #[pyclass]
 pub struct XStream {
     inner: Arc<TokioMutex<Option<RustXStream>>>,
     runtime: Arc<Runtime>,
-    peer_id: PeerId,
-    stream_id: u128,
+    peer_id: PyPeerId,
+    stream_id: u128, // Оставляем u128 для Python API
+    direction: StreamDirection, // Добавляем направление для Python API
 }
 
 impl XStream {
     // Create XStream from Rust XStream
     pub fn from_xstream(stream: RustXStream) -> Self {
-        let peer_id = PeerId { inner: stream.peer_id.clone() };
-        let stream_id = stream.id;
+        let peer_id = PyPeerId { inner: stream.peer_id.clone() };
+        let stream_id: u128 = stream.id.into(); // Преобразуем XStreamID в u128
+        let direction: StreamDirection = stream.direction.into(); // Преобразуем XStreamDirection в StreamDirection
         
         Self {
             inner: Arc::new(TokioMutex::new(Some(stream))),
             runtime: Arc::new(Runtime::new().expect("Failed to create tokio runtime")),
             peer_id,
             stream_id,
+            direction,
         }
     }
     
     // Create XStream from Arc<RustXStream>
     pub fn from_arc_xstream(stream: Arc<RustXStream>) -> Self {
-        let peer_id = PeerId { inner: stream.peer_id.clone() };
-        let stream_id = stream.id;
+        let peer_id = PyPeerId { inner: stream.peer_id.clone() };
+        let stream_id: u128 = stream.id.into(); // Преобразуем XStreamID в u128
+        let direction: StreamDirection = stream.direction.into(); // Преобразуем XStreamDirection в StreamDirection
         let stream_clone = stream.clone();
         
         Self {
@@ -44,6 +88,7 @@ impl XStream {
             runtime: Arc::new(Runtime::new().expect("Failed to create tokio runtime")),
             peer_id,
             stream_id,
+            direction,
         }
     }
 }
@@ -51,13 +96,18 @@ impl XStream {
 #[pymethods]
 impl XStream {
     #[getter]
-    fn peer_id(&self) -> PeerId {
+    fn peer_id(&self) -> PyPeerId {
         self.peer_id.clone()
     }
     
     #[getter]
     fn id(&self) -> u128 {
         self.stream_id
+    }
+    
+    #[getter]
+    fn direction(&self) -> StreamDirection {
+        self.direction
     }
     
     fn write<'py>(&self, py: Python<'py>, data: &PyAny) -> PyResult<&'py PyAny> {
@@ -243,6 +293,11 @@ impl XStream {
                 None => Ok(true), // If inner is None, it's closed
             }
         })
+    }
+    
+    fn __str__(&self) -> String {
+        format!("XStream(id={}, peer={}, direction={})", 
+                self.stream_id, self.peer_id, self.direction.__str__())
     }
     
     fn __enter__(slf: PyRef<Self>) -> PyRef<Self> {

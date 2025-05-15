@@ -1,6 +1,7 @@
 use std::task::{Context, Poll};
 
 use super::xstream::XStream;
+use super::types::{XStreamID, XStreamIDIterator, XStreamDirection};
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use libp2p::{
     swarm::{
@@ -12,7 +13,6 @@ use libp2p::{
 use tokio::sync::mpsc;
 
 use super::consts::XSTREAM_PROTOCOL;
-use super::utils::IdIterator;
 
 /// Возможные события, которые handler может отправить в behaviour
 #[derive(Debug)]
@@ -20,27 +20,27 @@ pub enum XStreamHandlerEvent {
     /// Установлен новый stream
     IncomingStreamEstablished {
         /// Идентификатор потока
-        stream_id: u128,
+        stream_id: XStreamID,
         /// Поток XStream
         stream: XStream,
     },
     OutboundStreamEstablished {
         /// Идентификатор потока
-        stream_id: u128,
+        stream_id: XStreamID,
         /// Поток XStream
         stream: XStream,
     },
     /// Произошла ошибка при работе со stream
     StreamError {
         /// Идентификатор потока (если известен)
-        stream_id: Option<u128>,
+        stream_id: Option<XStreamID>,
         /// Описание ошибки
         error: String,
     },
     /// Поток XStream закрыт
     StreamClosed {
         /// Идентификатор потока
-        stream_id: u128,
+        stream_id: XStreamID,
     },
 }
 
@@ -67,7 +67,7 @@ impl XStreamProtocol {
 /// Handler для XStream
 pub struct XStreamHandler {
     /// Итератор для генерации уникальных ID
-    id_iter: IdIterator,
+    id_iter: XStreamIDIterator,
     /// Активные потоки
     streams: Vec<XStream>,
     /// Очередь исходящих событий
@@ -77,7 +77,7 @@ pub struct XStreamHandler {
     /// Peer ID для потоков
     peer_id: PeerId,
     /// Sender for closure notifications
-    closure_sender: Option<mpsc::UnboundedSender<(PeerId, u128)>>,
+    closure_sender: Option<mpsc::UnboundedSender<(PeerId, XStreamID)>>,
 }
 
 impl XStreamHandler {
@@ -85,7 +85,7 @@ impl XStreamHandler {
     pub fn new() -> Self {
         // Используем дефолтный PeerId, который будет заменен позже
         Self {
-            id_iter: IdIterator::new(),
+            id_iter: XStreamIDIterator::new(),
             streams: Vec::new(),
             outgoing_events: Vec::new(),
             pending_commands: Vec::new(),
@@ -100,12 +100,12 @@ impl XStreamHandler {
     }
     
     /// Sets the closure sender
-    pub fn set_closure_sender(&mut self, sender: mpsc::UnboundedSender<(PeerId, u128)>) {
+    pub fn set_closure_sender(&mut self, sender: mpsc::UnboundedSender<(PeerId, XStreamID)>) {
         self.closure_sender = Some(sender);
     }
 
     /// Получает изменяемый XStream по его ID
-    pub fn get_stream_mut(&mut self, stream_id: u128) -> Option<&mut XStream> {
+    pub fn get_stream_mut(&mut self, stream_id: XStreamID) -> Option<&mut XStream> {
         self.streams.iter_mut().find(|s| s.id == stream_id)
     }
 
@@ -127,7 +127,15 @@ impl XStreamHandler {
             }
         };
 
-        let xstream = XStream::new(stream_id, self.peer_id, read, write, closure_sender);
+        // Создаем XStream с указанием направления Inbound
+        let xstream = XStream::new(
+            stream_id, 
+            self.peer_id, 
+            read, 
+            write, 
+            XStreamDirection::Inbound, // Указываем направление
+            closure_sender
+        );
 
         self.streams.push(xstream.clone());
         self.outgoing_events
@@ -154,7 +162,16 @@ impl XStreamHandler {
             }
         };
         
-        let xstream = XStream::new(stream_id, self.peer_id, read, write, closure_sender);
+        // Создаем XStream с указанием направления Outbound
+        let xstream = XStream::new(
+            stream_id, 
+            self.peer_id, 
+            read, 
+            write, 
+            XStreamDirection::Outbound, // Указываем направление
+            closure_sender
+        );
+
         self.streams.push(xstream.clone());
         self.outgoing_events
             .push(XStreamHandlerEvent::OutboundStreamEstablished {
@@ -171,7 +188,7 @@ impl XStreamHandler {
     }
 
     /// Получает XStream по его ID
-    pub fn get_stream(&self, stream_id: u128) -> Option<&XStream> {
+    pub fn get_stream(&self, stream_id: XStreamID) -> Option<&XStream> {
         self.streams.iter().find(|s| s.id == stream_id)
     }
 }
@@ -305,7 +322,7 @@ impl ConnectionHandler for XStreamHandler {
 
         // Отмечаем все потоки как закрытые перед завершением
         if !self.streams.is_empty() {
-            let stream_ids: Vec<u128> = self.streams.iter().map(|s| s.id).collect();
+            let stream_ids: Vec<XStreamID> = self.streams.iter().map(|s| s.id).collect();
             self.streams.clear();
 
             for stream_id in stream_ids {
