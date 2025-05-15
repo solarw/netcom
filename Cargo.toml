@@ -41,3 +41,7 @@ base64 = "0.22.1"
 
 [package.metadata.maturin]
 name = "p2p_network_py"
+
+[[test]]
+name = "error_stream_test"
+path = "tests/test_error_stream_rust.rs"

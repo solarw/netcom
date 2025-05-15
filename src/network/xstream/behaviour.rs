@@ -130,15 +130,18 @@ impl XStreamNetworkBehaviour {
                 let stream_id = pair.key.stream_id;
                 let peer_id = pair.key.peer_id;
 
-                // Split main stream into read and write parts
+                // Split both streams into read and write parts
                 let (main_read, main_write) = AsyncReadExt::split(pair.main);
+                let (error_read, error_write) = AsyncReadExt::split(pair.error);
 
-                // Create XStream
+                // Create XStream with both main and error streams
                 let xstream = XStream::new(
                     stream_id,
                     peer_id,
                     main_read,
                     main_write,
+                    error_read,
+                    error_write,
                     pair.key.direction,
                     self.closure_sender.clone(),
                 );
@@ -163,20 +166,6 @@ impl XStreamNetworkBehaviour {
                             stream_id,
                         }));
                 }
-
-                // Store error stream or handle it otherwise
-                // For example, could add additional storage for error streams
-                // Or add it as an additional field in XStream
-
-                // For now, we'll just close it after a delay to ensure header is processed
-                let error_stream = pair.error;
-                tokio::spawn(async move {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                    let (mut read_half, mut write_half) = AsyncReadExt::split(error_stream);
-                    if let Err(e) = futures::AsyncWriteExt::close(&mut write_half).await {
-                        error!("Error closing error stream: {:?}", e);
-                    }
-                });
             }
             PendingStreamsMessage::SubstreamError(error) => {
                 match error {

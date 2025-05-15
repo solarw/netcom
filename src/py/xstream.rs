@@ -1,12 +1,9 @@
-// src/py/xstream.rs
 use libp2p::PeerId;
 use pyo3::exceptions::PyIOError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3_asyncio::tokio::future_into_py;
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex as TokioMutex;
@@ -56,8 +53,8 @@ pub struct XStream {
     inner: Arc<TokioMutex<Option<RustXStream>>>,
     runtime: Arc<Runtime>,
     peer_id: PyPeerId,
-    stream_id: u128,            // Оставляем u128 для Python API
-    direction: StreamDirection, // Добавляем направление для Python API
+    stream_id: u128,
+    direction: StreamDirection,
 }
 
 impl XStream {
@@ -66,8 +63,8 @@ impl XStream {
         let peer_id = PyPeerId {
             inner: stream.peer_id.clone(),
         };
-        let stream_id: u128 = stream.id.into(); // Преобразуем XStreamID в u128
-        let direction: StreamDirection = stream.direction.into(); // Преобразуем XStreamDirection в StreamDirection
+        let stream_id: u128 = stream.id.into();
+        let direction: StreamDirection = stream.direction.into();
 
         Self {
             inner: Arc::new(TokioMutex::new(Some(stream))),
@@ -83,8 +80,8 @@ impl XStream {
         let peer_id = PyPeerId {
             inner: stream.peer_id.clone(),
         };
-        let stream_id: u128 = stream.id.into(); // Преобразуем XStreamID в u128
-        let direction: StreamDirection = stream.direction.into(); // Преобразуем XStreamDirection в StreamDirection
+        let stream_id: u128 = stream.id.into();
+        let direction: StreamDirection = stream.direction.into();
         let stream_clone = stream.clone();
 
         Self {
@@ -261,6 +258,108 @@ impl XStream {
         })
     }
 
+    // New method to read from error stream
+    fn error_read<'py>(&self, py: Python<'py>, timeout_ms: Option<u64>) -> PyResult<&'py PyAny> {
+        let inner = self.inner.clone();
+        let timeout = timeout_ms.map(|ms| Duration::from_millis(ms));
+
+        future_into_py(py, async move {
+            // Get the stream
+            let mut inner_guard = inner.lock().await;
+            let stream = match &*inner_guard {
+                Some(s) => s,
+                None => return Err(PyErr::new::<PyIOError, _>("Stream is closed")),
+            };
+
+            // Read from error stream with optional timeout
+            let result = if let Some(duration) = timeout {
+                match tokio::time::timeout(duration, stream.error_read()).await {
+                    Ok(res) => res,
+                    Err(_) => return Err(PyErr::new::<PyIOError, _>("Read operation timed out")),
+                }
+            } else {
+                stream.error_read().await
+            };
+
+            // Convert Vec<u8> to PyBytes and return
+            Python::with_gil(|py| match result {
+                Ok(data) => {
+                    let py_bytes = PyBytes::new(py, &data);
+                    Ok(py_bytes.to_object(py))
+                }
+                Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
+                    "Failed to read from error stream: {}",
+                    e
+                ))),
+            })
+        })
+    }
+
+    // New method to write to error stream
+    fn error_write<'py>(&self, py: Python<'py>, data: &PyAny) -> PyResult<&'py PyAny> {
+        let inner = self.inner.clone();
+
+        // Convert PyAny to Vec<u8>
+        let bytes = if let Ok(bytes) = data.extract::<Vec<u8>>() {
+            bytes
+        } else if let Ok(string) = data.extract::<String>() {
+            string.into_bytes()
+        } else {
+            return Err(PyErr::new::<PyIOError, _>("Data must be bytes or string"));
+        };
+
+        future_into_py(py, async move {
+            // Get the stream
+            let mut inner_guard = inner.lock().await;
+            let stream = match &*inner_guard {
+                Some(s) => s,
+                None => return Err(PyErr::new::<PyIOError, _>("Stream is closed")),
+            };
+
+            // Write data to the error stream
+            let result = stream.error_write(bytes).await;
+
+            // Return the result
+            match result {
+                Ok(_) => Ok(()),
+                Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
+                    "Failed to write to error stream: {}",
+                    e
+                ))),
+            }
+        })
+    }
+
+    // Alias for error_write that takes a string
+    fn write_error<'py>(&self, py: Python<'py>, error_msg: &str) -> PyResult<&'py PyAny> {
+        let inner = self.inner.clone();
+        let error_message = error_msg.to_string();
+
+        future_into_py(py, async move {
+            // Get the stream
+            let mut inner_guard = inner.lock().await;
+            let stream = match &*inner_guard {
+                Some(s) => s,
+                None => return Err(PyErr::new::<PyIOError, _>("Stream is closed")),
+            };
+
+            // Write error to the error stream
+            let result = stream.write_error(&error_message).await;
+
+            // Return the result
+            match result {
+                Ok(_) => Ok(()),
+                Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
+                    "Failed to write error: {}",
+                    e
+                ))),
+            }
+
+            
+        })
+    }
+
+
     fn close<'py>(&mut self, py: Python<'py>) -> PyResult<&'py PyAny> {
         let inner = self.inner.clone();
 
@@ -328,7 +427,6 @@ impl XStream {
         py.allow_threads(|| {
             self.runtime.block_on(async {
                 // Wait a bit for the Python future to resolve
-                // This is hacky, in real code you would await the future properly
                 tokio::time::sleep(Duration::from_millis(100)).await;
             });
         });

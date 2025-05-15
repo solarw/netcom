@@ -1,3 +1,5 @@
+// Updated XStream implementation removing check_error_stream and read_rest_after_error
+
 use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
 use libp2p::{PeerId, Stream};
@@ -13,9 +15,11 @@ use super::types::{XStreamDirection, XStreamID, XStreamState};
 pub struct XStream {
     pub stream_main_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
     pub stream_main_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
+    pub stream_error_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
+    pub stream_error_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
     pub id: XStreamID,
     pub peer_id: PeerId,
-    // Направление потока (входящий или исходящий)
+    // Direction of the stream (inbound or outbound)
     pub direction: XStreamDirection,
     // Closure notifier is now mandatory
     closure_notifier: mpsc::UnboundedSender<(PeerId, XStreamID)>,
@@ -30,6 +34,8 @@ impl XStream {
         peer_id: PeerId,
         stream_main_read: futures::io::ReadHalf<Stream>,
         stream_main_write: futures::io::WriteHalf<Stream>,
+        stream_error_read: futures::io::ReadHalf<Stream>,
+        stream_error_write: futures::io::WriteHalf<Stream>,
         direction: XStreamDirection,
         closure_notifier: mpsc::UnboundedSender<(PeerId, XStreamID)>,
     ) -> Self {
@@ -40,6 +46,8 @@ impl XStream {
         Self {
             stream_main_read: Arc::new(Mutex::new(stream_main_read)),
             stream_main_write: Arc::new(Mutex::new(stream_main_write)),
+            stream_error_read: Arc::new(Mutex::new(stream_error_read)),
+            stream_error_write: Arc::new(Mutex::new(stream_error_write)),
             id,
             peer_id,
             direction,
@@ -184,6 +192,8 @@ impl XStream {
                 | std::io::ErrorKind::ConnectionAborted
         )
     }
+
+    /// Check if error stream is available
 
     /// Reads exact number of bytes from the main stream
     pub async fn read_exact(&self, size: usize) -> Result<Vec<u8>, std::io::Error> {
@@ -340,6 +350,76 @@ impl XStream {
         }
     }
 
+    /// Read from the error stream
+    pub async fn error_read(&self) -> Result<Vec<u8>, std::io::Error> {
+        // Only outbound streams should read from error stream
+        if self.direction != XStreamDirection::Outbound {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Only outbound streams can read from error stream",
+            ));
+        }
+
+        let mut buf: Vec<u8> = Vec::new();
+        let stream_error_read = self.stream_error_read.clone();
+
+        // Acquire the lock and perform the read operation
+        let read_result = {
+            let mut guard = stream_error_read.lock().await;
+            guard.read_to_end(&mut buf).await
+        };
+
+        match read_result {
+            Ok(_) => Ok(buf),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Write an error to the error stream (only for inbound streams)
+    pub async fn error_write(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
+        // Only inbound streams can write errors
+        if self.direction != XStreamDirection::Inbound {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Only inbound streams can write to error stream",
+            ));
+        }
+
+        // Get the error stream write handle
+        let stream_error_write = self.stream_error_write.clone();
+        let mut error_stream = stream_error_write.lock().await;
+
+        // Write the error message
+        match error_stream.write_all(&buf).await {
+            Ok(_) => match error_stream.flush().await {
+                Ok(_) => {
+                    info!("Error written to stream {:?}", self.id);
+                }
+                Err(e) => {
+                    error!("Failed to flush error stream {:?}: {}", self.id, e);
+                    return Err(e)
+                }
+            },
+            Err(e) => {
+                error!("Failed to write to error stream {:?}: {}", self.id, e);
+                return Err(e)
+            }
+        }
+
+        match error_stream.close().await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!("Failed to write to error stream {:?}: {}", self.id, e);
+                Err(e)
+            }
+        }
+    }
+
+    /// Write a string error to the error stream (helper method)
+    pub async fn write_error(&self, error_message: &str) -> Result<(), std::io::Error> {
+        self.error_write(error_message.as_bytes().to_vec()).await
+    }
+
     /// Closes the streams
     pub async fn close(&mut self) -> Result<(), std::io::Error> {
         info!(
@@ -351,6 +431,14 @@ impl XStream {
         if self.is_local_closed() {
             debug!("Stream {:?} already locally closed", self.id);
             return Ok(());
+        }
+
+        // For inbound streams, we need to send a no-error marker before closing
+        if self.direction == XStreamDirection::Inbound {
+            // Close the error stream
+            let stream_error_write = self.stream_error_write.clone();
+            let mut error_stream = stream_error_write.lock().await;
+            //let _ = error_stream.close().await;
         }
 
         // Mark as locally closed
@@ -448,6 +536,8 @@ impl Clone for XStream {
         Self {
             stream_main_read: self.stream_main_read.clone(),
             stream_main_write: self.stream_main_write.clone(),
+            stream_error_read: self.stream_error_read.clone(),
+            stream_error_write: self.stream_error_write.clone(),
             id: self.id,
             peer_id: self.peer_id,
             direction: self.direction,
