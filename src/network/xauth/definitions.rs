@@ -1,10 +1,12 @@
-use std::{collections::HashMap, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use libp2p::{request_response::ResponseChannel, Multiaddr, PeerId};
 use serde::{Deserialize, Serialize};
 
 use super::por::por::ProofOfRepresentation;
-
 
 // Protocol identifier
 pub const PROTOCOL_ID: &str = "/por-auth/1.0.0";
@@ -12,7 +14,7 @@ pub const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 
 // Auth verification tracking struct - new
 pub struct PendingVerification {
-    pub peer_id: PeerId, 
+    pub peer_id: PeerId,
     pub address: Multiaddr,
     pub por: ProofOfRepresentation,
     pub metadata: HashMap<String, String>,
@@ -37,7 +39,6 @@ pub enum AuthResult {
     Ok(HashMap<String, String>),
     Error(String),
 }
-
 
 #[derive(Debug, Clone)]
 pub enum AuthDirection {

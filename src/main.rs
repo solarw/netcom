@@ -14,7 +14,7 @@ use std::{collections::HashMap, time::Duration};
 
 mod network;
 use libp2p::{Multiaddr, PeerId};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[derive(Parser, Debug)]
@@ -103,7 +103,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     cmd.listen_port(Some("127.0.0.1".to_string()), args.port)
         .await?;
 
-
     // Clone the Commander for the command input task
     let cmd_clone = Commander::new(cmd_tx.clone());
 
@@ -126,30 +125,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         if parts.len() >= 3 {
                             let peer_id_str = parts[1];
                             let message = parts[2];
-                    
+
                             match PeerId::from_str(peer_id_str) {
                                 Ok(peer_id) => {
                                     info!("🔗 Opening stream to {} to send message", peer_id);
-                    
+
                                     // Используем commander для открытия потока
                                     match cmd_clone.open_stream(peer_id).await {
                                         Ok(mut stream) => {
                                             info!("📤 Stream opened to {}", peer_id);
-                    
+
                                             // Отправляем сообщение
                                             let message_bytes = message.as_bytes().to_vec();
-                                            info!("📄 Sending message to {}: '{}'", peer_id, message);
-                    
+                                            info!(
+                                                "📄 Sending message to {}: '{}'",
+                                                peer_id, message
+                                            );
+
                                             match stream.write_all(message_bytes).await {
                                                 Ok(_) => {
-                                                    info!("✅ Message sent successfully to {}", peer_id);
-                    
+                                                    info!(
+                                                        "✅ Message sent successfully to {}",
+                                                        peer_id
+                                                    );
+
                                                     // Ждем немного перед закрытием потока
-                                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                                    tokio::time::sleep(Duration::from_millis(100))
+                                                        .await;
                                                 }
-                                                Err(e) => error!("❌ Failed to send message: {}", e),
+                                                Err(e) => {
+                                                    error!("❌ Failed to send message: {}", e)
+                                                }
                                             }
-                    
+
                                             // Закрываем поток
                                             match stream.close().await {
                                                 Ok(_) => info!("🔒 Stream closed successfully"),
@@ -306,13 +314,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 NetworkEvent::IncomingStream { stream } => {
                     let peer_id = stream.peer_id;
                     let stream_id = stream.id;
-                    
+
                     // Чистый, понятный вывод с эмодзи
                     info!("📥 Received stream from {} (id: {})", peer_id, stream_id);
-                
+
                     // Используем клон для чтения
                     let stream_clone = stream.clone();
-                    
+
                     // Запускаем чтение в отдельной задаче
                     tokio::spawn(async move {
                         // Читаем данные из потока
@@ -322,20 +330,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 match String::from_utf8(data.clone()) {
                                     Ok(message) => {
                                         // Чистый современный формат с эмодзи
-                                        info!("📩 Message received from {}: '{}'", peer_id, message.trim());
-                                    },
+                                        info!(
+                                            "📩 Message received from {}: '{}'",
+                                            peer_id,
+                                            message.trim()
+                                        );
+                                    }
                                     Err(_) => {
-                                        info!("📦 Binary data received from {}: {} bytes", peer_id, data.len());
+                                        info!(
+                                            "📦 Binary data received from {}: {} bytes",
+                                            peer_id,
+                                            data.len()
+                                        );
                                     }
                                 }
-                            },
+                            }
                             Err(e) => {
                                 warn!("❌ Error reading from stream {}: {}", stream_id, e);
                             }
                         }
-                        
+
                         // Поток закроется автоматически при выходе из области видимости
-                        info!("🔒 Finished processing stream {} from {}", stream_id, peer_id);
+                        info!(
+                            "🔒 Finished processing stream {} from {}",
+                            stream_id, peer_id
+                        );
                     });
                 }
 

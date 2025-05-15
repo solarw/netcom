@@ -9,8 +9,8 @@ use libp2p::{
 
 use libp2p_stream;
 
-use super::{xauth::behaviours::PorAuthBehaviour, xstream::behaviour::XStreamNetworkBehaviour};
 use super::xauth::por::por::ProofOfRepresentation;
+use super::{xauth::behaviours::PorAuthBehaviour, xstream::behaviour::XStreamNetworkBehaviour};
 
 // In the NodeBehaviour struct, use Toggle for mdns
 #[derive(NetworkBehaviour)]
@@ -66,7 +66,7 @@ pub fn make_behaviour(
 
     // 2. Disable periodic bootstrap (set to None)
     kad_config.set_periodic_bootstrap_interval(None);
-    
+
     // 3. Disable automatic bootstrap
     kad_config.set_automatic_bootstrap_throttle(None);
 
@@ -77,8 +77,7 @@ pub fn make_behaviour(
     // Create the Kademlia behavior with the custom config
     let mut kad_behaviour =
         kad::Behaviour::with_config(key.public().to_peer_id(), kad_store, kad_config);
-    
-    
+
     if kad_server_mode {
         kad_behaviour.set_mode(Some(kad::Mode::Server));
     } else {

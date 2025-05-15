@@ -15,8 +15,15 @@ use std::{
 use crate::network::xauth::definitions::DirectionalAuthState;
 
 // Import the ProofOfRepresentation from the por module
-use super::{connection_data::ConnectionData, definitions::{AuthDirection, AuthResult, CombinedAuthState, PendingVerification, PorAuthRequest, PorAuthResponse, AUTH_TIMEOUT, PROTOCOL_ID}, events::PorAuthEvent, por::por::ProofOfRepresentation};
-
+use super::{
+    connection_data::ConnectionData,
+    definitions::{
+        AuthDirection, AuthResult, CombinedAuthState, PendingVerification, PorAuthRequest,
+        PorAuthResponse, AUTH_TIMEOUT, PROTOCOL_ID,
+    },
+    events::PorAuthEvent,
+    por::por::ProofOfRepresentation,
+};
 
 // Define the behaviour
 pub struct PorAuthBehaviour {
@@ -25,7 +32,7 @@ pub struct PorAuthBehaviour {
 
     // Improved connection tracking - now using ConnectionId
     connections: HashMap<ConnectionId, ConnectionData>,
-    
+
     // Lookup from PeerId to ConnectionId(s)
     peer_connections: HashMap<PeerId, HashSet<ConnectionId>>,
 
@@ -37,7 +44,7 @@ pub struct PorAuthBehaviour {
 
     // Additional metadata to send with auth request
     metadata: HashMap<String, String>,
-    
+
     // Storage for pending PoR verifications using ConnectionId
     pending_verifications: HashMap<ConnectionId, PendingVerification>,
 }
@@ -85,26 +92,30 @@ impl PorAuthBehaviour {
         channel: ResponseChannel<PorAuthResponse>,
     ) {
         // Log the received authentication request
-        println!("Received auth request from {:?} on connection {:?}", peer_id, connection_id);
-    
+        println!(
+            "Received auth request from {:?} on connection {:?}",
+            peer_id, connection_id
+        );
+
         if let Some(conn) = self.connections.get_mut(&connection_id) {
             conn.touch();
-    
+
             // Get address for event
             let address = conn.address.clone();
-            
+
             // Store the verification request with connection_id
             let verification = PendingVerification {
-                peer_id, 
+                peer_id,
                 address: address.clone(),
                 por: request.por.clone(),
                 metadata: request.metadata.clone(),
                 response_channel: channel, // канал сохраняется только здесь
                 received_at: Instant::now(),
             };
-            
-            self.pending_verifications.insert(connection_id, verification);
-    
+
+            self.pending_verifications
+                .insert(connection_id, verification);
+
             // Forward the PoR verification request to the application (без channel)
             self.pending_events
                 .push_back(ToSwarm::GenerateEvent(PorAuthEvent::VerifyPorRequest {
@@ -119,10 +130,10 @@ impl PorAuthBehaviour {
 
     // Process the authentication response from the remote peer
     fn handle_auth_response(
-        &mut self, 
-        peer_id: PeerId, 
-        connection_id: ConnectionId, 
-        response: PorAuthResponse
+        &mut self,
+        peer_id: PeerId,
+        connection_id: ConnectionId,
+        response: PorAuthResponse,
     ) {
         println!(
             "Received auth response from {:?} on connection {:?}: {:?}",
@@ -189,7 +200,10 @@ impl PorAuthBehaviour {
             // Update state
             conn.start_outbound_auth();
 
-            println!("Starting outbound auth with peer {:?} on connection {:?}", peer_id, connection_id);
+            println!(
+                "Starting outbound auth with peer {:?} on connection {:?}",
+                peer_id, connection_id
+            );
 
             // Send authentication request
             let request = PorAuthRequest {
@@ -207,7 +221,10 @@ impl PorAuthBehaviour {
             // Set state to waiting for inbound auth
             conn.start_inbound_auth();
 
-            println!("Waiting for inbound auth from peer {:?} on connection {:?}", peer_id, connection_id);
+            println!(
+                "Waiting for inbound auth from peer {:?} on connection {:?}",
+                peer_id, connection_id
+            );
         }
     }
 
@@ -220,7 +237,12 @@ impl PorAuthBehaviour {
         // Get the pending verification and remove it
         let verification = match self.pending_verifications.remove(&connection_id) {
             Some(v) => v,
-            None => return Err(format!("No pending verification for connection ID {:?}", connection_id)),
+            None => {
+                return Err(format!(
+                    "No pending verification for connection ID {:?}",
+                    connection_id
+                ))
+            }
         };
 
         // Send the response
@@ -248,7 +270,7 @@ impl PorAuthBehaviour {
                 AuthResult::Ok(_) => {
                     // Update connection state
                     conn.set_inbound_auth_success();
-                    
+
                     // Check state before dropping the borrow
                     need_outbound_auth = conn.is_outbound_not_started();
                     is_fully_authenticated = matches!(
@@ -284,7 +306,7 @@ impl PorAuthBehaviour {
                 AuthResult::Error(reason) => {
                     conn.set_inbound_auth_failed(reason.clone());
                     need_outbound_auth = false;
-                    
+
                     // Generate outbound auth failure event
                     self.pending_events.push_back(ToSwarm::GenerateEvent(
                         PorAuthEvent::OutboundAuthFailure {
@@ -304,10 +326,13 @@ impl PorAuthBehaviour {
                 // Now start outbound auth (which will take another mutable borrow)
                 self.start_outbound_auth(peer_id, connection_id);
             }
-            
+
             Ok(())
         } else {
-            Err(format!("Connection data not found for connection ID {:?}", connection_id))
+            Err(format!(
+                "Connection data not found for connection ID {:?}",
+                connection_id
+            ))
         }
     }
 
@@ -316,15 +341,20 @@ impl PorAuthBehaviour {
         // Get the peer ID from connection data
         let peer_id = match self.connections.get(&connection_id) {
             Some(conn) => conn.peer_id,
-            None => return Err(format!("No connection data for connection ID {:?}", connection_id)),
+            None => {
+                return Err(format!(
+                    "No connection data for connection ID {:?}",
+                    connection_id
+                ))
+            }
         };
-        
+
         // Start outbound authentication
         self.start_outbound_auth(peer_id, connection_id);
 
         // Begin waiting for inbound authentication
         self.start_inbound_auth_waiting(peer_id, connection_id);
-        
+
         Ok(())
     }
 
@@ -386,11 +416,11 @@ impl PorAuthBehaviour {
                 );
             }
         }
-        
+
         // Also check for verification timeouts
         let timeout = Duration::from_secs(30); // 30 seconds timeout for verifications
         let now = Instant::now();
-        
+
         let timed_out_verifications: Vec<ConnectionId> = self
             .pending_verifications
             .iter()
@@ -402,13 +432,15 @@ impl PorAuthBehaviour {
                 }
             })
             .collect();
-            
+
         // Remove timed out verifications
         for conn_id in timed_out_verifications {
             if let Some(verification) = self.pending_verifications.remove(&conn_id) {
-                println!("PoR verification for peer {:?} on connection {:?} timed out", 
-                         verification.peer_id, conn_id);
-                         
+                println!(
+                    "PoR verification for peer {:?} on connection {:?} timed out",
+                    verification.peer_id, conn_id
+                );
+
                 // Try to send a timeout response
                 let _ = self.request_response.send_response(
                     verification.response_channel,
@@ -449,9 +481,12 @@ impl PorAuthBehaviour {
         }
         None
     }
-    
+
     // Get a pending verification by peer_id
-    pub fn get_pending_verification(&self, peer_id: &PeerId) -> Option<(ConnectionId, &PendingVerification)> {
+    pub fn get_pending_verification(
+        &self,
+        peer_id: &PeerId,
+    ) -> Option<(ConnectionId, &PendingVerification)> {
         for (conn_id, verification) in &self.pending_verifications {
             if &verification.peer_id == peer_id {
                 return Some((*conn_id, verification));
@@ -481,18 +516,21 @@ impl NetworkBehaviour for PorAuthBehaviour {
             remote_addr,
         ) {
             Ok(handler) => {
-                println!("Established inbound connection with peer: {:?} (connection ID: {:?})", peer, connection_id);
+                println!(
+                    "Established inbound connection with peer: {:?} (connection ID: {:?})",
+                    peer, connection_id
+                );
 
                 // Store the connection for our tracking
                 let conn_data = ConnectionData::new(peer, connection_id, remote_addr.clone());
                 self.connections.insert(connection_id, conn_data);
-                
+
                 // Update peer to connection mapping
                 self.peer_connections
                     .entry(peer)
                     .or_insert_with(HashSet::new)
                     .insert(connection_id);
-                    
+
                 Ok(handler)
             }
             Err(e) => Err(e),
@@ -518,18 +556,21 @@ impl NetworkBehaviour for PorAuthBehaviour {
                 port_use,
             ) {
             Ok(handler) => {
-                println!("Established outbound connection with peer: {:?} (connection ID: {:?})", peer, connection_id);
+                println!(
+                    "Established outbound connection with peer: {:?} (connection ID: {:?})",
+                    peer, connection_id
+                );
 
                 // Store the connection for our tracking
                 let conn_data = ConnectionData::new(peer, connection_id, addr.clone());
                 self.connections.insert(connection_id, conn_data);
-                
+
                 // Update peer to connection mapping
                 self.peer_connections
                     .entry(peer)
                     .or_insert_with(HashSet::new)
                     .insert(connection_id);
-                    
+
                 Ok(handler)
             }
             Err(e) => Err(e),
@@ -572,9 +613,10 @@ impl NetworkBehaviour for PorAuthBehaviour {
                             self.peer_connections.remove(&conn.peer_id);
                         }
                     }
-                    
+
                     // Remove any pending verification for this connection
-                    self.pending_verifications.remove(&connection_closed.connection_id);
+                    self.pending_verifications
+                        .remove(&connection_closed.connection_id);
                 }
             }
             _ => {}
@@ -620,7 +662,10 @@ impl NetworkBehaviour for PorAuthBehaviour {
                     error,
                     ..
                 }) => {
-                    println!("Outbound failure for peer {:?} on connection {:?}: {:?}", peer, connection_id, error);
+                    println!(
+                        "Outbound failure for peer {:?} on connection {:?}: {:?}",
+                        peer, connection_id, error
+                    );
 
                     // Mark connection as failed if it exists
                     // Mark connection as failed if it exists
@@ -648,7 +693,10 @@ impl NetworkBehaviour for PorAuthBehaviour {
                     error,
                     ..
                 }) => {
-                    println!("Inbound failure for peer {:?} on connection {:?}: {:?}", peer, connection_id, error);
+                    println!(
+                        "Inbound failure for peer {:?} on connection {:?}: {:?}",
+                        peer, connection_id, error
+                    );
 
                     // Mark connection as failed if it exists
                     if let Some(conn) = self.connections.get_mut(&connection_id) {

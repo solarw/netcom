@@ -97,7 +97,7 @@ impl XStreamIDIterator {
     pub fn with_start(start: u128) -> Self {
         let high = (start >> 64) as u64;
         let low = start as u64;
-        
+
         Self {
             high: Arc::new(AtomicU64::new(high)),
             low: Arc::new(AtomicU64::new(low)),
@@ -111,16 +111,16 @@ impl Iterator for XStreamIDIterator {
     fn next(&mut self) -> Option<Self::Item> {
         // Increment the low part first
         let low = self.low.fetch_add(1, Ordering::SeqCst);
-        
+
         // If low part wrapped around to 0, increment the high part
         if low == u64::MAX {
             self.high.fetch_add(1, Ordering::SeqCst);
         }
-        
+
         // Combine high and low parts into u128
         let high_u128 = (self.high.load(Ordering::SeqCst) as u128) << 64;
         let current = high_u128 | (low as u128);
-        
+
         // Return the current value as XStreamID
         Some(XStreamID(current))
     }
@@ -142,40 +142,40 @@ mod tests {
     #[test]
     fn test_xstream_id_iterator() {
         let mut iter = XStreamIDIterator::new();
-        
+
         assert_eq!(iter.next(), Some(XStreamID(0)));
         assert_eq!(iter.next(), Some(XStreamID(1)));
         assert_eq!(iter.next(), Some(XStreamID(2)));
-        
+
         // Test that clone continues from the same sequence
         let mut clone_iter = iter.clone();
         assert_eq!(clone_iter.next(), Some(XStreamID(3)));
         assert_eq!(iter.next(), Some(XStreamID(4)));
     }
-    
+
     #[test]
     fn test_xstream_id_conversion() {
         let id = XStreamID(42);
         let value: u128 = id.into();
         assert_eq!(value, 42);
-        
+
         let id_back = XStreamID::from(value);
         assert_eq!(id, id_back);
     }
-    
+
     #[test]
     fn test_xstream_id_display() {
         let id = XStreamID(42);
         assert_eq!(format!("{}", id), "42");
     }
-    
+
     #[test]
     fn test_substream_role_from_u8() {
         assert_eq!(SubstreamRole::from(0), SubstreamRole::Main);
         assert_eq!(SubstreamRole::from(1), SubstreamRole::Error);
         assert_eq!(SubstreamRole::from(2), SubstreamRole::Main); // Default to Main for unknown values
     }
-    
+
     #[test]
     fn test_xstream_state_from_u8() {
         assert_eq!(XStreamState::from(0), XStreamState::Open);

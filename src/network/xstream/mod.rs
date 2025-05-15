@@ -1,8 +1,10 @@
+pub mod behaviour;
 pub mod consts;
+pub mod events;
+pub mod handler;
+pub mod header;
+pub mod pending_streams;
+pub mod protocol;
+pub mod types;
 pub mod utils;
 pub mod xstream;
-pub mod events;
-pub mod protocol;
-pub mod handler;
-pub mod behaviour;
-pub mod types;

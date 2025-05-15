@@ -6,7 +6,6 @@ use super::commands::NetworkCommand;
 use super::xauth::definitions::AuthResult;
 use super::xstream::xstream::XStream;
 
-
 pub struct Commander {
     cmd_tx: mpsc::Sender<NetworkCommand>,
 }
@@ -233,16 +232,16 @@ impl Commander {
     ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
         // First, broadcast ourselves to the network
         println!("Broadcasting our presence to the network...");
-    
+
         // Make sure Kademlia is enabled
         match self.cmd_tx.send(NetworkCommand::EnableKad).await {
             Ok(_) => println!("Kademlia enabled"),
             Err(e) => println!("Failed to enable Kademlia: {}", e),
         }
-    
+
         // Fixed interval of 100ms between attempts
         let retry_interval = Duration::from_millis(100);
-        
+
         // Calculate maximum attempts based on timeout (if provided)
         // Default to a reasonable number if no timeout is specified
         let max_attempts = match timeout_secs {
@@ -253,22 +252,22 @@ impl Commander {
             }
             None => 100, // Default max attempts if no timeout specified
         };
-    
+
         // Create a future representing the search operation
         let search_future = async {
             // Start looking for the peer
             println!("Initiating search for peer: {}", peer_id);
-    
+
             // Start an explicit DHT search
             self.find_peer_addresses(peer_id).await?;
-            
+
             // Try multiple times with fixed delay
             for attempt in 1..=max_attempts {
                 println!("Attempt {} to find peer {} via Kademlia", attempt, peer_id);
-    
+
                 // Get the latest addresses
                 let addrs = self.get_peer_addresses(peer_id).await?;
-    
+
                 if addrs.is_empty() {
                     println!(
                         "No addresses found for peer {} on attempt {}",
@@ -280,15 +279,19 @@ impl Commander {
                     tokio::time::sleep(retry_interval).await;
                     continue;
                 }
-    
+
                 // Return the addresses we found
                 println!("Found {} addresses for peer {}", addrs.len(), peer_id);
                 return Ok(addrs);
             }
-    
-            Err(format!("Failed to find peer addresses via Kademlia after {} attempts", max_attempts).into())
+
+            Err(format!(
+                "Failed to find peer addresses via Kademlia after {} attempts",
+                max_attempts
+            )
+            .into())
         };
-    
+
         // If timeout is provided, use tokio::time::timeout with seconds converted to Duration
         match timeout_secs {
             Some(secs) => {

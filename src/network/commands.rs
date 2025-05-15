@@ -1,9 +1,9 @@
 // Файл: ./src/network/commands.rs
 
-use libp2p::{Multiaddr, PeerId, swarm::ConnectionId};
+use super::{xauth::definitions::AuthResult, xstream::xstream::XStream};
+use libp2p::{swarm::ConnectionId, Multiaddr, PeerId};
 use std::error::Error;
 use tokio::sync::oneshot;
-use super::{xauth::definitions::AuthResult, xstream::xstream::XStream};
 
 // Update the NetworkCommand enum in commands.rs
 #[derive(Debug)]
@@ -15,7 +15,7 @@ pub enum NetworkCommand {
     // KAD commands
     EnableKad,
     DisableKad,
-    
+
     // NEW: Add BootstrapKad command
     BootstrapKad {
         response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
@@ -62,19 +62,19 @@ pub enum NetworkCommand {
         peer_id: PeerId,
         response: oneshot::Sender<Vec<Multiaddr>>,
     },
-    
+
     // Initiate a network search for a peer's addresses
     FindPeerAddresses {
         peer_id: PeerId,
         response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
     },
-    
+
     // Check if a peer is authenticated
     IsPeerAuthenticated {
         peer_id: PeerId,
         response: oneshot::Sender<bool>,
     },
-    
+
     // Submit PoR verification result
     SubmitPorVerification {
         connection_id: ConnectionId,
@@ -82,7 +82,7 @@ pub enum NetworkCommand {
     },
 
     OpenStream {
-        peer_id: PeerId, 
+        peer_id: PeerId,
         connection_id: Option<ConnectionId>,
         response: oneshot::Sender<Result<XStream, String>>,
     },

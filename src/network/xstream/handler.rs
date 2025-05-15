@@ -1,8 +1,9 @@
 use std::task::{Context, Poll};
 
+use super::header::{read_header_from_stream, write_header_to_stream, XStreamHeader};
+use super::types::{SubstreamRole, XStreamDirection, XStreamID, XStreamIDIterator};
 use super::xstream::XStream;
-use super::types::{XStreamID, XStreamIDIterator, XStreamDirection};
-use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use libp2p::{
     swarm::{
         handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound},
@@ -11,24 +12,26 @@ use libp2p::{
     PeerId, Stream, StreamProtocol,
 };
 use tokio::sync::mpsc;
+use tracing::{debug, error, info, trace};
 
 use super::consts::XSTREAM_PROTOCOL;
 
 /// Возможные события, которые handler может отправить в behaviour
 #[derive(Debug)]
 pub enum XStreamHandlerEvent {
-    /// Установлен новый stream
+    /// Установлен новый входящий поток
     IncomingStreamEstablished {
-        /// Идентификатор потока
-        stream_id: XStreamID,
-        /// Поток XStream
-        stream: XStream,
+        /// libp2p Stream (сырой поток)
+        stream: Stream,
     },
+    /// Установлен новый исходящий поток
     OutboundStreamEstablished {
+        /// libp2p Stream (сырой поток)
+        stream: Stream,
+        /// Роль потока
+        role: SubstreamRole,
         /// Идентификатор потока
         stream_id: XStreamID,
-        /// Поток XStream
-        stream: XStream,
     },
     /// Произошла ошибка при работе со stream
     StreamError {
@@ -47,8 +50,20 @@ pub enum XStreamHandlerEvent {
 /// Команды, которые behaviour может отправить в handler
 #[derive(Debug)]
 pub enum XStreamHandlerIn {
-    /// Открыть новый поток
-    OpenStream,
+    /// Открыть поток с указанным ID и ролью
+    OpenStreamWithRole {
+        /// Идентификатор потока
+        stream_id: XStreamID,
+        /// Роль потока
+        role: SubstreamRole,
+    },
+}
+
+/// Информация о запрошенном потоке
+#[derive(Debug, Clone)]
+pub struct XStreamOpenInfo {
+    pub stream_id: XStreamID,
+    pub role: SubstreamRole,
 }
 
 /// Простая реализация протокола потока
@@ -66,8 +81,6 @@ impl XStreamProtocol {
 
 /// Handler для XStream
 pub struct XStreamHandler {
-    /// Итератор для генерации уникальных ID
-    id_iter: XStreamIDIterator,
     /// Активные потоки
     streams: Vec<XStream>,
     /// Очередь исходящих событий
@@ -78,19 +91,25 @@ pub struct XStreamHandler {
     peer_id: PeerId,
     /// Sender for closure notifications
     closure_sender: Option<mpsc::UnboundedSender<(PeerId, XStreamID)>>,
+
+    outgoing_event_sender: mpsc::UnboundedSender<XStreamHandlerEvent>,
+    /// Receiver for messages from PendingStreamsManager
+    outgoing_event_receiver: mpsc::UnboundedReceiver<XStreamHandlerEvent>,
 }
 
 impl XStreamHandler {
     /// Создает новый XStreamHandler
     pub fn new() -> Self {
         // Используем дефолтный PeerId, который будет заменен позже
+        let (tx, rx) = mpsc::unbounded_channel();
         Self {
-            id_iter: XStreamIDIterator::new(),
             streams: Vec::new(),
             outgoing_events: Vec::new(),
             pending_commands: Vec::new(),
             peer_id: PeerId::random(),
             closure_sender: None,
+            outgoing_event_sender: tx,
+            outgoing_event_receiver: rx,
         }
     }
 
@@ -98,7 +117,6 @@ impl XStreamHandler {
     pub fn set_peer_id(&mut self, peer_id: PeerId) {
         self.peer_id = peer_id;
     }
-    
     /// Sets the closure sender
     pub fn set_closure_sender(&mut self, sender: mpsc::UnboundedSender<(PeerId, XStreamID)>) {
         self.closure_sender = Some(sender);
@@ -109,82 +127,76 @@ impl XStreamHandler {
         self.streams.iter_mut().find(|s| s.id == stream_id)
     }
 
-    /// Обрабатывает новый входящий поток
+    /// Обрабатывает новый входящий поток - передаем как есть в behaviour
     fn handle_inbound_stream(&mut self, stream: Stream, protocol: StreamProtocol) {
-        println!("INBOUND");
-        let stream_id = self.id_iter.next().unwrap();
-        let (read, write) = AsyncReadExt::split(stream);
-
-        // Get closure_sender, or early return if none
-        let closure_sender = match &self.closure_sender {
-            Some(sender) => sender.clone(),
-            None => {
-                self.outgoing_events.push(XStreamHandlerEvent::StreamError {
-                    stream_id: Some(stream_id),
-                    error: "No closure sender available for stream creation".to_string(),
-                });
-                return;
-            }
-        };
-
-        // Создаем XStream с указанием направления Inbound
-        let xstream = XStream::new(
-            stream_id, 
-            self.peer_id, 
-            read, 
-            write, 
-            XStreamDirection::Inbound, // Указываем направление
-            closure_sender
-        );
-
-        self.streams.push(xstream.clone());
-        self.outgoing_events
-            .push(XStreamHandlerEvent::IncomingStreamEstablished {
-                stream_id,
-                stream: xstream,
-            });
+        debug!("Handling new inbound stream");
+        // Отправляем поток как есть в behaviour
+        let sender = self.outgoing_event_sender.clone();
+        tokio::spawn(async move {
+            sender
+                .send(XStreamHandlerEvent::IncomingStreamEstablished { stream })
+                .unwrap();
+        });
+        //self.outgoing_events
+        //    .push(XStreamHandlerEvent::IncomingStreamEstablished { stream });
     }
 
-    fn handle_outbound_stream(&mut self, stream: Stream, protocol: StreamProtocol) {
-        println!("OUTBOUND");
-        let stream_id = self.id_iter.next().unwrap();
-        let (read, write) = AsyncReadExt::split(stream);
-    
-        // Get closure_sender, or early return if none
-        let closure_sender = match &self.closure_sender {
-            Some(sender) => sender.clone(),
-            None => {
-                self.outgoing_events.push(XStreamHandlerEvent::StreamError {
-                    stream_id: Some(stream_id),
-                    error: "No closure sender available for stream creation".to_string(),
-                });
-                return;
-            }
-        };
-        
-        // Создаем XStream с указанием направления Outbound
-        let xstream = XStream::new(
-            stream_id, 
-            self.peer_id, 
-            read, 
-            write, 
-            XStreamDirection::Outbound, // Указываем направление
-            closure_sender
+    /// Обрабатывает новый исходящий поток - передаем с информацией о запросе
+    fn handle_outbound_stream(
+        &mut self,
+        stream: Stream,
+        protocol: StreamProtocol,
+        info: XStreamOpenInfo,
+    ) {
+        debug!(
+            "Handling new outbound stream with ID: {:?} and role: {:?}",
+            info.stream_id, info.role
         );
 
-        self.streams.push(xstream.clone());
-        self.outgoing_events
-            .push(XStreamHandlerEvent::OutboundStreamEstablished {
-                stream_id,
-                stream: xstream,
-            });
+        // Записываем заголовок перед отправкой потока в behaviour
+        let sender = self.outgoing_event_sender.clone();
+        tokio::spawn({
+            let stream_id = info.stream_id;
+            let role = info.role;
+            async move {
+                // Создаем заголовок
+                let header = XStreamHeader::new(stream_id, role);
+
+                // Разделяем поток
+                let (mut read, mut write) = AsyncReadExt::split(stream);
+
+                // Записываем заголовок
+                if let Err(e) = write_header_to_stream(&mut write, &header).await {
+                    error!("Failed to write header to stream: {}", e);
+                    // TODO: не смогли открыть один поток, надо уведомить.
+                }
+                let reunion_stream = read.reunite(write).unwrap();
+
+                // Отправляем поток в behaviour с информацией о роли и ID
+                sender
+                    .send(XStreamHandlerEvent::OutboundStreamEstablished {
+                        stream: reunion_stream,
+                        role: info.role,
+                        stream_id: info.stream_id,
+                    })
+                    .unwrap();
+            }
+        });
     }
 
-    /// Открывает новый исходящий поток
-    fn open_outbound_stream(&mut self) -> SubstreamProtocol<XStreamProtocol, ()> {
+    /// Открывает поток с указанным ID и ролью
+    fn open_stream_with_role(
+        &mut self,
+        stream_id: XStreamID,
+        role: SubstreamRole,
+    ) -> SubstreamProtocol<XStreamProtocol, XStreamOpenInfo> {
         // Создаем протокол с нашим StreamProtocol
         let proto = XStreamProtocol::new(XSTREAM_PROTOCOL.clone());
-        SubstreamProtocol::new(proto, ())
+
+        // Создаем информацию об открытии
+        let info = XStreamOpenInfo { stream_id, role };
+
+        SubstreamProtocol::new(proto, info)
     }
 
     /// Получает XStream по его ID
@@ -230,7 +242,7 @@ impl ConnectionHandler for XStreamHandler {
     type InboundProtocol = XStreamProtocol;
     type OutboundProtocol = XStreamProtocol;
     type InboundOpenInfo = ();
-    type OutboundOpenInfo = ();
+    type OutboundOpenInfo = XStreamOpenInfo;
 
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, Self::InboundOpenInfo> {
         // Создаем протокол с нашим StreamProtocol
@@ -240,23 +252,37 @@ impl ConnectionHandler for XStreamHandler {
 
     fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
         match event {
-            XStreamHandlerIn::OpenStream => {
-                self.pending_commands.push(XStreamHandlerIn::OpenStream);
+            XStreamHandlerIn::OpenStreamWithRole { stream_id, role } => {
+                self.pending_commands
+                    .push(XStreamHandlerIn::OpenStreamWithRole { stream_id, role });
             }
         }
     }
 
     fn connection_keep_alive(&self) -> bool {
-        !self.streams.is_empty() // Uncomment this line
+        !self.streams.is_empty() || !self.pending_commands.is_empty()
     }
 
     fn poll(
         &mut self,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
     ) -> Poll<
         ConnectionHandlerEvent<Self::OutboundProtocol, Self::OutboundOpenInfo, Self::ToBehaviour>,
     > {
         // Обрабатываем исходящие события
+        match self.outgoing_event_receiver.poll_recv(cx) {
+            Poll::Ready(Some(event)) => {
+                return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(event));
+            }
+            Poll::Ready(None) => {
+                error!("[POLL] PendingStreams message channel closed unexpectedly");
+            }
+            Poll::Pending => {
+                // No messages from PendingStreamsManager, continue
+                trace!("[POLL] No messages from PendingStreamsManager");
+            }
+        }
+
         if !self.outgoing_events.is_empty() {
             return Poll::Ready(ConnectionHandlerEvent::NotifyBehaviour(
                 self.outgoing_events.remove(0),
@@ -266,9 +292,10 @@ impl ConnectionHandler for XStreamHandler {
         // Обрабатываем входящие команды
         if !self.pending_commands.is_empty() {
             match self.pending_commands.remove(0) {
-                XStreamHandlerIn::OpenStream => {
+                XStreamHandlerIn::OpenStreamWithRole { stream_id, role } => {
+                    // Открываем поток с указанным ID и ролью
                     return Poll::Ready(ConnectionHandlerEvent::OutboundSubstreamRequest {
-                        protocol: self.open_outbound_stream(),
+                        protocol: self.open_stream_with_role(stream_id, role),
                     });
                 }
             }
@@ -280,7 +307,7 @@ impl ConnectionHandler for XStreamHandler {
 
     fn on_connection_event(
         &mut self,
-        event: ConnectionEvent<Self::InboundProtocol, Self::OutboundProtocol>,
+        event: ConnectionEvent<'_, XStreamProtocol, XStreamProtocol, (), XStreamOpenInfo>,
     ) {
         match event {
             ConnectionEvent::FullyNegotiatedInbound(FullyNegotiatedInbound {
@@ -291,22 +318,39 @@ impl ConnectionHandler for XStreamHandler {
             }
             ConnectionEvent::FullyNegotiatedOutbound(FullyNegotiatedOutbound {
                 protocol: (stream, protocol),
-                info: (),
+                info,
             }) => {
-                // Обрабатываем исходящий поток аналогично входящему
-                self.handle_outbound_stream(stream, protocol);
+                self.handle_outbound_stream(stream, protocol, info);
             }
             ConnectionEvent::ListenUpgradeError(error) => {
-                self.outgoing_events.push(XStreamHandlerEvent::StreamError {
-                    stream_id: None,
-                    error: format!("Listen upgrade error: {:?}", error.error),
+                let sender = self.outgoing_event_sender.clone();
+                tokio::spawn(async move {
+                    sender
+                        .send(XStreamHandlerEvent::StreamError {
+                            stream_id: None,
+                            error: format!("Listen upgrade error: {:?}", error.error),
+                        })
+                        .unwrap();
                 });
+                //self.outgoing_events.push(XStreamHandlerEvent::StreamError {
+                //    stream_id: None,
+                //    error: format!("Listen upgrade error: {:?}", error.error),
+                //});
             }
             ConnectionEvent::DialUpgradeError(error) => {
-                self.outgoing_events.push(XStreamHandlerEvent::StreamError {
-                    stream_id: None,
-                    error: format!("Dial upgrade error: {:?}", error.error),
+                let sender = self.outgoing_event_sender.clone();
+                tokio::spawn(async move {
+                    sender
+                        .send(XStreamHandlerEvent::StreamError {
+                            stream_id: None,
+                            error: format!("Dial upgrade error: {:?}", error.error),
+                        })
+                        .unwrap();
                 });
+                //self.outgoing_events.push(XStreamHandlerEvent::StreamError {
+                //    stream_id: None,
+                //    error: format!("Dial upgrade error: {:?}", error.error),
+                //});
             }
             _ => {
                 // Остальные события не представляют интереса для XStream

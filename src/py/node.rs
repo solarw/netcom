@@ -46,7 +46,7 @@ pub struct Node {
     /// Keypair for the node
     key_pair: KeyPair,
     enable_mdns: bool,
-    kad_server_mode: bool
+    kad_server_mode: bool,
 }
 
 #[pymethods]
@@ -66,7 +66,7 @@ impl Node {
             running: Arc::new(Mutex::new(false)),
             key_pair,
             enable_mdns,
-            kad_server_mode
+            kad_server_mode,
         }
     }
 
@@ -99,7 +99,7 @@ impl Node {
 
             // Create the network node
             let enable_mdns = false; // We'll control this with explicit commands
-             // We'll control this with explicit commands
+                                     // We'll control this with explicit commands
 
             let result = NetworkNode::new(key_pair, por, enable_mdns, kad_server_mode).await;
 
@@ -385,7 +385,7 @@ impl Node {
         &self,
         py: Python<'py>,
         peer_id: &PyPeerId,
-        timeout_secs: Option<u64>
+        timeout_secs: Option<u64>,
     ) -> PyResult<&'py PyAny> {
         let commander = self.commander.clone();
         let peer_id = peer_id.inner.clone();

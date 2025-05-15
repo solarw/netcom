@@ -4,7 +4,6 @@ use libp2p::{swarm::ConnectionId, Multiaddr, PeerId};
 
 use super::{definitions::AuthDirection, por::por::ProofOfRepresentation};
 
-
 // Events emitted by the behaviour
 #[derive(Debug, Clone)]
 pub enum PorAuthEvent {

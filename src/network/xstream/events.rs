@@ -1,5 +1,5 @@
-use libp2p::PeerId;
 use super::types::XStreamID;
+use libp2p::PeerId;
 
 /// События, генерируемые XStreamNetworkBehaviour
 #[derive(Debug)]

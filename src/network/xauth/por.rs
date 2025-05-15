@@ -2,13 +2,13 @@ use libp2p::{
     identity::{Keypair, PublicKey},
     PeerId,
 };
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // Create a module with serialization/deserialization logic for PublicKey
 mod public_key_serde {
     use libp2p::identity::PublicKey;
-    use serde::{Deserializer, Serializer, de};
+    use serde::{de, Deserializer, Serializer};
     use std::fmt;
 
     pub fn serialize<S>(key: &PublicKey, serializer: S) -> Result<S::Ok, S::Error>
@@ -74,28 +74,28 @@ pub mod por {
         /// Owner's public key
         #[serde(with = "public_key_serde")]
         pub owner_public_key: PublicKey,
-        
+
         /// PeerId of the node representing the owner
         pub peer_id: PeerId,
-        
+
         /// Timestamp of credential creation (UNIX timestamp in seconds)
         pub issued_at: u64,
-        
+
         /// Expiration time of the credential (UNIX timestamp in seconds)
         pub expires_at: u64,
-        
+
         /// Digital signature created with the owner's private key
         pub signature: Vec<u8>,
     }
-    
+
     impl ProofOfRepresentation {
         /// Create a new POR with a valid signature
-        /// 
+        ///
         /// # Arguments
         /// * `owner_keypair` - Owner's Keypair for signing
         /// * `peer_id` - PeerId of the node being delegated authority
         /// * `validity_duration` - Validity period of the credential
-        /// 
+        ///
         /// # Returns
         /// A new ProofOfRepresentation instance with a valid signature
         pub fn create(
@@ -108,25 +108,21 @@ pub mod por {
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| format!("System time error: {}", e))?
                 .as_secs();
-            
+
             // Calculate expiration time
             let expires_at = now + validity_duration.as_secs();
-            
+
             // Get public key
             let public_key = owner_keypair.public();
-            
+
             // Prepare data for signing
-            let message = Self::prepare_message_for_signing(
-                &public_key,
-                &peer_id,
-                now,
-                expires_at,
-            );
-            
+            let message = Self::prepare_message_for_signing(&public_key, &peer_id, now, expires_at);
+
             // Create signature
-            let signature = owner_keypair.sign(&message)
+            let signature = owner_keypair
+                .sign(&message)
                 .map_err(|e| format!("Signature creation error: {}", e))?;
-            
+
             Ok(Self {
                 owner_public_key: public_key,
                 peer_id,
@@ -135,7 +131,7 @@ pub mod por {
                 signature,
             })
         }
-        
+
         /// Create POR with specified start and end times (for testing)
         pub fn create_with_times(
             owner_keypair: &Keypair,
@@ -145,19 +141,16 @@ pub mod por {
         ) -> Result<Self, String> {
             // Get public key
             let public_key = owner_keypair.public();
-            
+
             // Prepare data for signing
-            let message = Self::prepare_message_for_signing(
-                &public_key,
-                &peer_id,
-                issued_at,
-                expires_at,
-            );
-            
+            let message =
+                Self::prepare_message_for_signing(&public_key, &peer_id, issued_at, expires_at);
+
             // Create signature
-            let signature = owner_keypair.sign(&message)
+            let signature = owner_keypair
+                .sign(&message)
                 .map_err(|e| format!("Signature creation error: {}", e))?;
-            
+
             Ok(Self {
                 owner_public_key: public_key,
                 peer_id,
@@ -166,7 +159,7 @@ pub mod por {
                 signature,
             })
         }
-        
+
         /// Validate the POR
         ///
         /// # Returns
@@ -177,19 +170,19 @@ pub mod por {
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| format!("System time error: {}", e))?
                 .as_secs();
-            
+
             if now < self.issued_at {
                 return Err("POR not yet valid".to_string());
             }
-            
+
             if now > self.expires_at {
                 return Err("POR has expired".to_string());
             }
-            
+
             // Verify signature
             self.verify_signature()
         }
-        
+
         /// Verify POR signature
         ///
         /// # Returns
@@ -202,7 +195,7 @@ pub mod por {
                 self.issued_at,
                 self.expires_at,
             );
-            
+
             // Verify signature
             if self.owner_public_key.verify(&message, &self.signature) {
                 Ok(())
@@ -210,7 +203,7 @@ pub mod por {
                 Err("Invalid signature".to_string())
             }
         }
-        
+
         /// Prepare message for signing/verification
         fn prepare_message_for_signing(
             owner_public_key: &PublicKey,
@@ -220,39 +213,39 @@ pub mod por {
         ) -> Vec<u8> {
             // Concatenate all data to be signed
             let mut message = Vec::new();
-            
+
             // Add owner's public key bytes
             let public_key_bytes = owner_public_key.encode_protobuf();
             message.extend_from_slice(&public_key_bytes);
-            
+
             // Add peer_id as string
             let peer_id_str = peer_id.to_string();
             message.extend_from_slice(peer_id_str.as_bytes());
-            
+
             // Add issued_at and expires_at as bytes
             message.extend_from_slice(&issued_at.to_le_bytes());
             message.extend_from_slice(&expires_at.to_le_bytes());
-            
+
             message
         }
-        
+
         /// Check if POR has expired
         pub fn is_expired(&self) -> Result<bool, String> {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| format!("System time error: {}", e))?
                 .as_secs();
-            
+
             Ok(now > self.expires_at)
         }
-        
+
         /// Get remaining validity time in seconds
         pub fn remaining_time(&self) -> Result<Option<u64>, String> {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| format!("System time error: {}", e))?
                 .as_secs();
-            
+
             if now > self.expires_at {
                 Ok(None)
             } else {
@@ -260,22 +253,22 @@ pub mod por {
             }
         }
     }
-    
+
     /// Helper functions for working with keys
     pub struct PorUtils;
-    
+
     impl PorUtils {
         /// Create a new keypair for the owner
         pub fn generate_owner_keypair() -> Keypair {
             Keypair::generate_ed25519()
         }
-        
+
         /// Create a keypair from existing private key in protobuf format
         pub fn keypair_from_bytes(secret_key_bytes: &[u8]) -> Result<Keypair, String> {
             Keypair::from_protobuf_encoding(secret_key_bytes)
                 .map_err(|e| format!("Invalid key format: {}", e))
         }
-        
+
         /// Get PeerId from keypair
         pub fn peer_id_from_keypair(keypair: &Keypair) -> PeerId {
             keypair.public().to_peer_id()

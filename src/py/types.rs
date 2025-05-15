@@ -254,12 +254,10 @@ pub fn generate_por(
     ProofOfRepresentation::new(owner_keypair, peer_id, validity_duration_secs)
 }
 
-
-
 pub fn rust_por_to_py_por(py: Python, por_obj: por::ProofOfRepresentation) -> PyResult<PyObject> {
     // Create the Python ProofOfRepresentation instance
     let py_por = ProofOfRepresentation { inner: por_obj };
-    
+
     // Convert to PyObject
     Ok(py_por.into_py(py))
 }

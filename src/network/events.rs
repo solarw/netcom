@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use libp2p::{swarm::ConnectionId, Multiaddr, PeerId, StreamProtocol};
 use super::{xauth::events::PorAuthEvent, xstream::xstream::XStream};
+use libp2p::{swarm::ConnectionId, Multiaddr, PeerId, StreamProtocol};
 
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
@@ -25,7 +25,7 @@ pub enum NetworkEvent {
         peer_id: PeerId,
         addr: Multiaddr,
         connection_id: ConnectionId,
-        protocols: Vec<StreamProtocol>,  
+        protocols: Vec<StreamProtocol>,
     },
     ConnectionClosed {
         peer_id: PeerId,
@@ -39,11 +39,11 @@ pub enum NetworkEvent {
     StopListeningOnAddress {
         addr: Multiaddr,
     },
-    
+
     // Discovery events
     MdnsIsOn {},
     MdnsIsOff {},
-    
+
     // Kademlia DHT events
     KadAddressAdded {
         peer_id: PeerId,
@@ -53,14 +53,13 @@ pub enum NetworkEvent {
         peer_id: PeerId,
         addresses: Vec<Multiaddr>,
     },
-    
+
     // Authentication event wrapper
     AuthEvent {
         event: PorAuthEvent,
     },
 
     IncomingStream {
-        stream: Arc<XStream>
+        stream: Arc<XStream>,
     },
-
 }
