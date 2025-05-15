@@ -13,16 +13,16 @@ use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::network::{
+use xnetwork::{
     commander::Commander,
     commands::NetworkCommand,
     events::NetworkEvent,
     node::NetworkNode,
     utils::make_new_key,
-    xauth::por::por::{PorUtils, ProofOfRepresentation},
+    
 };
-
-use crate::py::{
+use xauth::por::por::{PorUtils, ProofOfRepresentation};
+use crate::{
     events::network_event_to_dict,
     types::{KeyPair, PeerId as PyPeerId},
     xstream::XStream as PyXStream,
@@ -569,7 +569,7 @@ impl Node {
 
             // Create AuthResult
             let auth_result = Python::with_gil(
-                |py| -> Result<crate::network::xauth::definitions::AuthResult, PyErr> {
+                |py| -> Result<xauth::definitions::AuthResult, PyErr> {
                     if accept {
                         // Create metadata map if provided
                         let mut metadata = HashMap::new();
@@ -585,7 +585,7 @@ impl Node {
                                 }
                             }
                         }
-                        Ok(crate::network::xauth::definitions::AuthResult::Ok(metadata))
+                        Ok(xauth::definitions::AuthResult::Ok(metadata))
                     } else {
                         // Create error message
                         let reason = if let Some(obj) = py_data.as_ref() {
@@ -608,7 +608,7 @@ impl Node {
                         } else {
                             "Authentication rejected".to_string()
                         };
-                        Ok(crate::network::xauth::definitions::AuthResult::Error(
+                        Ok(xauth::definitions::AuthResult::Error(
                             reason,
                         ))
                     }

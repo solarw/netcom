@@ -1,0 +1,17 @@
+[package]
+name = "xauth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics']}
+serde = { version = "1.0", features = ["derive"] }
+
+[lib]
+
+
+# PyO3 dependencies for Python bindings
+
+
+

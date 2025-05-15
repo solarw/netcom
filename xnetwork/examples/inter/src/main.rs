@@ -1,21 +1,19 @@
 #![allow(warnings)]
-use network::commands::NetworkCommand;
+use xnetwork::commands::NetworkCommand;
 use tokio::sync::{mpsc, oneshot};
 
 use clap::Parser;
-use network::xauth::definitions::AuthResult;
-use network::xauth::por::por::{PorUtils, ProofOfRepresentation};
-use network::{
-    commander::Commander, events::NetworkEvent, node::NetworkNode, utils::make_new_key,
-    xauth::events::PorAuthEvent,
-};
+use xnetwork::{commander::Commander, events::NetworkEvent, node::NetworkNode, utils::make_new_key};
 use std::str::FromStr;
 use std::{collections::HashMap, time::Duration};
+use xauth::definitions::AuthResult;
+use xauth::events::PorAuthEvent;
+use xauth::por::por::{PorUtils, ProofOfRepresentation};
 
-mod network;
 use libp2p::{Multiaddr, PeerId};
 use tracing::{debug, error, info, warn};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
+use xnetwork;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -76,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if args.disable_mdns {
         println!("mDNS discovery disabled");
         cmd_tx
-            .send(network::commands::NetworkCommand::DisableMdns)
+            .send(xnetwork::commands::NetworkCommand::DisableMdns)
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                 format!("Failed to send DisableMdns command: {}", e).into()
@@ -84,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     } else {
         println!("mDNS discovery enabled");
         cmd_tx
-            .send(network::commands::NetworkCommand::EnableMdns)
+            .send(xnetwork::commands::NetworkCommand::EnableMdns)
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
                 format!("Failed to send EnableMdns command: {}", e).into()
@@ -163,6 +161,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                 Ok(_) => info!("🔒 Stream closed successfully"),
                                                 Err(e) => warn!("⚠️ Error closing stream: {}", e),
                                             }
+                                            match stream.read_to_end().await {
+                                                Ok(data) => println!("got data: {:?}", data),
+                                                Err(e) => warn!("⚠️ Error closing stream: {}", e),
+                                            }
                                         }
                                         Err(e) => {
                                             error!("❌ Failed to open stream to {}: {}", peer_id, e)
@@ -202,7 +204,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                                 for (i, addr) in addresses.iter().enumerate() {
                                                     println!("  [{:2}] {}", i + 1, addr);
                                                 }
-                                                println!("\nUse 'connect <multiaddr>' to connect to any of these addresses");
+                                                println!(
+                                                    "\nUse 'connect <multiaddr>' to connect to any of these addresses"
+                                                );
                                             }
                                         }
                                         Err(e) => {
@@ -252,7 +256,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         println!(
                             "  find <peer_id> - Find and connect to a peer using Kademlia DHT"
                         );
-                        println!("  stream <peer_id> <message> - Open a stream to a peer and send a message");
+                        println!(
+                            "  stream <peer_id> <message> - Open a stream to a peer and send a message"
+                        );
                         println!("  help - Show this help message");
                     } else if !input.is_empty() {
                         println!(
@@ -319,7 +325,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     info!("📥 Received stream from {} (id: {})", peer_id, stream_id);
 
                     // Используем клон для чтения
-                    let stream_clone = stream.clone();
+                    let mut stream_clone = stream.clone();
 
                     // Запускаем чтение в отдельной задаче
                     tokio::spawn(async move {
@@ -335,6 +341,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                             peer_id,
                                             message.trim()
                                         );
+
+                                        stream_clone.write_all(data).await;
+                                        //stream_clone.close().await;
                                     }
                                     Err(_) => {
                                         info!(
@@ -399,35 +408,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             // Here we make the authentication decision
                             let auth_result = if args.accept_all_auth {
                                 // If --accept-all-auth is enabled, always accept
-                                println!("🔑 Automatically accepting auth request (--accept-all-auth enabled)");
+                                println!(
+                                    "🔑 Automatically accepting auth request (--accept-all-auth enabled)"
+                                );
                                 AuthResult::Ok(HashMap::new())
                             } else {
                                 // Validate the PoR
                                 match por.validate() {
                                     Ok(()) => {
                                         let owner_peer_id = por.owner_public_key.to_peer_id();
-                                        println!("✅ PoR validation successful for {peer_id} {owner_peer_id}");
+                                        println!(
+                                            "✅ PoR validation successful for {peer_id} {owner_peer_id}"
+                                        );
                                         AuthResult::Ok(HashMap::new())
                                     }
                                     Err(e) => {
                                         // Check specifically for public key errors
                                         if e.contains("Invalid owner public key") {
-                                            println!("❌ PoR validation failed for {peer_id}: Invalid public key");
+                                            println!(
+                                                "❌ PoR validation failed for {peer_id}: Invalid public key"
+                                            );
                                             AuthResult::Error(format!(
                                                 "PoR validation failed: Invalid public key"
                                             ))
                                         } else if e.contains("expired") {
-                                            println!("❌ PoR validation failed for {peer_id}: Expired PoR");
+                                            println!(
+                                                "❌ PoR validation failed for {peer_id}: Expired PoR"
+                                            );
                                             AuthResult::Error(format!(
                                                 "PoR validation failed: Expired"
                                             ))
                                         } else if e.contains("not yet valid") {
-                                            println!("❌ PoR validation failed for {peer_id}: PoR not yet valid");
+                                            println!(
+                                                "❌ PoR validation failed for {peer_id}: PoR not yet valid"
+                                            );
                                             AuthResult::Error(format!(
                                                 "PoR validation failed: Not yet valid"
                                             ))
                                         } else if e.contains("Invalid signature") {
-                                            println!("❌ PoR validation failed for {peer_id}: Invalid signature");
+                                            println!(
+                                                "❌ PoR validation failed for {peer_id}: Invalid signature"
+                                            );
                                             AuthResult::Error(format!(
                                                 "PoR validation failed: Invalid signature"
                                             ))
@@ -469,7 +490,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             println!("❌ Failed to authenticate peer {peer_id}: {reason}");
                             // Optionally disconnect from unauthenticated peers if auth is required
                             if args.require_auth {
-                                println!("🚫 Disconnecting from unauthenticated peer as --require-auth is enabled");
+                                println!(
+                                    "🚫 Disconnecting from unauthenticated peer as --require-auth is enabled"
+                                );
                                 // Use the commander to disconnect
                                 match cmd.disconnect(peer_id).await {
                                     Ok(_) => println!("📤 Disconnected from {peer_id}"),
@@ -483,7 +506,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             println!("❌ Peer {peer_id} failed to authenticate us: {reason}");
                             // Optionally disconnect in this case as well
                             if args.require_auth {
-                                println!("🚫 Disconnecting from peer that couldn't authenticate us as --require-auth is enabled");
+                                println!(
+                                    "🚫 Disconnecting from peer that couldn't authenticate us as --require-auth is enabled"
+                                );
                                 // Use the commander to disconnect
                                 match cmd.disconnect(peer_id).await {
                                     Ok(_) => println!("📤 Disconnected from {peer_id}"),
@@ -500,7 +525,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             );
                             // Optionally disconnect for timeout
                             if args.require_auth {
-                                println!("🚫 Disconnecting due to authentication timeout as --require-auth is enabled");
+                                println!(
+                                    "🚫 Disconnecting due to authentication timeout as --require-auth is enabled"
+                                );
                                 // Use the commander to disconnect
                                 match cmd.disconnect(peer_id).await {
                                     Ok(_) => println!("📤 Disconnected from {peer_id}"),

@@ -1,0 +1,36 @@
+[package]
+name = "pyxnetwork"
+version = "0.1.0"
+edition = "2024"
+
+
+[lib]
+name = "pyxnetwork"
+crate-type = ["cdylib"]
+
+
+[dependencies]
+libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['macros', 'tokio']}
+# PyO3 dependencies for Python bindings
+pyo3 = { version = "^0.20", features = ["extension-module"] }
+pyo3-asyncio = { version = "0.20.0", features = [
+    "async-channel",
+    "tokio",
+    "attributes",
+    "tokio-runtime",
+    "clap",
+    "async-std",
+    "async-std-runtime",
+] }
+tracing = "0.1"
+xauth = { path = "/home/solarw/hyperion/netcom/protocols/xauth" }
+xstream = { path = "/home/solarw/hyperion/netcom/protocols/xstream" }
+xnetwork = { path = "/home/solarw/hyperion/netcom/xnetwork" }
+
+tokio = { version = "1.35", features = ["full"] }
+
+# Keep libp2p-stream but as a local path dependency if needed
+# libp2p-stream = { path = "/home/solarw/hyperion/rust-libp2p/protocols/stream" }
+
+[package.metadata.maturin]
+name = "pyxnetwork"

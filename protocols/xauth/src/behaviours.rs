@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::network::xauth::definitions::DirectionalAuthState;
+use super::definitions::DirectionalAuthState;
 
 // Import the ProofOfRepresentation from the por module
 use super::{

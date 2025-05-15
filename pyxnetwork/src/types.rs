@@ -4,8 +4,7 @@ use pyo3::prelude::*;
 use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
-
-use crate::network::xauth::por::por;
+use xauth::por::por;
 
 #[pyclass]
 #[derive(Clone, Debug)]

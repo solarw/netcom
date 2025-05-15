@@ -8,10 +8,10 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex as TokioMutex;
 
-use crate::network::xstream::events::XStreamEvent;
-use crate::network::xstream::types::{XStreamDirection, XStreamID};
-use crate::network::xstream::xstream::XStream as RustXStream;
-use crate::py::types::PeerId as PyPeerId;
+use xstream::events::XStreamEvent;
+use xstream::types::{XStreamDirection, XStreamID};
+use xstream::xstream::XStream as RustXStream;
+use crate::types::PeerId as PyPeerId;
 
 #[pyclass]
 #[derive(Clone, Copy)]
