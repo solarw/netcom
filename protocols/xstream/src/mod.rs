@@ -7,4 +7,6 @@ pub mod pending_streams;
 pub mod protocol;
 pub mod types;
 pub mod utils;
+pub mod xstream_state;
 pub mod xstream;
+pub mod tests;

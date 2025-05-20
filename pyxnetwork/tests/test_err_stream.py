@@ -117,12 +117,13 @@ class TestSimpleNode:
                 # Отправляем подтверждение
                 response = f"ACK: {decoded_message}"
                 await stream.write(response.encode())
+                print("SEND MESSAGE1111111111111")
             
             # Закрываем поток после обработки
             await stream.close()
         
         except Exception as e:
-            print(f"❌ Ошибка при обработке потока: {e}")
+            print(f"❌ Ошибка при обработке потока входящего: {e}")
     
     async def connect_and_wait_auth(self, address, timeout=10):
         """
@@ -154,7 +155,7 @@ class TestSimpleNode:
     async def send_message(self, peer_id, message):
         """
         Отправка сообщения с получением ответа
-        
+
         :param peer_id: ID узла-получателя
         :param message: Сообщение для отправки
         :return: Полученный ответ или None в случае ошибки
@@ -167,15 +168,18 @@ class TestSimpleNode:
             # Отправляем сообщение
             print(f"📤 Отправка сообщения '{message}'")
             await stream.write(message.encode())
-            await stream.write(message.encode())
             
-            print("WRITE EOF!!!!!!!!!!!!!!!!")
-            await stream.close()
-            await asyncio.sleep(2)
-            print("11 after sleep")
+            # Signal end of message by closing write side only
+            print("📬 Отправка EOF (закрытие канала отправки)...")
+            await stream.write_eof()
             
-            # Читаем ответ из потока
+            # Read the response (read side is still open)
+            print("📥 Ожидание ответа...")
             response_data = await stream.read_to_end()
+            
+            # Now fully close the stream after reading the response
+            print("🔒 Полное закрытие потока...")
+            await stream.close()
             
             if response_data:
                 response = response_data.decode()
@@ -183,10 +187,8 @@ class TestSimpleNode:
                 return response
             
             return None
-        
         except Exception as e:
-            print(f"❌  SEND MESSAGE Ошибка при отправке сообщения: {e}")
-            raise
+            print(f"❌ Ошибка при отправке сообщения: {e}")
             return None
     
     def get_peer_id(self):
@@ -256,6 +258,7 @@ async def test_simple_message():
         # Проверяем, что ответ содержит ожидаемый текст
         assert test_message in response, "Ответ должен содержать исходное сообщение"
         assert "ACK" in response, "Ответ должен содержать подтверждение"
+        assert test_message in response
         
         print("✅ Тест успешно пройден")
         print(f"📋 Отправленное сообщение: {test_message}")

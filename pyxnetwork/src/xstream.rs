@@ -388,6 +388,29 @@ impl XStream {
         })
     }
 
+
+    fn write_eof<'py>(&self, py: Python<'py>) -> PyResult<&'py PyAny> {
+    let inner = self.inner.clone();
+
+    future_into_py(py, async move {
+        // Get the stream
+        let mut inner_guard = inner.lock().await;
+        let stream = match &*inner_guard {
+            Some(s) => s,
+            None => return Err(PyErr::new::<PyIOError, _>("Stream is closed")),
+        };
+
+        // Call write_eof on the stream
+        match stream.write_eof().await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
+                "Failed to send EOF: {}",
+                e
+            ))),
+        }
+    })
+}
+
     fn is_closed<'py>(&self, py: Python<'py>) -> PyResult<&'py PyAny> {
         let inner = self.inner.clone();
 
