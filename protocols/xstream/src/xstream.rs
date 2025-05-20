@@ -4,7 +4,7 @@ use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
 use libp2p::{PeerId, Stream};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error, info, warn};
 
 use super::types::{XStreamDirection, XStreamID, XStreamState};
@@ -41,15 +41,10 @@ impl XStream {
             "Creating new XStream with id: {:?} for peer: {}, direction: {:?}",
             id, peer_id, direction
         );
-        
+
         // Create the state manager
-        let state_manager = XStreamStateManager::new(
-            id,
-            peer_id,
-            direction,
-            closure_notifier,
-        );
-        
+        let state_manager = XStreamStateManager::new(id, peer_id, direction, closure_notifier);
+
         Self {
             stream_main_read: Arc::new(Mutex::new(stream_main_read)),
             stream_main_write: Arc::new(Mutex::new(stream_main_write)),
@@ -150,8 +145,11 @@ impl XStream {
         match read_result {
             Ok(_) => Ok(buf),
             Err(e) => {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof || 
-                   self.state_manager.handle_connection_error(&e, "read_exact error") {
+                if e.kind() == std::io::ErrorKind::UnexpectedEof
+                    || self
+                        .state_manager
+                        .handle_connection_error(&e, "read_exact error")
+                {
                     self.state_manager.mark_read_remote_closed();
                 }
                 Err(e)
@@ -185,7 +183,8 @@ impl XStream {
                 Ok(buf)
             }
             Err(e) => {
-                self.state_manager.handle_connection_error(&e, "read_to_end error");
+                self.state_manager
+                    .handle_connection_error(&e, "read_to_end error");
                 Err(e)
             }
         }
@@ -236,16 +235,16 @@ impl XStream {
     /// Unlike normal read methods, this won't return an error if the stream is in error state.
     pub async fn read_after_error(&self) -> Result<Vec<u8>, std::io::Error> {
         // Ensure proper context: either we've read an error, or we've written one
-        let has_error = self.state_manager.has_error_written() || 
-                       self.state_manager.has_error_data().await;
-                        
+        let has_error =
+            self.state_manager.has_error_written() || self.state_manager.has_error_data().await;
+
         if !has_error {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Cannot use read_after_error() without first receiving or writing an error",
             ));
         }
-        
+
         let mut buf: Vec<u8> = Vec::new();
         let stream_main_read = self.stream_main_read.clone();
 
@@ -257,14 +256,22 @@ impl XStream {
 
         match read_result {
             Ok(_) => {
-                debug!("Read {} bytes after error from stream {:?}", buf.len(), self.id);
+                debug!(
+                    "Read {} bytes after error from stream {:?}",
+                    buf.len(),
+                    self.id
+                );
                 Ok(buf)
             }
             Err(e) => {
                 // If it's an EOF or connection closed error, return empty buffer
-                if e.kind() == std::io::ErrorKind::UnexpectedEof || 
-                   self.state_manager.is_connection_closed_error(&e) {
-                    debug!("EOF or connection closed when reading after error from stream {:?}", self.id);
+                if e.kind() == std::io::ErrorKind::UnexpectedEof
+                    || self.state_manager.is_connection_closed_error(&e)
+                {
+                    debug!(
+                        "EOF or connection closed when reading after error from stream {:?}",
+                        self.id
+                    );
                     Ok(Vec::new())
                 } else {
                     // For other errors, return the actual error
@@ -283,7 +290,10 @@ impl XStream {
         if self.state_manager.is_write_local_closed() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
-                format!("Cannot write EOF to stream {:?}: write half already closed", self.id),
+                format!(
+                    "Cannot write EOF to stream {:?}: write half already closed",
+                    self.id
+                ),
             ));
         }
 
@@ -294,7 +304,10 @@ impl XStream {
 
         // Flush any pending data first
         if let Err(e) = guard.flush().await {
-            if self.state_manager.handle_connection_error(&e, "flush error during write_eof") {
+            if self
+                .state_manager
+                .handle_connection_error(&e, "flush error during write_eof")
+            {
                 return Err(e);
             }
         }
@@ -309,7 +322,10 @@ impl XStream {
             }
             Err(e) => {
                 // If the remote has already closed, consider it a success
-                if self.state_manager.handle_connection_error(&e, "shutdown error during write_eof") {
+                if self
+                    .state_manager
+                    .handle_connection_error(&e, "shutdown error during write_eof")
+                {
                     self.state_manager.mark_write_local_closed();
                     Ok(())
                 } else {
@@ -352,7 +368,7 @@ impl XStream {
                     self.state_manager.store_error_data(buf.clone()).await;
                 }
                 Ok(buf)
-            },
+            }
             Err(e) => Err(e),
         }
     }
@@ -374,13 +390,15 @@ impl XStream {
                 match guard.flush().await {
                     Ok(_) => Ok(()),
                     Err(e) => {
-                        self.state_manager.handle_connection_error(&e, "flush error");
+                        self.state_manager
+                            .handle_connection_error(&e, "flush error");
                         Err(e)
                     }
                 }
             }
             Err(e) => {
-                self.state_manager.handle_connection_error(&e, "write error");
+                self.state_manager
+                    .handle_connection_error(&e, "write error");
                 Err(e)
             }
         }
@@ -424,7 +442,10 @@ impl XStream {
                 }
                 Err(e) => {
                     // Check if error indicates the stream was already closed by remote
-                    if self.state_manager.handle_connection_error(&e, "flush error during close") {
+                    if self
+                        .state_manager
+                        .handle_connection_error(&e, "flush error during close")
+                    {
                         // Return success if remote already closed it
                         Ok(())
                     } else {
@@ -438,6 +459,91 @@ impl XStream {
 
         // Return the result of closing the stream
         result
+    }
+
+    pub async fn error_write(
+        &self,
+        error_data: Vec<u8>,
+        with_data_flush: bool,
+    ) -> Result<(), std::io::Error> {
+        // Only inbound streams should write to error stream
+        if self.direction != XStreamDirection::Inbound {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Only inbound streams can write to error stream",
+            ));
+        }
+
+        // Check if we've already written an error
+        if self.state_manager.has_error_written() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "Error already written to this stream",
+            ));
+        }
+
+        // Optionally flush any pending data from the main stream first
+        if with_data_flush {
+            debug!(
+                "Flushing pending data before sending error on stream {:?}",
+                self.id
+            );
+            let stream_main_write = self.stream_main_write.clone();
+            let mut guard = stream_main_write.lock().await;
+
+            // Try to flush any pending data
+            if let Err(e) = guard.flush().await {
+                if !self
+                    .state_manager
+                    .handle_connection_error(&e, "flush error during write_error")
+                {
+                    return Err(e);
+                }
+            }
+        }
+
+        // Mark that we're writing an error
+        self.state_manager.mark_error_written();
+
+        // Write the error data to the error stream
+        let stream_error_write = self.stream_error_write.clone();
+        let mut guard = stream_error_write.lock().await;
+
+        // Write error data
+        match guard.write_all(&error_data).await {
+            Ok(_) => {
+                // Flush to ensure data is sent
+                if let Err(e) = guard.flush().await {
+                    if !self
+                        .state_manager
+                        .handle_connection_error(&e, "flush error during write_error")
+                    {
+                        return Err(e);
+                    }
+                }
+
+                // Close the error stream (send EOF)
+                if let Err(e) = guard.close().await {
+                    if !self
+                        .state_manager
+                        .handle_connection_error(&e, "close error during write_error")
+                    {
+                        return Err(e);
+                    }
+                }
+
+                // Mark stream state as error
+                self.state_manager
+                    .mark_error("Error written to error stream");
+                debug!("Error successfully written to stream {:?}", self.id);
+                Ok(())
+            }
+            Err(e) => {
+                self.state_manager
+                    .handle_connection_error(&e, "write error during write_error");
+                Err(e)
+            }
+        }
     }
 }
 
@@ -465,7 +571,7 @@ impl Clone for XStream {
 impl Drop for XStream {
     fn drop(&mut self) {
         debug!("Dropping XStream with id: {:?}", self.id);
-        
+
         // If stream is not fully closed, notify about drop
         if !self.state_manager.is_closed() {
             self.state_manager.notify_state_change("XStream dropped");

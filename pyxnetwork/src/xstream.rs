@@ -8,10 +8,10 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex as TokioMutex;
 
+use crate::types::PeerId as PyPeerId;
 use xstream::events::XStreamEvent;
 use xstream::types::{XStreamDirection, XStreamID};
 use xstream::xstream::XStream as RustXStream;
-use crate::types::PeerId as PyPeerId;
 
 #[pyclass]
 #[derive(Clone, Copy)]
@@ -295,8 +295,12 @@ impl XStream {
         })
     }
 
-    // New method to write to error stream
-    fn error_write<'py>(&self, py: Python<'py>, data: &PyAny) -> PyResult<&'py PyAny> {
+    fn error_write<'py>(
+        &self,
+        py: Python<'py>,
+        data: &PyAny,
+        with_data_flush: Option<bool>,
+    ) -> PyResult<&'py PyAny> {
         let inner = self.inner.clone();
 
         // Convert PyAny to Vec<u8>
@@ -308,6 +312,9 @@ impl XStream {
             return Err(PyErr::new::<PyIOError, _>("Data must be bytes or string"));
         };
 
+        // Default with_data_flush to false if not provided
+        let flush_data = with_data_flush.unwrap_or(false);
+
         future_into_py(py, async move {
             // Get the stream
             let mut inner_guard = inner.lock().await;
@@ -317,48 +324,28 @@ impl XStream {
             };
 
             // Write data to the error stream
-            let result = stream.error_write(bytes).await;
-
-            // Return the result
-            match result {
+            match stream.error_write(bytes, flush_data).await {
                 Ok(_) => Ok(()),
-                Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
-                    "Failed to write to error stream: {}",
-                    e
-                ))),
+                Err(e) => {
+                    // Handle specific error types with appropriate Python errors
+                    match e.kind() {
+                        std::io::ErrorKind::PermissionDenied => {
+                            Err(PyErr::new::<PyIOError, _>(format!(
+                                "Permission denied: Only inbound streams can write to error stream"
+                            )))
+                        }
+                        std::io::ErrorKind::AlreadyExists => Err(PyErr::new::<PyIOError, _>(
+                            "Error already written to this stream",
+                        )),
+                        _ => Err(PyErr::new::<PyIOError, _>(format!(
+                            "Failed to write to error stream: {}",
+                            e
+                        ))),
+                    }
+                }
             }
         })
     }
-
-    // Alias for error_write that takes a string
-    fn write_error<'py>(&self, py: Python<'py>, error_msg: &str) -> PyResult<&'py PyAny> {
-        let inner = self.inner.clone();
-        let error_message = error_msg.to_string();
-
-        future_into_py(py, async move {
-            // Get the stream
-            let mut inner_guard = inner.lock().await;
-            let stream = match &*inner_guard {
-                Some(s) => s,
-                None => return Err(PyErr::new::<PyIOError, _>("Stream is closed")),
-            };
-
-            // Write error to the error stream
-            let result = stream.write_error(&error_message).await;
-
-            // Return the result
-            match result {
-                Ok(_) => Ok(()),
-                Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
-                    "Failed to write error: {}",
-                    e
-                ))),
-            }
-
-            
-        })
-    }
-
 
     fn close<'py>(&mut self, py: Python<'py>) -> PyResult<&'py PyAny> {
         let inner = self.inner.clone();
@@ -388,28 +375,27 @@ impl XStream {
         })
     }
 
-
     fn write_eof<'py>(&self, py: Python<'py>) -> PyResult<&'py PyAny> {
-    let inner = self.inner.clone();
+        let inner = self.inner.clone();
 
-    future_into_py(py, async move {
-        // Get the stream
-        let mut inner_guard = inner.lock().await;
-        let stream = match &*inner_guard {
-            Some(s) => s,
-            None => return Err(PyErr::new::<PyIOError, _>("Stream is closed")),
-        };
+        future_into_py(py, async move {
+            // Get the stream
+            let mut inner_guard = inner.lock().await;
+            let stream = match &*inner_guard {
+                Some(s) => s,
+                None => return Err(PyErr::new::<PyIOError, _>("Stream is closed")),
+            };
 
-        // Call write_eof on the stream
-        match stream.write_eof().await {
-            Ok(_) => Ok(()),
-            Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
-                "Failed to send EOF: {}",
-                e
-            ))),
-        }
-    })
-}
+            // Call write_eof on the stream
+            match stream.write_eof().await {
+                Ok(_) => Ok(()),
+                Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
+                    "Failed to send EOF: {}",
+                    e
+                ))),
+            }
+        })
+    }
 
     fn is_closed<'py>(&self, py: Python<'py>) -> PyResult<&'py PyAny> {
         let inner = self.inner.clone();
