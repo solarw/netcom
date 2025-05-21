@@ -228,7 +228,6 @@ impl XStreamNetworkBehaviour {
     /// Requests to open a new stream to the specified peer
     pub fn request_open_stream(&mut self, peer_id: PeerId) -> XStreamID {
         let stream_id = self.id_iter.next().unwrap();
-
         self.events.push(ToSwarm::NotifyHandler {
             peer_id,
             handler: NotifyHandler::Any,
