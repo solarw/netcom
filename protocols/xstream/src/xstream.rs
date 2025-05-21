@@ -304,60 +304,6 @@ impl XStream {
         .await
     }
 
-    /// Read data after an error has been received or written
-    ///
-    /// This method allows reading the remaining data from the main stream
-    /// after an error has been received through `error_read()` or sent via `write_error()`.
-    /// Unlike normal read methods, this won't return an error if the stream is in error state.
-    pub async fn read_after_error(&self) -> Result<Vec<u8>, std::io::Error> {
-        // Ensure proper context: either we've read an error, or we've written one
-        let has_error =
-            self.state_manager.has_error_written() || self.state_manager.has_error_data().await;
-
-        if !has_error {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Cannot use read_after_error() without first receiving or writing an error",
-            ));
-        }
-
-        let mut buf: Vec<u8> = Vec::new();
-        let stream_main_read = self.stream_main_read.clone();
-
-        // This operation doesn't use the utility method because it needs special error handling
-        let read_result = {
-            let mut guard = stream_main_read.lock().await;
-            guard.read_to_end(&mut buf).await
-        };
-
-        match read_result {
-            Ok(_) => {
-                debug!(
-                    "Read {} bytes after error from stream {:?}",
-                    buf.len(),
-                    self.id
-                );
-                Ok(buf)
-            }
-            Err(e) => {
-                // If it's an EOF or connection closed error, return empty buffer
-                if e.kind() == std::io::ErrorKind::UnexpectedEof
-                    || self.state_manager.is_connection_closed_error(&e)
-                {
-                    debug!(
-                        "EOF or connection closed when reading after error from stream {:?}",
-                        self.id
-                    );
-                    Ok(Vec::new())
-                } else {
-                    // For other errors, return the actual error
-                    error!("Error reading after error from stream {:?}: {}", self.id, e);
-                    Err(e)
-                }
-            }
-        }
-    }
-
     /// Flushes the main stream
     pub async fn flush(&self) -> Result<(), std::io::Error> {
         self.execute_main_write_op(|writer| Box::pin(async move { writer.flush().await }))
@@ -433,13 +379,15 @@ impl XStream {
 
         // If no stored data, read from the error stream using execute_error_read_op
         let mut buf: Vec<u8> = Vec::new();
-        
-        let read_result = self.execute_error_read_op(|reader| {
-            Box::pin(async move {
-                reader.read_to_end(&mut buf).await?;
-                Ok(buf)
+
+        let read_result = self
+            .execute_error_read_op(|reader| {
+                Box::pin(async move {
+                    reader.read_to_end(&mut buf).await?;
+                    Ok(buf)
+                })
             })
-        }).await;
+            .await;
 
         match read_result {
             Ok(buf) => {
@@ -467,15 +415,21 @@ impl XStream {
     }
 
     /// Closes the streams
+    /// Closes the streams
     pub async fn close(&mut self) -> Result<(), std::io::Error> {
         info!(
             "Closing XStream with id: {:?} for peer: {}",
             self.id, self.peer_id
         );
 
-        // If already closed locally, return early
-        if self.state_manager.is_local_closed() {
-            debug!("Stream {:?} already locally closed", self.id);
+        // Always mark as locally closed first, before doing any operations
+        // This ensures the state is set regardless of the outcome
+        self.state_manager.mark_local_closed();
+        debug!("Stream {:?} marked as locally closed", self.id);
+
+        // If already fully closed, return early
+        if self.state_manager.is_closed() {
+            debug!("Stream {:?} already fully closed", self.id);
             return Ok(());
         }
 
@@ -486,20 +440,23 @@ impl XStream {
                 .await;
         }
 
-        // Mark as locally closed
-        self.state_manager.mark_local_closed();
-
         // Get a lock on the write stream and close it
+        // We'll try to close it, but we won't rely on this for state management
         let result = self
             .execute_main_write_op(|writer| {
                 Box::pin(async move {
-                    writer.flush().await?;
+                    // Ignore any errors from flush
+                    let _ = writer.flush().await;
                     writer.close().await
                 })
             })
             .await;
 
         debug!("Network stream close result: {:?}", result);
+
+        // Explicitly notify about the state change to ensure it propagates
+        self.state_manager
+            .notify_state_change("Stream explicitly closed");
 
         // Even if there was an error closing the stream, if it indicates
         // the connection was already closed, consider it a success
@@ -509,16 +466,14 @@ impl XStream {
                 if self.state_manager.is_connection_closed_error(&e) {
                     Ok(())
                 } else {
+                    // Return the error but still keep the stream marked as locally closed
                     Err(e)
                 }
             }
         }
     }
 
-    pub async fn error_write(
-        &self,
-        error_data: Vec<u8>,
-    ) -> Result<(), std::io::Error> {
+    pub async fn error_write(&self, error_data: Vec<u8>) -> Result<(), std::io::Error> {
         // Only inbound streams should write to error stream
         if self.direction != XStreamDirection::Inbound {
             return Err(std::io::Error::new(

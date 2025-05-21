@@ -1,13 +1,13 @@
 // xstream_state.rs
 // Module for managing XStream states, transitions, and notifications
 
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicU8, Ordering};
+use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error, info, warn};
 
-use libp2p::PeerId;
 use super::types::{XStreamDirection, XStreamID, XStreamState};
+use libp2p::PeerId;
 
 /// Manages the state of an XStream with thread-safe transitions and notifications
 #[derive(Debug)]
@@ -61,10 +61,14 @@ impl XStreamStateManager {
         let final_state = match (current_state, new_state) {
             // If already fully closed, stay closed
             (XStreamState::FullyClosed, _) => XStreamState::FullyClosed,
-            
+
             // If write locally closed and read remotely closed, become fully closed
-            (XStreamState::WriteLocalClosed, XStreamState::ReadRemoteClosed) => XStreamState::FullyClosed,
-            (XStreamState::ReadRemoteClosed, XStreamState::WriteLocalClosed) => XStreamState::FullyClosed,
+            (XStreamState::WriteLocalClosed, XStreamState::ReadRemoteClosed) => {
+                XStreamState::FullyClosed
+            }
+            (XStreamState::ReadRemoteClosed, XStreamState::WriteLocalClosed) => {
+                XStreamState::FullyClosed
+            }
 
             // If local closed and remote closes, become fully closed
             (XStreamState::LocalClosed, XStreamState::RemoteClosed) => XStreamState::FullyClosed,
@@ -85,10 +89,11 @@ impl XStreamStateManager {
             );
 
             // Send notifications for certain transitions
-            if final_state == XStreamState::FullyClosed || 
-               final_state == XStreamState::Error ||
-               new_state == XStreamState::ReadRemoteClosed ||
-               new_state == XStreamState::RemoteClosed {
+            if final_state == XStreamState::FullyClosed
+                || final_state == XStreamState::Error
+                || new_state == XStreamState::ReadRemoteClosed
+                || new_state == XStreamState::RemoteClosed
+            {
                 // These state transitions should trigger a notification
                 self.notify_state_change(&format!("State transition to {:?}", final_state));
             }
@@ -137,7 +142,13 @@ impl XStreamStateManager {
     pub fn mark_local_closed(&self) {
         let current = self.state();
         match current {
-            XStreamState::Open => self.set_state(XStreamState::LocalClosed),
+            XStreamState::Open | XStreamState::WriteLocalClosed => {
+                // Explicitly handle the WriteLocalClosed -> LocalClosed transition
+                self.set_state(XStreamState::LocalClosed);
+
+                // Ensure notification is sent for this important transition
+                self.notify_state_change("Stream marked as locally closed");
+            }
             XStreamState::RemoteClosed => self.set_state(XStreamState::FullyClosed),
             _ => {} // Already locally closed or fully closed
         }
@@ -163,10 +174,10 @@ impl XStreamStateManager {
     pub fn is_closed(&self) -> bool {
         matches!(
             self.state(),
-            XStreamState::LocalClosed 
-            | XStreamState::RemoteClosed 
-            | XStreamState::FullyClosed 
-            | XStreamState::Error
+            XStreamState::LocalClosed
+                | XStreamState::RemoteClosed
+                | XStreamState::FullyClosed
+                | XStreamState::Error
         )
     }
 
@@ -190,9 +201,7 @@ impl XStreamStateManager {
     pub fn is_write_local_closed(&self) -> bool {
         matches!(
             self.state(),
-            XStreamState::WriteLocalClosed 
-            | XStreamState::LocalClosed 
-            | XStreamState::FullyClosed
+            XStreamState::WriteLocalClosed | XStreamState::LocalClosed | XStreamState::FullyClosed
         )
     }
 
@@ -200,9 +209,7 @@ impl XStreamStateManager {
     pub fn is_read_remote_closed(&self) -> bool {
         matches!(
             self.state(),
-            XStreamState::ReadRemoteClosed 
-            | XStreamState::RemoteClosed 
-            | XStreamState::FullyClosed
+            XStreamState::ReadRemoteClosed | XStreamState::RemoteClosed | XStreamState::FullyClosed
         )
     }
 
@@ -298,105 +305,95 @@ mod tests {
     fn test_state_transitions() {
         // Create a test runtime
         let rt = Runtime::new().unwrap();
-        
+
         // Run the async test
         rt.block_on(async {
             // Create a test channel
             let (tx, mut rx) = mpsc::unbounded_channel();
-            
+
             // Create a random peer ID
             let keypair = identity::Keypair::generate_ed25519();
             let peer_id = keypair.public().to_peer_id();
-            
+
             // Create a stream ID
             let stream_id = XStreamID::from(1u128);
-            
+
             // Create a state manager
             let manager = XStreamStateManager::new(
                 stream_id,
                 peer_id.clone(),
                 XStreamDirection::Outbound,
-                tx
+                tx,
             );
-            
+
             // Initial state should be Open
             assert_eq!(manager.state(), XStreamState::Open);
-            
+
             // Mark write locally closed
             manager.mark_write_local_closed();
             assert_eq!(manager.state(), XStreamState::WriteLocalClosed);
-            
+
             // Mark read remotely closed, should become fully closed
             manager.mark_read_remote_closed();
             assert_eq!(manager.state(), XStreamState::FullyClosed);
-            
+
             // We should have received a notification for this transition
             let timeout = tokio::time::timeout(Duration::from_millis(100), rx.recv()).await;
             assert!(timeout.is_ok(), "Should have received a notification");
-            
+
             if let Ok(Some((notif_peer_id, notif_stream_id))) = timeout {
                 assert_eq!(notif_peer_id, peer_id);
                 assert_eq!(notif_stream_id, stream_id);
             }
-            
+
             // Try to change state after fully closed, should remain fully closed
             manager.mark_local_closed();
             assert_eq!(manager.state(), XStreamState::FullyClosed);
         });
     }
-    
+
     #[test]
     fn test_error_handling() {
         // Create a test runtime
         let rt = Runtime::new().unwrap();
-        
+
         // Run the async test
         rt.block_on(async {
             // Create a test channel
             let (tx, mut rx) = mpsc::unbounded_channel();
-            
+
             // Create a random peer ID
             let keypair = identity::Keypair::generate_ed25519();
             let peer_id = keypair.public().to_peer_id();
-            
+
             // Create a stream ID
             let stream_id = XStreamID::from(2u128);
-            
+
             // Create a state manager
-            let manager = XStreamStateManager::new(
-                stream_id,
-                peer_id.clone(),
-                XStreamDirection::Inbound,
-                tx
-            );
-            
+            let manager =
+                XStreamStateManager::new(stream_id, peer_id.clone(), XStreamDirection::Inbound, tx);
+
             // Test handling connection errors
-            let broken_pipe = std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "Broken pipe"
-            );
-            
+            let broken_pipe = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Broken pipe");
+
             assert!(manager.is_connection_closed_error(&broken_pipe));
-            
+
             // Handle a connection error
             let handled = manager.handle_connection_error(&broken_pipe, "test error");
             assert!(handled);
-            
+
             // State should be RemoteClosed
             assert_eq!(manager.state(), XStreamState::RemoteClosed);
-            
+
             // We should have received a notification
             let timeout = tokio::time::timeout(Duration::from_millis(100), rx.recv()).await;
             assert!(timeout.is_ok(), "Should have received a notification");
-            
+
             // Test non-connection errors
-            let other_error = std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Some other error"
-            );
-            
+            let other_error = std::io::Error::new(std::io::ErrorKind::Other, "Some other error");
+
             assert!(!manager.is_connection_closed_error(&other_error));
-            
+
             let handled = manager.handle_connection_error(&other_error, "test error");
             assert!(!handled);
         });

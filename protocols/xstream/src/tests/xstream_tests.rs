@@ -11,22 +11,22 @@ use tokio::time::{sleep, timeout};
 use crate::{behaviour::XStreamNetworkBehaviour, events::XStreamEvent, xstream::XStream};
 
 // Structure to hold paired streams for testing
-struct XStreamTestPair {
-    client_stream: XStream,
-    server_stream: XStream,
-    client_peer_id: PeerId,
-    server_peer_id: PeerId,
+pub struct XStreamTestPair {
+    pub client_stream: XStream,
+    pub server_stream: XStream,
+    pub client_peer_id: PeerId,
+    pub server_peer_id: PeerId,
 }
 
 // Helper struct to manage shutdown
-struct ShutdownManager {
-    client_shutdown: mpsc::Sender<()>,
-    server_shutdown: mpsc::Sender<()>,
+pub struct ShutdownManager {
+    pub client_shutdown: mpsc::Sender<()>,
+    pub server_shutdown: mpsc::Sender<()>,
 }
 
 impl ShutdownManager {
     // Shutdown tasks in the correct order
-    async fn shutdown(&self) {
+    pub async fn shutdown(&self) {
         println!("Starting coordinated shutdown...");
         // First close the client, then the server
         let _ = self.client_shutdown.send(()).await;
@@ -41,7 +41,7 @@ impl ShutdownManager {
 }
 
 // Function to create a pair of streams for testing
-async fn create_xstream_test_pair() -> (XStreamTestPair, ShutdownManager) {
+pub async fn create_xstream_test_pair() -> (XStreamTestPair, ShutdownManager) {
     println!("Creating client and server nodes");
 
     // Create server swarm
