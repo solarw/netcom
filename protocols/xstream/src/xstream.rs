@@ -1,4 +1,5 @@
 // Updated XStream implementation using the new state management module
+// With utility methods to reduce code duplication
 
 use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
@@ -56,6 +57,133 @@ impl XStream {
             state_manager,
         }
     }
+
+    // ===== UTILITY METHODS TO REDUCE CODE DUPLICATION =====
+
+    /// Executes a read operation on the main stream with proper error handling
+    async fn execute_main_read_op<F, R>(&self, operation: F) -> Result<R, std::io::Error>
+    where
+        F: FnOnce(
+            &mut futures::io::ReadHalf<Stream>,
+        ) -> futures::future::BoxFuture<'_, Result<R, std::io::Error>>,
+    {
+        // First check if we can read
+        self.check_readable()?;
+
+        let stream_main_read = self.stream_main_read.clone();
+
+        // Acquire the lock and perform the read operation
+        let read_result = {
+            let mut guard = stream_main_read.lock().await;
+            operation(&mut *guard).await
+        };
+
+        match read_result {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // Handle EOF and connection errors
+                if e.kind() == std::io::ErrorKind::UnexpectedEof
+                    || self
+                        .state_manager
+                        .handle_connection_error(&e, "read operation error")
+                {
+                    self.state_manager.mark_read_remote_closed();
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Executes a write operation on the main stream with proper error handling
+    async fn execute_main_write_op<F, R>(&self, operation: F) -> Result<R, std::io::Error>
+    where
+        F: FnOnce(
+            &mut futures::io::WriteHalf<Stream>,
+        ) -> futures::future::BoxFuture<'_, Result<R, std::io::Error>>,
+    {
+        // First check if we can write
+        self.check_writable()?;
+
+        let stream_main_write = self.stream_main_write.clone();
+
+        // Acquire the lock and perform the write operation
+        let write_result = {
+            let mut guard = stream_main_write.lock().await;
+            operation(&mut *guard).await
+        };
+
+        match write_result {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // Handle connection errors
+                self.state_manager
+                    .handle_connection_error(&e, "write operation error");
+                Err(e)
+            }
+        }
+    }
+
+    /// Executes a read operation on the error stream with proper error handling
+    async fn execute_error_read_op<F, R>(&self, operation: F) -> Result<R, std::io::Error>
+    where
+        F: FnOnce(
+            &mut futures::io::ReadHalf<Stream>,
+        ) -> futures::future::BoxFuture<'_, Result<R, std::io::Error>>,
+    {
+        let stream_error_read = self.stream_error_read.clone();
+
+        // Acquire the lock and perform the operation
+        let op_result = {
+            let mut guard = stream_error_read.lock().await;
+            operation(&mut *guard).await
+        };
+
+        match op_result {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.state_manager
+                    .handle_connection_error(&e, "error stream read operation error");
+                Err(e)
+            }
+        }
+    }
+
+    /// Executes a write operation on the error stream with proper error handling
+    async fn execute_error_write_op<F, R>(&self, operation: F) -> Result<R, std::io::Error>
+    where
+        F: FnOnce(
+            &mut futures::io::WriteHalf<Stream>,
+        ) -> futures::future::BoxFuture<'_, Result<R, std::io::Error>>,
+    {
+        let stream_error_write = self.stream_error_write.clone();
+
+        // Acquire the lock and perform the operation
+        let op_result = {
+            let mut guard = stream_error_write.lock().await;
+            operation(&mut *guard).await
+        };
+
+        match op_result {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                self.state_manager
+                    .handle_connection_error(&e, "error stream write operation error");
+                Err(e)
+            }
+        }
+    }
+
+    /// Helper to perform write+flush operations atomically
+    async fn write_and_flush(
+        writer: &mut futures::io::WriteHalf<Stream>,
+        data: &[u8],
+    ) -> Result<(), std::io::Error> {
+        writer.write_all(data).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    // ===== STATE MANAGEMENT METHODS =====
 
     /// Get current stream state
     pub fn state(&self) -> XStreamState {
@@ -127,90 +255,51 @@ impl XStream {
         Ok(())
     }
 
+    // ===== STREAM OPERATIONS =====
+
     /// Reads exact number of bytes from the main stream
     pub async fn read_exact(&self, size: usize) -> Result<Vec<u8>, std::io::Error> {
-        // First check if we can read
-        self.check_readable()?;
-
         let mut buf = vec![0u8; size];
-        let stream_main_read = self.stream_main_read.clone();
 
-        // Acquire the lock and perform the read operation
-        let read_result = {
-            let mut guard = stream_main_read.lock().await;
-            guard.read_exact(&mut buf).await
-        };
-
-        // Process the result
-        match read_result {
-            Ok(_) => Ok(buf),
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof
-                    || self
-                        .state_manager
-                        .handle_connection_error(&e, "read_exact error")
-                {
-                    self.state_manager.mark_read_remote_closed();
-                }
-                Err(e)
-            }
-        }
+        self.execute_main_read_op(|reader| {
+            Box::pin(async move {
+                reader.read_exact(&mut buf).await?;
+                Ok(buf)
+            })
+        })
+        .await
     }
 
     /// Reads all data from the main stream to the end
     pub async fn read_to_end(&self) -> Result<Vec<u8>, std::io::Error> {
-        // First check if we can read
-        self.check_readable()?;
-
         let mut buf: Vec<u8> = Vec::new();
-        let stream_main_read = self.stream_main_read.clone();
 
-        // Acquire the lock and perform the read operation
-        let read_result = {
-            let mut guard = stream_main_read.lock().await;
-            guard.read_to_end(&mut buf).await
-        };
-
-        match read_result {
-            Ok(bytes_read) => {
-                debug!("Read {} bytes to end from stream {:?}", bytes_read, self.id);
+        self.execute_main_read_op(|reader| {
+            Box::pin(async move {
+                let bytes_read = reader.read_to_end(&mut buf).await?;
 
                 // If we read zero bytes and this is the first read, it might be an EOF
                 if bytes_read == 0 && buf.is_empty() {
-                    debug!("Stream {:?} was already at EOF", self.id);
-                    self.state_manager.mark_read_remote_closed();
+                    debug!("Stream was already at EOF");
                 }
+
                 Ok(buf)
-            }
-            Err(e) => {
-                self.state_manager
-                    .handle_connection_error(&e, "read_to_end error");
-                Err(e)
-            }
-        }
+            })
+        })
+        .await
     }
 
     /// Reads available data from the main stream
     pub async fn read(&self) -> Result<Vec<u8>, std::io::Error> {
-        // First check if we can read
-        self.check_readable()?;
-
         let mut buf: Vec<u8> = vec![0; 4096]; // Use a reasonable buffer size
-        let stream_main_read = self.stream_main_read.clone();
 
-        // Acquire the lock and perform the read operation
-        let read_result = {
-            let mut guard = stream_main_read.lock().await;
-            guard.read(&mut buf).await
-        };
+        self.execute_main_read_op(|reader| {
+            Box::pin(async move {
+                let bytes_read = reader.read(&mut buf).await?;
 
-        match read_result {
-            Ok(bytes_read) => {
                 // Check for EOF condition (remote side closed the stream)
                 if bytes_read == 0 {
-                    debug!("Detected EOF while reading from stream {:?}", self.id);
-                    self.state_manager.mark_read_remote_closed();
-
+                    debug!("Detected EOF while reading");
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::UnexpectedEof,
                         "End of file",
@@ -220,12 +309,9 @@ impl XStream {
                 // Resize the buffer to the actual bytes read
                 buf.truncate(bytes_read);
                 Ok(buf)
-            }
-            Err(e) => {
-                self.state_manager.handle_connection_error(&e, "read error");
-                Err(e)
-            }
-        }
+            })
+        })
+        .await
     }
 
     /// Read data after an error has been received or written
@@ -248,7 +334,7 @@ impl XStream {
         let mut buf: Vec<u8> = Vec::new();
         let stream_main_read = self.stream_main_read.clone();
 
-        // Acquire the lock and perform the read operation
+        // This operation doesn't use the utility method because it needs special error handling
         let read_result = {
             let mut guard = stream_main_read.lock().await;
             guard.read_to_end(&mut buf).await
@@ -297,26 +383,24 @@ impl XStream {
             ));
         }
 
-        let stream_main_write = self.stream_main_write.clone();
+        let result = self
+            .execute_main_write_op(|writer| {
+                Box::pin(async move {
+                    // Flush any pending data first
+                    writer.flush().await?;
 
-        // Acquire lock on the write half
-        let mut guard = stream_main_write.lock().await;
+                    // Shutdown only the write half (this is different from close())
+                    writer.close().await?;
 
-        // Flush any pending data first
-        if let Err(e) = guard.flush().await {
-            if self
-                .state_manager
-                .handle_connection_error(&e, "flush error during write_eof")
-            {
-                return Err(e);
-            }
-        }
+                    Ok(())
+                })
+            })
+            .await;
 
-        // Shutdown only the write half (this is different from close())
-        match guard.close().await {
+        // Mark state change on success or connection errors
+        match result {
             Ok(_) => {
                 debug!("Stream {:?} write half shutdown (EOF sent)", self.id);
-                // Mark the write half as closed but keep read half open
                 self.state_manager.mark_write_local_closed();
                 Ok(())
             }
@@ -351,18 +435,18 @@ impl XStream {
             return Ok(data);
         }
 
-        // If no stored data, read from the error stream
+        // If no stored data, read from the error stream using execute_error_read_op
         let mut buf: Vec<u8> = Vec::new();
-        let stream_error_read = self.stream_error_read.clone();
-
-        // Acquire the lock and perform the read operation
-        let read_result = {
-            let mut guard = stream_error_read.lock().await;
-            guard.read_to_end(&mut buf).await
-        };
+        
+        let read_result = self.execute_error_read_op(|reader| {
+            Box::pin(async move {
+                reader.read_to_end(&mut buf).await?;
+                Ok(buf)
+            })
+        }).await;
 
         match read_result {
-            Ok(_) => {
+            Ok(buf) => {
                 // Store the error data for future reads
                 if !buf.is_empty() {
                     self.state_manager.store_error_data(buf.clone()).await;
@@ -375,33 +459,15 @@ impl XStream {
 
     /// Writes all data to the main stream
     pub async fn write_all(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
-        // First check if we can write
-        self.check_writable()?;
-
-        let stream_main_write = self.stream_main_write.clone();
-
-        // Acquire lock, write data, and flush
-        let mut guard = stream_main_write.lock().await;
-
-        // Try to write
-        match guard.write_all(&buf).await {
-            Ok(_) => {
-                // Write succeeded, try to flush
-                match guard.flush().await {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        self.state_manager
-                            .handle_connection_error(&e, "flush error");
-                        Err(e)
-                    }
-                }
-            }
-            Err(e) => {
-                self.state_manager
-                    .handle_connection_error(&e, "write error");
-                Err(e)
-            }
-        }
+        self.execute_main_write_op(|writer| {
+            let data = buf.clone(); // Clone for move into async block
+            Box::pin(async move {
+                writer.write_all(&data).await?;
+                writer.flush().await?;
+                Ok(())
+            })
+        })
+        .await
     }
 
     /// Closes the streams
@@ -419,46 +485,38 @@ impl XStream {
 
         // For inbound streams, close the error stream
         if self.direction == XStreamDirection::Inbound {
-            let stream_error_write = self.stream_error_write.clone();
-            let mut error_stream = stream_error_write.lock().await;
-            let _ = error_stream.close().await;
+            let _ = self
+                .execute_error_write_op(|writer| Box::pin(async move { writer.close().await }))
+                .await;
         }
 
         // Mark as locally closed
         self.state_manager.mark_local_closed();
 
         // Get a lock on the write stream and close it
-        let stream_main_write = self.stream_main_write.clone();
-
-        // Try to flush and close, catching potential errors that indicate closed connection
-        let result = {
-            let mut guard = stream_main_write.lock().await;
-
-            // Try to flush
-            match guard.flush().await {
-                Ok(_) => {
-                    // Flush worked, try to close
-                    guard.close().await
-                }
-                Err(e) => {
-                    // Check if error indicates the stream was already closed by remote
-                    if self
-                        .state_manager
-                        .handle_connection_error(&e, "flush error during close")
-                    {
-                        // Return success if remote already closed it
-                        Ok(())
-                    } else {
-                        Err(e)
-                    }
-                }
-            }
-        };
+        let result = self
+            .execute_main_write_op(|writer| {
+                Box::pin(async move {
+                    writer.flush().await?;
+                    writer.close().await
+                })
+            })
+            .await;
 
         debug!("Network stream close result: {:?}", result);
 
-        // Return the result of closing the stream
-        result
+        // Even if there was an error closing the stream, if it indicates
+        // the connection was already closed, consider it a success
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if self.state_manager.is_connection_closed_error(&e) {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            }
+        }
     }
 
     pub async fn error_write(
@@ -488,11 +546,12 @@ impl XStream {
                 "Flushing pending data before sending error on stream {:?}",
                 self.id
             );
-            let stream_main_write = self.stream_main_write.clone();
-            let mut guard = stream_main_write.lock().await;
 
-            // Try to flush any pending data
-            if let Err(e) = guard.flush().await {
+            let flush_result = self
+                .execute_main_write_op(|writer| Box::pin(async move { writer.flush().await }))
+                .await;
+
+            if let Err(e) = flush_result {
                 if !self
                     .state_manager
                     .handle_connection_error(&e, "flush error during write_error")
@@ -505,33 +564,22 @@ impl XStream {
         // Mark that we're writing an error
         self.state_manager.mark_error_written();
 
-        // Write the error data to the error stream
-        let stream_error_write = self.stream_error_write.clone();
-        let mut guard = stream_error_write.lock().await;
+        // Write the error data to the error stream using execute_error_write_op
+        let data_clone = error_data.clone();
+        let result = self
+            .execute_error_write_op(|writer| {
+                let error_data = data_clone.clone();
+                Box::pin(async move {
+                    writer.write_all(&error_data).await?;
+                    writer.flush().await?;
+                    writer.close().await?;
+                    Ok(())
+                })
+            })
+            .await;
 
-        // Write error data
-        match guard.write_all(&error_data).await {
+        match result {
             Ok(_) => {
-                // Flush to ensure data is sent
-                if let Err(e) = guard.flush().await {
-                    if !self
-                        .state_manager
-                        .handle_connection_error(&e, "flush error during write_error")
-                    {
-                        return Err(e);
-                    }
-                }
-
-                // Close the error stream (send EOF)
-                if let Err(e) = guard.close().await {
-                    if !self
-                        .state_manager
-                        .handle_connection_error(&e, "close error during write_error")
-                    {
-                        return Err(e);
-                    }
-                }
-
                 // Mark stream state as error
                 self.state_manager
                     .mark_error("Error written to error stream");
