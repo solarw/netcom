@@ -299,7 +299,6 @@ impl XStream {
         &self,
         py: Python<'py>,
         data: &PyAny,
-        with_data_flush: Option<bool>,
     ) -> PyResult<&'py PyAny> {
         let inner = self.inner.clone();
 
@@ -312,8 +311,6 @@ impl XStream {
             return Err(PyErr::new::<PyIOError, _>("Data must be bytes or string"));
         };
 
-        // Default with_data_flush to false if not provided
-        let flush_data = with_data_flush.unwrap_or(false);
 
         future_into_py(py, async move {
             // Get the stream
@@ -324,7 +321,7 @@ impl XStream {
             };
 
             // Write data to the error stream
-            match stream.error_write(bytes, flush_data).await {
+            match stream.error_write(bytes).await {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     // Handle specific error types with appropriate Python errors

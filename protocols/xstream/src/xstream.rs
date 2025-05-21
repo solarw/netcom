@@ -173,16 +173,6 @@ impl XStream {
         }
     }
 
-    /// Helper to perform write+flush operations atomically
-    async fn write_and_flush(
-        writer: &mut futures::io::WriteHalf<Stream>,
-        data: &[u8],
-    ) -> Result<(), std::io::Error> {
-        writer.write_all(data).await?;
-        writer.flush().await?;
-        Ok(())
-    }
-
     // ===== STATE MANAGEMENT METHODS =====
 
     /// Get current stream state
@@ -368,6 +358,12 @@ impl XStream {
         }
     }
 
+    /// Flushes the main stream
+    pub async fn flush(&self) -> Result<(), std::io::Error> {
+        self.execute_main_write_op(|writer| Box::pin(async move { writer.flush().await }))
+            .await
+    }
+
     /// Closes only the write half of the main stream, sending EOF
     /// This allows the peer to know all data has been sent
     /// while still allowing us to read their response
@@ -522,7 +518,6 @@ impl XStream {
     pub async fn error_write(
         &self,
         error_data: Vec<u8>,
-        with_data_flush: bool,
     ) -> Result<(), std::io::Error> {
         // Only inbound streams should write to error stream
         if self.direction != XStreamDirection::Inbound {
@@ -538,27 +533,6 @@ impl XStream {
                 std::io::ErrorKind::AlreadyExists,
                 "Error already written to this stream",
             ));
-        }
-
-        // Optionally flush any pending data from the main stream first
-        if with_data_flush {
-            debug!(
-                "Flushing pending data before sending error on stream {:?}",
-                self.id
-            );
-
-            let flush_result = self
-                .execute_main_write_op(|writer| Box::pin(async move { writer.flush().await }))
-                .await;
-
-            if let Err(e) = flush_result {
-                if !self
-                    .state_manager
-                    .handle_connection_error(&e, "flush error during write_error")
-                {
-                    return Err(e);
-                }
-            }
         }
 
         // Mark that we're writing an error
