@@ -71,7 +71,6 @@ impl XStreamNetworkBehaviour {
                     stream_id,
                     peer_id
                 );
-                println!("111111111111111111111111111 CLOSURE TASK!!!!");
 
                 // Send an event to the behavior
                 match event_sender.send(XStreamEvent::StreamClosed {

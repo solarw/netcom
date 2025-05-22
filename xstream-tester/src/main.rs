@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use libp2p::{multiaddr::Protocol, Multiaddr, PeerId};
+use libp2p::{Multiaddr, PeerId};
 use rand::RngCore;
 use std::{io, sync::Arc, time::Duration};
 use tokio::{
@@ -13,6 +13,7 @@ use xstream::{
     behaviour::XStreamNetworkBehaviour,
     events::XStreamEvent,
     xstream::XStream,
+    xstream_error::ErrorOnRead,
 };
 
 // Структура для хранения статистики узла
@@ -291,7 +292,7 @@ async fn handle_echo_request(stream: XStream, stats: Arc<Mutex<NodeStats>>) -> i
     }
 
     loop {
-        // Читаем данные из потока
+        // Читаем данные из потока с новой обработкой ошибок
         match stream.read().await {
             Ok(data) => {
                 if data.is_empty() {
@@ -331,23 +332,40 @@ async fn handle_echo_request(stream: XStream, stats: Arc<Mutex<NodeStats>>) -> i
                     }
                 }
             }
-            Err(e) => {
-                if e.kind() == io::ErrorKind::UnexpectedEof {
-                    tracing::debug!("EOF received for stream {:?}", stream_id);
-                    
-                    // Закрываем пишущую часть потока явно при получении EOF
-                    if let Err(e) = stream.write_eof().await {
-                        tracing::error!("Error closing write half of stream {:?}: {:?}", stream_id, e);
+            Err(error_on_read) => {
+                // Обрабатываем новый тип ошибки ErrorOnRead
+                if let Some(io_wrapper) = error_on_read.as_io_error() {
+                    if io_wrapper.kind() == io::ErrorKind::UnexpectedEof {
+                        tracing::debug!("EOF received for stream {:?}", stream_id);
+                        
+                        // Закрываем пишущую часть потока явно при получении EOF
+                        if let Err(e) = stream.write_eof().await {
+                            tracing::error!("Error closing write half of stream {:?}: {:?}", stream_id, e);
+                        }
+                        
+                        // Обновляем статистику отправленных ответов
+                        let mut stats = stats.lock().await;
+                        stats.echo_responses_sent += 1;
+                        
+                        return Ok(total);
                     }
                     
-                    // Обновляем статистику отправленных ответов
-                    let mut stats = stats.lock().await;
-                    stats.echo_responses_sent += 1;
-                    
-                    return Ok(total);
+                    // Конвертируем ErrorOnRead в io::Error для совместимости
+                    return Err(io_wrapper.to_io_error());
+                } else if let Some(xs_error) = error_on_read.as_xstream_error() {
+                    // XStream ошибка - конвертируем в io::Error
+                    tracing::warn!("XStream error for stream {:?}: {}", stream_id, xs_error);
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("XStream error: {}", xs_error)
+                    ));
+                } else {
+                    // Неизвестный тип ошибки
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Unknown error type: {}", error_on_read)
+                    ));
                 }
-                
-                return Err(e);
             }
         }
     }
@@ -364,9 +382,9 @@ async fn send_echo(mut stream: XStream, stats: Arc<Mutex<NodeStats>>) -> io::Res
         .unwrap()
         .as_nanos() % 900) as usize;
 
-    // Заполняем буфер случайными данными
+    // Заполняем буфер случайными данными (исправляем deprecated функцию)
     let mut bytes = vec![0; num_bytes];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     
     // Отправляем данные
     stream.write_all(bytes.clone()).await?;
@@ -380,7 +398,7 @@ async fn send_echo(mut stream: XStream, stats: Arc<Mutex<NodeStats>>) -> io::Res
     // Закрываем пишущую часть потока
     stream.write_eof().await?;
     
-    // Читаем ответ
+    // Читаем ответ с новой обработкой ошибок
     let mut response = Vec::new();
     
     // Собираем все данные из потока
@@ -393,12 +411,27 @@ async fn send_echo(mut stream: XStream, stats: Arc<Mutex<NodeStats>>) -> io::Res
                 
                 response.extend_from_slice(&chunk);
             }
-            Err(e) => {
-                if e.kind() == io::ErrorKind::UnexpectedEof {
+            Err(error_on_read) => {
+                // Обрабатываем новый тип ошибки ErrorOnRead
+                if let Some(io_wrapper) = error_on_read.as_io_error() {
+                    if io_wrapper.kind() == io::ErrorKind::UnexpectedEof {
+                        break;
+                    }
+                    
+                    // Конвертируем ErrorOnRead в io::Error для совместимости
+                    return Err(io_wrapper.to_io_error());
+                } else if let Some(_xs_error) = error_on_read.as_xstream_error() {
+                    // Для XStream ошибок в echo клиенте просто прерываем чтение
+                    // Возможно, сервер отправил ошибку, но это не критично для echo теста
+                    tracing::info!("XStream error during echo read, using partial data");
                     break;
+                } else {
+                    // Неизвестный тип ошибки
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Unknown error type: {}", error_on_read)
+                    ));
                 }
-                
-                return Err(e);
             }
         }
     }
@@ -444,11 +477,11 @@ impl XStreamTester {
         port2: u16
     ) -> Result<Self> {
         // Создаем первый узел
-        let mut node1 = Node::new("node1", port1, use_ipv6).await?;
+        let node1 = Node::new("node1", port1, use_ipv6).await?;
         let node1_sender = node1.get_command_sender();
         
         // Создаем второй узел
-        let mut node2 = Node::new("node2", port2, use_ipv6).await?;
+        let node2 = Node::new("node2", port2, use_ipv6).await?;
         let node2_sender = node2.get_command_sender();
         
         Ok(XStreamTester {
