@@ -4,3 +4,4 @@ Cargo.lock
 /src/old/
 /src/xauth
 *.log
+Makefile
