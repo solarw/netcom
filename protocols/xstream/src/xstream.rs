@@ -1,4 +1,5 @@
-// Updated XStream implementation using the new state management module
+// xstream.rs
+// Updated XStream implementation using the new error handling module
 // With utility methods to reduce code duplication
 
 use futures::AsyncReadExt;
@@ -10,6 +11,7 @@ use tracing::{debug, error, info, warn};
 
 use super::types::{XStreamDirection, XStreamID, XStreamState};
 use super::xstream_state::XStreamStateManager;
+use super::error_handling::{ErrorDataStore, ErrorReaderTask};
 
 /// XStream struct - represents a pair of streams for data transfer
 #[derive(Debug)]
@@ -24,6 +26,10 @@ pub struct XStream {
     pub direction: XStreamDirection,
     // State manager handling all state transitions and notifications
     state_manager: XStreamStateManager,
+    
+    // New error handling components
+    error_data_store: ErrorDataStore,
+    error_reader_task: Arc<Mutex<Option<ErrorReaderTask>>>,
 }
 
 impl XStream {
@@ -44,17 +50,39 @@ impl XStream {
         );
 
         // Create the state manager
-        let state_manager = XStreamStateManager::new(id, peer_id, direction, closure_notifier);
+        let state_manager = XStreamStateManager::new(id, peer_id, direction, closure_notifier.clone());
+        let error_data_store = ErrorDataStore::new();
+        
+        // Create Arc-wrapped streams first
+        let stream_error_read_arc = Arc::new(Mutex::new(stream_error_read));
+        let stream_error_write_arc = Arc::new(Mutex::new(stream_error_write));
+        
+        // Start error reading task for outbound streams
+        let error_reader_task = if direction == XStreamDirection::Outbound {
+            let task = ErrorReaderTask::start(
+                id,
+                peer_id,
+                direction,
+                stream_error_read_arc.clone(),
+                error_data_store.clone(),
+                closure_notifier,
+            );
+            Arc::new(Mutex::new(Some(task)))
+        } else {
+            Arc::new(Mutex::new(None))
+        };
 
         Self {
             stream_main_read: Arc::new(Mutex::new(stream_main_read)),
             stream_main_write: Arc::new(Mutex::new(stream_main_write)),
-            stream_error_read: Arc::new(Mutex::new(stream_error_read)),
-            stream_error_write: Arc::new(Mutex::new(stream_error_write)),
+            stream_error_read: stream_error_read_arc,
+            stream_error_write: stream_error_write_arc,
             id,
             peer_id,
             direction,
             state_manager,
+            error_data_store,
+            error_reader_task,
         }
     }
 
@@ -304,6 +332,18 @@ impl XStream {
         .await
     }
 
+    /// Writes all data to the main stream
+    pub async fn write_all(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
+        self.execute_main_write_op(|writer| {
+            let data = buf.clone(); // Clone for move into async block
+            Box::pin(async move {
+                writer.write_all(&data).await?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
     /// Flushes the main stream
     pub async fn flush(&self) -> Result<(), std::io::Error> {
         self.execute_main_write_op(|writer| Box::pin(async move { writer.flush().await }))
@@ -361,7 +401,10 @@ impl XStream {
         }
     }
 
+    // ===== ERROR STREAM OPERATIONS =====
+
     /// Read from the error stream (only for outbound streams)
+    /// This method keeps the same signature but now waits for error from the background task
     pub async fn error_read(&self) -> Result<Vec<u8>, std::io::Error> {
         // Only outbound streams should read from error stream
         if self.direction != XStreamDirection::Outbound {
@@ -371,13 +414,24 @@ impl XStream {
             ));
         }
 
-        // Check if we already have stored error data
-        if let Some(data) = self.state_manager.get_error_data().await {
-            debug!("Returning cached error data for stream {:?}", self.id);
-            return Ok(data);
+        debug!("Waiting for error data for stream {:?}", self.id);
+        
+        // Wait for error data from the background task
+        self.error_data_store.wait_for_error().await
+    }
+
+    /// Internal method to read from error stream (used by background task)
+    /// This is the actual reading functionality that was moved from error_read
+    pub async fn inner_error_read(&self) -> Result<Vec<u8>, std::io::Error> {
+        // Only outbound streams should read from error stream
+        if self.direction != XStreamDirection::Outbound {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Only outbound streams can read from error stream",
+            ));
         }
 
-        // If no stored data, read from the error stream using execute_error_read_op
+        // Read from the error stream using execute_error_read_op
         let mut buf: Vec<u8> = Vec::new();
 
         let read_result = self
@@ -391,88 +445,27 @@ impl XStream {
 
         match read_result {
             Ok(buf) => {
-                // Store the error data for future reads
-                if !buf.is_empty() {
-                    self.state_manager.store_error_data(buf.clone()).await;
-                }
+                debug!("Read {} bytes from error stream for stream {:?}", buf.len(), self.id);
                 Ok(buf)
             }
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Writes all data to the main stream
-    pub async fn write_all(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
-        self.execute_main_write_op(|writer| {
-            let data = buf.clone(); // Clone for move into async block
-            Box::pin(async move {
-                writer.write_all(&data).await?;
-                writer.flush().await?;
-                Ok(())
-            })
-        })
-        .await
-    }
-
-    /// Closes the streams
-    /// Closes the streams
-    pub async fn close(&mut self) -> Result<(), std::io::Error> {
-        info!(
-            "Closing XStream with id: {:?} for peer: {}",
-            self.id, self.peer_id
-        );
-
-        // Always mark as locally closed first, before doing any operations
-        // This ensures the state is set regardless of the outcome
-        self.state_manager.mark_local_closed();
-        debug!("Stream {:?} marked as locally closed", self.id);
-
-        // If already fully closed, return early
-        if self.state_manager.is_closed() {
-            debug!("Stream {:?} already fully closed", self.id);
-            return Ok(());
-        }
-
-        // For inbound streams, close the error stream
-        if self.direction == XStreamDirection::Inbound {
-            let _ = self
-                .execute_error_write_op(|writer| Box::pin(async move { writer.close().await }))
-                .await;
-        }
-
-        // Get a lock on the write stream and close it
-        // We'll try to close it, but we won't rely on this for state management
-        let result = self
-            .execute_main_write_op(|writer| {
-                Box::pin(async move {
-                    // Ignore any errors from flush
-                    let _ = writer.flush().await;
-                    writer.close().await
-                })
-            })
-            .await;
-
-        debug!("Network stream close result: {:?}", result);
-
-        // Explicitly notify about the state change to ensure it propagates
-        self.state_manager
-            .notify_state_change("Stream explicitly closed");
-
-        // Even if there was an error closing the stream, if it indicates
-        // the connection was already closed, consider it a success
-        match result {
-            Ok(_) => Ok(()),
             Err(e) => {
-                if self.state_manager.is_connection_closed_error(&e) {
-                    Ok(())
-                } else {
-                    // Return the error but still keep the stream marked as locally closed
-                    Err(e)
-                }
+                error!("Failed to read from error stream for stream {:?}: {:?}", self.id, e);
+                Err(e)
             }
         }
     }
 
+    /// Check if error data is available without waiting
+    pub async fn has_error_data(&self) -> bool {
+        self.error_data_store.has_error().await
+    }
+
+    /// Get cached error data if available (non-blocking)
+    pub async fn get_cached_error(&self) -> Option<Vec<u8>> {
+        self.error_data_store.get_cached_error().await
+    }
+
+    /// Write to the error stream (only for inbound streams)
     pub async fn error_write(&self, error_data: Vec<u8>) -> Result<(), std::io::Error> {
         // Only inbound streams should write to error stream
         if self.direction != XStreamDirection::Inbound {
@@ -522,6 +515,70 @@ impl XStream {
             }
         }
     }
+
+    /// Closes the streams and shuts down background tasks
+    pub async fn close(&mut self) -> Result<(), std::io::Error> {
+        info!(
+            "Closing XStream with id: {:?} for peer: {}",
+            self.id, self.peer_id
+        );
+
+        // Always mark as locally closed first
+        self.state_manager.mark_local_closed();
+        debug!("Stream {:?} marked as locally closed", self.id);
+
+        // Shutdown error reader task
+        {
+            let mut task_guard = self.error_reader_task.lock().await;
+            if let Some(task) = task_guard.take() {
+                debug!("Shutting down error reader task for stream {:?}", self.id);
+                task.shutdown().await;
+            }
+        }
+
+        // Close error data store
+        self.error_data_store.close().await;
+
+        // If already fully closed, return early
+        if self.state_manager.is_closed() {
+            debug!("Stream {:?} already fully closed", self.id);
+            return Ok(());
+        }
+
+        // For inbound streams, close the error stream
+        if self.direction == XStreamDirection::Inbound {
+            let _ = self
+                .execute_error_write_op(|writer| Box::pin(async move { writer.close().await }))
+                .await;
+        }
+
+        // Close main write stream
+        let result = self
+            .execute_main_write_op(|writer| {
+                Box::pin(async move {
+                    let _ = writer.flush().await;
+                    writer.close().await
+                })
+            })
+            .await;
+
+        debug!("Network stream close result: {:?}", result);
+
+        // Notify about the state change
+        self.state_manager
+            .notify_state_change("Stream explicitly closed");
+
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if self.state_manager.is_connection_closed_error(&e) {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
 }
 
 impl Clone for XStream {
@@ -531,7 +588,6 @@ impl Clone for XStream {
             self.id, self.peer_id
         );
 
-        // Clone the stream with all its components
         Self {
             stream_main_read: self.stream_main_read.clone(),
             stream_main_write: self.stream_main_write.clone(),
@@ -541,6 +597,8 @@ impl Clone for XStream {
             peer_id: self.peer_id,
             direction: self.direction,
             state_manager: self.state_manager.clone(),
+            error_data_store: self.error_data_store.clone(),
+            error_reader_task: self.error_reader_task.clone(),
         }
     }
 }
@@ -553,5 +611,8 @@ impl Drop for XStream {
         if !self.state_manager.is_closed() {
             self.state_manager.notify_state_change("XStream dropped");
         }
+
+        // The error reader task will be shut down when the Arc is dropped
+        // or when close() is called explicitly
     }
 }

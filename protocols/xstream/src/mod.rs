@@ -9,4 +9,6 @@ pub mod types;
 pub mod utils;
 pub mod xstream_state;
 pub mod xstream;
+pub mod error_handling;
+#[cfg(test)]
 pub mod tests;

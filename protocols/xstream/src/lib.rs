@@ -10,6 +10,7 @@ pub mod types;
 pub mod utils;
 pub mod xstream_state;
 pub mod xstream;
+pub mod error_handling;
 // Добавьте следующее для подключения тестов:
 #[cfg(test)]
 mod tests;
