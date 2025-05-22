@@ -250,12 +250,25 @@ class EnhancedEchoNode:
                         await asyncio.sleep(0.1)
             
             # Try to read normal response data if we don't have error data or if we expect both
-            if not error_data or self.test_mode == "partial_error":
+            if not error_data or self.test_mode == "partial_error" or expect_error == False:
                 try:
                     logger.debug(f"Node {self.name}: Attempting to read response data")
                     response_data = await stream.read_to_end()
                     if response_data:
                         logger.info(f"Node {self.name}: Received response: {response_data.decode()}")
+                        
+                        # For partial_error mode, after getting response, check again for error data
+                        if self.test_mode == "partial_error" and not error_data:
+                            for attempt in range(3):
+                                await asyncio.sleep(0.1)
+                                if await stream.has_error_data():
+                                    try:
+                                        error_data = await stream.error_read()
+                                        logger.info(f"Node {self.name}: Received error after partial response: {error_data.decode()}")
+                                        break
+                                    except Exception as err_e:
+                                        logger.warning(f"Node {self.name}: Failed to read error after partial: {err_e}")
+                        
                 except Exception as e:
                     logger.info(f"Node {self.name}: No response data or read failed: {e}")
                     
@@ -330,14 +343,38 @@ async def test_scenario(server, client, server_peer_id, scenario_name, test_mode
     if result['success']:
         if expect_error:
             if result['error']:
-                logger.info(f"✅ {scenario_name} PASSED: Received expected error")
-                logger.info(f"   Error: {result['error']}")
-                return True
+                # Check if the error contains the original message
+                if test_data in result['error']:
+                    logger.info(f"✅ {scenario_name} PASSED: Received expected error with correct data")
+                    logger.info(f"   Error: {result['error']}")
+                    logger.info(f"   Original data found in error: '{test_data}'")
+                    return True
+                else:
+                    logger.error(f"❌ {scenario_name} FAILED: Error doesn't contain original data")
+                    logger.error(f"   Sent: '{test_data}'")
+                    logger.error(f"   Error: '{result['error']}'")
+                    return False
             elif result['response'] and test_mode == "partial_error":
-                # For partial_error mode, receiving partial response is also acceptable
-                logger.info(f"✅ {scenario_name} PASSED: Received partial response (partial_error mode)")
-                logger.info(f"   Response: {result['response']}")
-                return True
+                # For partial_error mode, check if we got partial response with original data
+                partial_correct = test_data[:10] in result['response']
+                error_correct = result['error'] and test_data in result['error'] if result['error'] else False
+                
+                if partial_correct and error_correct:
+                    logger.info(f"✅ {scenario_name} PASSED: Received both partial response and error with correct data")
+                    logger.info(f"   Partial Response: {result['response']}")
+                    logger.info(f"   Error: {result['error']}")
+                    return True
+                elif partial_correct:
+                    logger.info(f"✅ {scenario_name} PASSED: Received partial response with correct data")
+                    logger.info(f"   Response: {result['response']}")
+                    logger.info(f"   Original data prefix found: '{test_data[:10]}'")
+                    return True
+                else:
+                    logger.error(f"❌ {scenario_name} FAILED: Partial response doesn't contain expected data")
+                    logger.error(f"   Sent: '{test_data}'")
+                    logger.error(f"   Expected prefix: '{test_data[:10]}'")
+                    logger.error(f"   Response: '{result['response']}'")
+                    return False
             else:
                 logger.warning(f"⚠️ {scenario_name}: Expected error but got response")
                 logger.info(f"   Response: {result['response']}")
@@ -436,7 +473,7 @@ async def main():
         
         logger.info(f"\nPhase 3 Results: {partial_success_count}/2 partial error tests passed")
         
-        # Final Summary
+        # Final Summary with detailed validation
         total_tests = 8
         total_passed = normal_success_count + error_success_count + partial_success_count
         
@@ -447,13 +484,27 @@ async def main():
         logger.info(f"Passed: {total_passed}")
         logger.info(f"Failed: {total_tests - total_passed}")
         logger.info(f"Success Rate: {(total_passed/total_tests)*100:.1f}%")
+        logger.info("")
+        logger.info("DETAILED RESULTS:")
+        logger.info(f"  Normal Echo Tests: {normal_success_count}/3 passed")
+        logger.info(f"  Error Response Tests: {error_success_count}/3 passed")
+        logger.info(f"  Partial Error Tests: {partial_success_count}/2 passed")
         
         if total_passed == total_tests:
             logger.info("🎉 ALL TESTS PASSED! Enhanced XStream functionality working correctly!")
+            logger.info("   ✅ Normal echo communication works")
+            logger.info("   ✅ Error stream functionality works")
+            logger.info("   ✅ Partial response + error functionality works")
         else:
-            logger.warning(f"⚠️ {total_tests - total_passed} tests failed. Check logs for details.")
+            logger.warning(f"⚠️ {total_tests - total_passed} tests failed. Analysis:")
+            if normal_success_count < 3:
+                logger.warning(f"   ❌ Normal echo failed: {3 - normal_success_count} times")
+            if error_success_count < 3:
+                logger.warning(f"   ❌ Error stream failed: {3 - error_success_count} times")
+            if partial_success_count < 2:
+                logger.warning(f"   ❌ Partial error failed: {2 - partial_success_count} times")
         
-        logger.info(f"Server processed {server.request_count} total requests")
+        logger.info(f"\nServer processed {server.request_count} total requests")
         
     finally:
         # Stop the nodes
