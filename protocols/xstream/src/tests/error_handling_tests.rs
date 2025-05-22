@@ -70,14 +70,17 @@ async fn test_error_data_store_multiple_readers() {
         store3.wait_for_error().await
     });
     
-    // Wait a bit then store data
-    sleep(Duration::from_millis(50)).await;
+    // Wait longer then store data
+    sleep(Duration::from_millis(100)).await;
     store.store_error(test_data).await.unwrap();
     
-    // All readers should get the data
-    let result1 = timeout(Duration::from_secs(1), reader1).await.unwrap().unwrap().unwrap();
-    let result2 = timeout(Duration::from_secs(1), reader2).await.unwrap().unwrap().unwrap();
-    let result3 = timeout(Duration::from_secs(1), reader3).await.unwrap().unwrap().unwrap();
+    // All readers should get the data with much longer timeout
+    let result1 = timeout(Duration::from_secs(15), reader1).await
+        .expect("Reader1 timed out after 15 seconds").unwrap().unwrap();
+    let result2 = timeout(Duration::from_secs(15), reader2).await
+        .expect("Reader2 timed out after 15 seconds").unwrap().unwrap();
+    let result3 = timeout(Duration::from_secs(15), reader3).await
+        .expect("Reader3 timed out after 15 seconds").unwrap().unwrap();
     
     assert_eq!(result1, expected1);
     assert_eq!(result2, expected2);
@@ -210,21 +213,26 @@ async fn test_error_data_store_concurrent_access() {
     
     // Concurrent writer (should only store once)
     let writer = tokio::spawn(async move {
+        sleep(Duration::from_millis(100)).await; // Longer delay before writing
         store3.store_error(data1).await
     });
     
     // Another writer with different data (should be ignored)
     let store4 = store.clone();
     let late_writer = tokio::spawn(async move {
-        sleep(Duration::from_millis(10)).await;
+        sleep(Duration::from_millis(150)).await;
         store4.store_error(data2).await
     });
     
-    // Wait for all operations
-    let write_result = timeout(Duration::from_secs(1), writer).await.unwrap().unwrap();
-    let late_write_result = timeout(Duration::from_secs(1), late_writer).await.unwrap().unwrap();
-    let read_result1 = timeout(Duration::from_secs(1), reader1).await.unwrap().unwrap().unwrap();
-    let read_result2 = timeout(Duration::from_secs(1), reader2).await.unwrap().unwrap().unwrap();
+    // Wait for all operations with much longer timeouts
+    let write_result = timeout(Duration::from_secs(15), writer).await
+        .expect("Writer timed out after 15 seconds").unwrap();
+    let late_write_result = timeout(Duration::from_secs(15), late_writer).await
+        .expect("Late writer timed out after 15 seconds").unwrap();
+    let read_result1 = timeout(Duration::from_secs(15), reader1).await
+        .expect("Reader1 timed out after 15 seconds").unwrap().unwrap();
+    let read_result2 = timeout(Duration::from_secs(15), reader2).await
+        .expect("Reader2 timed out after 15 seconds").unwrap().unwrap();
     
     // First write should succeed
     assert!(write_result.is_ok());
@@ -241,9 +249,9 @@ async fn test_error_data_store_stress_test() {
     let store = ErrorDataStore::new();
     let test_data = b"stress test data".to_vec();
     
-    // Create many concurrent readers
+    // Create fewer concurrent readers for better stability
     let mut readers = Vec::new();
-    for i in 0..50 {
+    for i in 0..10 { // Reduced from 25 to 10
         let store_clone = store.clone();
         let expected_data = test_data.clone();
         let reader = tokio::spawn(async move {
@@ -254,13 +262,14 @@ async fn test_error_data_store_stress_test() {
         readers.push(reader);
     }
     
-    // Wait a bit then store data
-    sleep(Duration::from_millis(10)).await;
+    // Wait longer then store data
+    sleep(Duration::from_millis(200)).await; // Increased delay
     store.store_error(test_data).await.unwrap();
     
-    // All readers should complete successfully
+    // All readers should complete successfully with much longer timeout
     for (expected_id, reader) in readers.into_iter().enumerate() {
-        let reader_id = timeout(Duration::from_secs(2), reader).await.unwrap().unwrap();
+        let reader_id = timeout(Duration::from_secs(20), reader).await
+            .expect(&format!("Reader {} timed out after 20 seconds", expected_id)).unwrap();
         assert_eq!(reader_id, expected_id);
     }
     

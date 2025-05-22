@@ -15,26 +15,34 @@ use super::types::{XStreamDirection, XStreamID};
 /// while a single background task reads from the error stream.
 #[derive(Debug, Clone)]
 pub struct ErrorDataStore {
-    /// Receiver for error data - can be cloned and awaited from multiple places
-    error_receiver: Arc<Mutex<Option<watch::Receiver<Option<Vec<u8>>>>>>,
-    /// Sender for error data - used by background task
-    error_sender: Arc<Mutex<Option<watch::Sender<Option<Vec<u8>>>>>>,
+    /// Shared error data state
+    shared_state: Arc<Mutex<SharedErrorState>>,
+    /// Notifier for when error data becomes available
+    notify: Arc<tokio::sync::Notify>,
+}
+
+#[derive(Debug)]
+struct SharedErrorState {
+    /// Cached error data if available
+    error_data: Option<Vec<u8>>,
     /// Flag to indicate if error was already received
-    error_received: Arc<tokio::sync::RwLock<bool>>,
-    /// Cached error data for subsequent reads
-    cached_error: Arc<Mutex<Option<Vec<u8>>>>,
+    error_received: bool,
+    /// Flag to indicate if the store is closed
+    is_closed: bool,
 }
 
 impl ErrorDataStore {
     /// Create a new ErrorDataStore
     pub fn new() -> Self {
-        let (sender, receiver) = watch::channel(None);
-        
+        let shared_state = SharedErrorState {
+            error_data: None,
+            error_received: false,
+            is_closed: false,
+        };
+
         Self {
-            error_receiver: Arc::new(Mutex::new(Some(receiver))),
-            error_sender: Arc::new(Mutex::new(Some(sender))),
-            error_received: Arc::new(tokio::sync::RwLock::new(false)),
-            cached_error: Arc::new(Mutex::new(None)),
+            shared_state: Arc::new(Mutex::new(shared_state)),
+            notify: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -45,60 +53,30 @@ impl ErrorDataStore {
     /// 2. Wait for new error data if not cached
     /// 3. Cache the error data for future reads
     pub async fn wait_for_error(&self) -> Result<Vec<u8>, std::io::Error> {
-        // First check if we have cached data
-        {
-            let cached = self.cached_error.lock().await;
-            if let Some(ref data) = *cached {
-                debug!("Returning cached error data ({} bytes)", data.len());
-                return Ok(data.clone());
-            }
-        }
-
-        // If no cached data, wait for new error
-        let mut receiver_guard = self.error_receiver.lock().await;
-        if let Some(receiver) = receiver_guard.as_mut() {
-            debug!("Waiting for error data to arrive...");
-            
-            // Wait for error data to arrive
-            loop {
-                match receiver.changed().await {
-                    Ok(_) => {
-                        let current_value = receiver.borrow().clone();
-                        if let Some(error_data) = current_value {
-                            debug!("Error data received ({} bytes)", error_data.len());
-                            
-                            // Cache the error for future reads
-                            {
-                                let mut cached = self.cached_error.lock().await;
-                                *cached = Some(error_data.clone());
-                            }
-                            
-                            // Mark as received
-                            {
-                                let mut received = self.error_received.write().await;
-                                *received = true;
-                            }
-                            
-                            debug!("Error data cached and marked as received");
-                            return Ok(error_data);
-                        }
-                        // Continue waiting if we got None
-                    }
-                    Err(_) => {
-                        // Sender was dropped, no error will come
-                        debug!("Error sender was dropped - no error data will arrive");
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
-                            "Error stream closed without receiving error data",
-                        ));
-                    }
+        loop {
+            // Check current state
+            {
+                let state = self.shared_state.lock().await;
+                if let Some(ref data) = state.error_data {
+                    debug!("Returning cached error data ({} bytes)", data.len());
+                    return Ok(data.clone());
+                }
+                
+                if state.is_closed {
+                    debug!("Error store is closed - no error data will arrive");
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "Error stream closed without receiving error data",
+                    ));
                 }
             }
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotConnected,
-                "Error receiver not available",
-            ));
+
+            debug!("Waiting for error data to arrive...");
+            
+            // Wait for notification
+            self.notify.notified().await;
+            
+            // Check again after notification (loop will either return data or continue waiting)
         }
     }
 
@@ -106,66 +84,47 @@ impl ErrorDataStore {
     /// 
     /// This method sends error data to all waiting consumers
     pub async fn store_error(&self, data: Vec<u8>) -> Result<(), std::io::Error> {
-        // Check if error was already received
+        debug!("Storing error data ({} bytes)", data.len());
+
         {
-            let received = self.error_received.read().await;
-            if *received {
+            let mut state = self.shared_state.lock().await;
+            
+            // Check if error was already received
+            if state.error_received {
                 debug!("Error already received, ignoring new error data");
                 return Ok(());
             }
-        }
-
-        debug!("Storing error data ({} bytes)", data.len());
-
-        // Send error data through watch channel
-        let sender_guard = self.error_sender.lock().await;
-        if let Some(ref sender) = *sender_guard {
-            match sender.send(Some(data.clone())) {
-                Ok(_) => {
-                    debug!("Error data sent to watchers");
-                    
-                    // Also cache it immediately
-                    {
-                        let mut cached = self.cached_error.lock().await;
-                        *cached = Some(data);
-                    }
-                    
-                    // Mark as received
-                    {
-                        let mut received = self.error_received.write().await;
-                        *received = true;
-                    }
-                    
-                    debug!("Error data stored successfully");
-                    Ok(())
-                }
-                Err(_) => {
-                    error!("Failed to send error data - no receivers");
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::BrokenPipe,
-                        "Failed to send error data - no receivers",
-                    ))
-                }
+            
+            if state.is_closed {
+                debug!("Store is closed, cannot store error data");
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "Error store is closed",
+                ));
             }
-        } else {
-            error!("Error sender not available");
-            Err(std::io::Error::new(
-                std::io::ErrorKind::NotConnected,
-                "Error sender not available",
-            ))
+
+            // Store the error data
+            state.error_data = Some(data);
+            state.error_received = true;
         }
+
+        // Notify all waiters
+        self.notify.notify_waiters();
+        debug!("Error data stored and all waiters notified");
+        
+        Ok(())
     }
 
     /// Check if error data is available without waiting
     pub async fn has_error(&self) -> bool {
-        let received = self.error_received.read().await;
-        *received
+        let state = self.shared_state.lock().await;
+        state.error_received
     }
 
     /// Get cached error data if available (non-blocking)
     pub async fn get_cached_error(&self) -> Option<Vec<u8>> {
-        let cached = self.cached_error.lock().await;
-        cached.clone()
+        let state = self.shared_state.lock().await;
+        state.error_data.clone()
     }
 
     /// Close the error data store (used when stream is closing)
@@ -174,26 +133,31 @@ impl ErrorDataStore {
     pub async fn close(&self) {
         debug!("Closing ErrorDataStore");
         
-        // Drop the sender to signal no more data will come
-        let mut sender_guard = self.error_sender.lock().await;
-        *sender_guard = None;
+        {
+            let mut state = self.shared_state.lock().await;
+            state.is_closed = true;
+        }
+        
+        // Notify all waiters that store is closed
+        self.notify.notify_waiters();
         
         debug!("ErrorDataStore closed");
     }
 
     /// Check if the store is closed
     pub async fn is_closed(&self) -> bool {
-        let sender_guard = self.error_sender.lock().await;
-        sender_guard.is_none()
+        let state = self.shared_state.lock().await;
+        state.is_closed
     }
 
     /// Clear cached error data (useful for testing)
     pub async fn clear_cache(&self) {
-        let mut cached = self.cached_error.lock().await;
-        *cached = None;
-        
-        let mut received = self.error_received.write().await;
-        *received = false;
+        {
+            let mut state = self.shared_state.lock().await;
+            state.error_data = None;
+            state.error_received = false;
+            state.is_closed = false;
+        }
         
         debug!("Error cache cleared");
     }

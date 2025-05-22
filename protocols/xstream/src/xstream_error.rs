@@ -159,6 +159,14 @@ impl ErrorOnRead {
         }
     }
 
+    /// Compatibility method for tests - returns ErrorKind if this is an IO error
+    pub fn kind(&self) -> io::ErrorKind {
+        match &self.error {
+            ReadError::Io(io_wrapper) => io_wrapper.kind(),
+            ReadError::XStream(_) => io::ErrorKind::Other,
+        }
+    }
+
     /// Создает ErrorOnRead с IO ошибкой
     pub fn from_io_error(partial_data: Vec<u8>, error: io::Error) -> Self {
         Self {
@@ -261,6 +269,21 @@ impl ErrorOnRead {
     pub fn xstream_error_only(error: XStreamError) -> Self {
         Self::from_xstream_error(Vec::new(), error)
     }
+
+    /// Compatibility method: converts ErrorOnRead to io::Error for legacy code
+    pub fn to_io_error(self) -> io::Error {
+        match self.error {
+            ReadError::Io(io_wrapper) => io_wrapper.to_io_error(),
+            ReadError::XStream(xs_error) => {
+                io::Error::new(io::ErrorKind::Other, format!("XStream error: {}", xs_error))
+            }
+        }
+    }
+
+    /// Compatibility method: creates ErrorOnRead from io::Error (for test compatibility)
+    pub fn from_std_io_error(error: io::Error) -> Self {
+        Self::io_error_only(error)
+    }
 }
 
 impl fmt::Display for ReadError {
@@ -304,6 +327,13 @@ impl std::error::Error for ErrorOnRead {
 
 /// Результат операции чтения XStream
 pub type XStreamReadResult<T> = Result<T, ErrorOnRead>;
+
+// For backward compatibility with existing tests
+impl From<io::Error> for ErrorOnRead {
+    fn from(error: io::Error) -> Self {
+        ErrorOnRead::io_error_only(error)
+    }
+}
 
 /// Утилиты для работы с ошибками XStream
 pub mod utils {
@@ -403,13 +433,23 @@ mod tests {
     }
 
     #[test]
-    fn test_utils_critical_error() {
-        let critical = ReadError::Io(IoErrorWrapper::new(
-            io::Error::new(io::ErrorKind::ConnectionReset, "Reset")
-        ));
-        let non_critical = ReadError::XStream(XStreamError::new(b"Error".to_vec()));
+    fn test_error_on_read_compatibility() {
+        // Test kind() method compatibility
+        let io_error = io::Error::new(io::ErrorKind::BrokenPipe, "Pipe broken");
+        let error_on_read = ErrorOnRead::from(io_error);
+        assert_eq!(error_on_read.kind(), io::ErrorKind::BrokenPipe);
         
-        assert!(utils::is_critical_error(&critical));
-        assert!(!utils::is_critical_error(&non_critical));
+        // Test XStream error returns Other kind
+        let xs_error = XStreamError::new(b"test".to_vec());
+        let xs_error_on_read = ErrorOnRead::xstream_error_only(xs_error);
+        assert_eq!(xs_error_on_read.kind(), io::ErrorKind::Other);
+    }
+    
+    #[test]
+    fn test_error_conversion() {
+        let original = io::Error::new(io::ErrorKind::TimedOut, "Timeout");
+        let error_on_read = ErrorOnRead::from(original);
+        let converted_back = error_on_read.to_io_error();
+        assert_eq!(converted_back.kind(), io::ErrorKind::TimedOut);
     }
 }

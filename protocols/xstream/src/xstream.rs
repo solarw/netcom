@@ -1,5 +1,5 @@
 // xstream.rs
-// Updated XStream implementation using the new error handling module
+// Updated XStream implementation with enhanced error handling
 // With utility methods to reduce code duplication
 
 use futures::AsyncReadExt;
@@ -7,11 +7,13 @@ use futures::AsyncWriteExt;
 use libp2p::{PeerId, Stream};
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
+use tokio::select;
 use tracing::{debug, error, info, warn};
 
 use super::types::{XStreamDirection, XStreamID, XStreamState};
 use super::xstream_state::XStreamStateManager;
 use super::error_handling::{ErrorDataStore, ErrorReaderTask};
+use super::xstream_error::{ErrorOnRead, ReadError, XStreamError, XStreamReadResult, utils};
 
 /// XStream struct - represents a pair of streams for data transfer
 #[derive(Debug)]
@@ -27,7 +29,7 @@ pub struct XStream {
     // State manager handling all state transitions and notifications
     state_manager: XStreamStateManager,
     
-    // New error handling components
+    // Error handling components
     error_data_store: ErrorDataStore,
     error_reader_task: Arc<Mutex<Option<ErrorReaderTask>>>,
 }
@@ -96,7 +98,7 @@ impl XStream {
         ) -> futures::future::BoxFuture<'_, Result<R, std::io::Error>>,
     {
         // First check if we can read
-        self.check_readable()?;
+        self.check_readable_basic()?;
 
         let stream_main_read = self.stream_main_read.clone();
 
@@ -146,31 +148,6 @@ impl XStream {
                 // Handle connection errors
                 self.state_manager
                     .handle_connection_error(&e, "write operation error");
-                Err(e)
-            }
-        }
-    }
-
-    /// Executes a read operation on the error stream with proper error handling
-    async fn execute_error_read_op<F, R>(&self, operation: F) -> Result<R, std::io::Error>
-    where
-        F: FnOnce(
-            &mut futures::io::ReadHalf<Stream>,
-        ) -> futures::future::BoxFuture<'_, Result<R, std::io::Error>>,
-    {
-        let stream_error_read = self.stream_error_read.clone();
-
-        // Acquire the lock and perform the operation
-        let op_result = {
-            let mut guard = stream_error_read.lock().await;
-            operation(&mut *guard).await
-        };
-
-        match op_result {
-            Ok(result) => Ok(result),
-            Err(e) => {
-                self.state_manager
-                    .handle_connection_error(&e, "error stream read operation error");
                 Err(e)
             }
         }
@@ -233,8 +210,8 @@ impl XStream {
         self.state_manager.is_read_remote_closed()
     }
 
-    /// Checks if the stream is in a valid state for reading
-    fn check_readable(&self) -> Result<(), std::io::Error> {
+    /// Basic readable check for internal operations (returns std::io::Error)
+    fn check_readable_basic(&self) -> Result<(), std::io::Error> {
         if self.state_manager.is_read_remote_closed() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -248,6 +225,14 @@ impl XStream {
             ));
         }
         Ok(())
+    }
+
+    /// Enhanced readable check that returns ErrorOnRead
+    fn check_readable(&self) -> XStreamReadResult<()> {
+        match self.check_readable_basic() {
+            Ok(()) => Ok(()),
+            Err(e) => Err(ErrorOnRead::io_error_only(e)),
+        }
     }
 
     /// Checks if the stream is in a valid state for writing
@@ -273,49 +258,228 @@ impl XStream {
         Ok(())
     }
 
-    // ===== STREAM OPERATIONS =====
+    /// Check if there's an immediate error available
+    async fn check_for_immediate_error(&self) -> Option<XStreamError> {
+        if self.direction == XStreamDirection::Outbound {
+            if let Some(error_data) = self.error_data_store.get_cached_error().await {
+                return Some(XStreamError::new(error_data));
+            }
+        }
+        None
+    }
 
-    /// Reads exact number of bytes from the main stream
-    pub async fn read_exact(&self, size: usize) -> Result<Vec<u8>, std::io::Error> {
+    /// Check if there's a pending error without blocking
+    pub async fn has_pending_error(&self) -> bool {
+        self.direction == XStreamDirection::Outbound && self.error_data_store.has_error().await
+    }
+
+    // ===== ENHANCED STREAM OPERATIONS WITH ERROR HANDLING =====
+
+    /// Reads exact number of bytes from the main stream with error awareness
+    pub async fn read_exact(&self, size: usize) -> XStreamReadResult<Vec<u8>> {
+        // Check stream state first
+        self.check_readable()?;
+
+        // Check for immediate error
+        if let Some(error) = self.check_for_immediate_error().await {
+            return Err(ErrorOnRead::xstream_error_only(error));
+        }
+
+        // For outbound streams, read with error awareness
+        if self.direction == XStreamDirection::Outbound {
+            self.read_exact_with_error_awareness(size).await
+        } else {
+            // For inbound streams, simple read
+            self.read_exact_simple(size).await
+        }
+    }
+
+    /// Simple read_exact for inbound streams
+    async fn read_exact_simple(&self, size: usize) -> XStreamReadResult<Vec<u8>> {
         let mut buf = vec![0u8; size];
 
-        self.execute_main_read_op(|reader| {
+        match self.execute_main_read_op(|reader| {
             Box::pin(async move {
                 reader.read_exact(&mut buf).await?;
                 Ok(buf)
             })
-        })
-        .await
+        }).await {
+            Ok(data) => Ok(data),
+            Err(e) => Err(ErrorOnRead::io_error_only(e)),
+        }
     }
 
-    /// Reads all data from the main stream to the end
-    pub async fn read_to_end(&self) -> Result<Vec<u8>, std::io::Error> {
+    /// Read exact with error awareness for outbound streams
+    async fn read_exact_with_error_awareness(&self, size: usize) -> XStreamReadResult<Vec<u8>> {
+        let mut buf = vec![0u8; size];
+        let mut bytes_read = 0;
+
+        while bytes_read < size {
+            let stream_main_read = self.stream_main_read.clone();
+            
+            select! {
+                // Try to read more data
+                read_result = async {
+                    let mut guard = stream_main_read.lock().await;
+                    guard.read(&mut buf[bytes_read..]).await
+                } => {
+                    match read_result {
+                        Ok(0) => {
+                            // EOF reached before reading all data
+                            let partial_data = buf[0..bytes_read].to_vec();
+                            let eof_error = std::io::Error::new(
+                                std::io::ErrorKind::UnexpectedEof,
+                                format!("EOF after reading {} of {} bytes", bytes_read, size)
+                            );
+                            return Err(ErrorOnRead::from_io_error(partial_data, eof_error));
+                        },
+                        Ok(n) => {
+                            bytes_read += n;
+                            debug!("Read {} bytes, total: {}/{}", n, bytes_read, size);
+                        },
+                        Err(e) => {
+                            // IO error during read
+                            let partial_data = buf[0..bytes_read].to_vec();
+                            self.state_manager.handle_connection_error(&e, "read_exact error");
+                            return Err(ErrorOnRead::from_io_error(partial_data, e));
+                        }
+                    }
+                },
+                // Wait for error from server
+                error_result = self.error_data_store.wait_for_error() => {
+                    match error_result {
+                        Ok(error_data) => {
+                            // Server sent an error
+                            let partial_data = buf[0..bytes_read].to_vec();
+                            let xstream_error = XStreamError::new(error_data);
+                            return Err(ErrorOnRead::from_xstream_error(partial_data, xstream_error));
+                        },
+                        Err(_) => {
+                            // Error stream closed, continue reading
+                            debug!("Error stream closed, continuing to read data");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Successfully read all requested bytes
+        buf.truncate(size);
+        Ok(buf)
+    }
+
+    /// Reads all data from the main stream to the end with error awareness
+    pub async fn read_to_end(&self) -> XStreamReadResult<Vec<u8>> {
+        // Check stream state first
+        self.check_readable()?;
+
+        // Check for immediate error
+        if let Some(error) = self.check_for_immediate_error().await {
+            return Err(ErrorOnRead::xstream_error_only(error));
+        }
+
+        // For outbound streams, read with error awareness
+        if self.direction == XStreamDirection::Outbound {
+            self.read_to_end_with_error_awareness().await
+        } else {
+            // For inbound streams, simple read
+            self.read_to_end_simple().await
+        }
+    }
+
+    /// Simple read_to_end for inbound streams
+    async fn read_to_end_simple(&self) -> XStreamReadResult<Vec<u8>> {
         let mut buf: Vec<u8> = Vec::new();
 
-        self.execute_main_read_op(|reader| {
+        match self.execute_main_read_op(|reader| {
             Box::pin(async move {
                 let bytes_read = reader.read_to_end(&mut buf).await?;
-
-                // If we read zero bytes and this is the first read, it might be an EOF
                 if bytes_read == 0 && buf.is_empty() {
                     debug!("Stream was already at EOF");
                 }
-
                 Ok(buf)
             })
-        })
-        .await
+        }).await {
+            Ok(data) => Ok(data),
+            Err(e) => Err(ErrorOnRead::io_error_only(e)),
+        }
     }
 
-    /// Reads available data from the main stream
-    pub async fn read(&self) -> Result<Vec<u8>, std::io::Error> {
-        let mut buf: Vec<u8> = vec![0; 4096]; // Use a reasonable buffer size
+    /// Read to end with error awareness for outbound streams
+    async fn read_to_end_with_error_awareness(&self) -> XStreamReadResult<Vec<u8>> {
+        let mut buf = Vec::new();
+        let mut temp_buf = vec![0u8; 4096];
 
-        self.execute_main_read_op(|reader| {
+        loop {
+            let stream_main_read = self.stream_main_read.clone();
+            
+            select! {
+                // Try to read more data
+                read_result = async {
+                    let mut guard = stream_main_read.lock().await;
+                    guard.read(&mut temp_buf).await
+                } => {
+                    match read_result {
+                        Ok(0) => {
+                            // EOF reached - normal completion
+                            debug!("Read to end completed, total bytes: {}", buf.len());
+                            return Ok(buf);
+                        },
+                        Ok(n) => {
+                            buf.extend_from_slice(&temp_buf[0..n]);
+                            debug!("Read {} bytes, total: {}", n, buf.len());
+                        },
+                        Err(e) => {
+                            // IO error during read
+                            self.state_manager.handle_connection_error(&e, "read_to_end error");
+                            return Err(ErrorOnRead::from_io_error(buf, e));
+                        }
+                    }
+                },
+                // Wait for error from server
+                error_result = self.error_data_store.wait_for_error() => {
+                    match error_result {
+                        Ok(error_data) => {
+                            // Server sent an error
+                            let xstream_error = XStreamError::new(error_data);
+                            return Err(ErrorOnRead::from_xstream_error(buf, xstream_error));
+                        },
+                        Err(_) => {
+                            // Error stream closed, continue reading until EOF
+                            debug!("Error stream closed, continuing to read until EOF");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reads available data from the main stream with error awareness
+    pub async fn read(&self) -> XStreamReadResult<Vec<u8>> {
+        // Check stream state first
+        self.check_readable()?;
+
+        // Check for immediate error
+        if let Some(error) = self.check_for_immediate_error().await {
+            return Err(ErrorOnRead::xstream_error_only(error));
+        }
+
+        // For outbound streams, read with error awareness
+        if self.direction == XStreamDirection::Outbound {
+            self.read_with_error_awareness().await
+        } else {
+            // For inbound streams, simple read
+            self.read_simple().await
+        }
+    }
+
+    /// Simple read for inbound streams
+    async fn read_simple(&self) -> XStreamReadResult<Vec<u8>> {
+        let mut buf: Vec<u8> = vec![0; 4096];
+
+        match self.execute_main_read_op(|reader| {
             Box::pin(async move {
                 let bytes_read = reader.read(&mut buf).await?;
-
-                // Check for EOF condition (remote side closed the stream)
                 if bytes_read == 0 {
                     debug!("Detected EOF while reading");
                     return Err(std::io::Error::new(
@@ -323,19 +487,121 @@ impl XStream {
                         "End of file",
                     ));
                 }
-
-                // Resize the buffer to the actual bytes read
                 buf.truncate(bytes_read);
                 Ok(buf)
             })
-        })
-        .await
+        }).await {
+            Ok(data) => Ok(data),
+            Err(e) => Err(ErrorOnRead::io_error_only(e)),
+        }
     }
+
+    /// Read with error awareness for outbound streams
+    async fn read_with_error_awareness(&self) -> XStreamReadResult<Vec<u8>> {
+        let mut buf = vec![0u8; 4096];
+        let stream_main_read = self.stream_main_read.clone();
+
+        select! {
+            // Try to read data
+            read_result = async {
+                let mut guard = stream_main_read.lock().await;
+                guard.read(&mut buf).await
+            } => {
+                match read_result {
+                    Ok(0) => {
+                        // EOF reached
+                        let eof_error = std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "End of file"
+                        );
+                        Err(ErrorOnRead::io_error_only(eof_error))
+                    },
+                    Ok(n) => {
+                        buf.truncate(n);
+                        debug!("Read {} bytes", n);
+                        Ok(buf)
+                    },
+                    Err(e) => {
+                        self.state_manager.handle_connection_error(&e, "read error");
+                        Err(ErrorOnRead::io_error_only(e))
+                    }
+                }
+            },
+            // Wait for error from server
+            error_result = self.error_data_store.wait_for_error() => {
+                match error_result {
+                    Ok(error_data) => {
+                        // Server sent an error
+                        let xstream_error = XStreamError::new(error_data);
+                        Err(ErrorOnRead::xstream_error_only(xstream_error))
+                    },
+                    Err(_) => {
+                        // Error stream closed, perform normal read
+                        debug!("Error stream closed, performing normal read");
+                        self.read_simple().await
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== CONVENIENCE METHODS FOR BACKWARD COMPATIBILITY =====
+
+    /// Read ignoring XStream errors (backward compatibility)
+    pub async fn read_ignore_errors(&self) -> Result<Vec<u8>, std::io::Error> {
+        match self.read().await {
+            Ok(data) => Ok(data),
+            Err(error_on_read) => {
+                if error_on_read.has_partial_data() {
+                    // Return partial data if available
+                    Ok(error_on_read.into_partial_data())
+                } else {
+                    // Convert to IO error
+                    match error_on_read.into_error() {
+                        ReadError::Io(io_wrapper) => Err(io_wrapper.to_io_error()),
+                        ReadError::XStream(xs_error) => {
+                            // Convert XStream error to IO error
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("XStream error: {}", xs_error)
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Read to end ignoring XStream errors (backward compatibility)
+    pub async fn read_to_end_ignore_errors(&self) -> Result<Vec<u8>, std::io::Error> {
+        match self.read_to_end().await {
+            Ok(data) => Ok(data),
+            Err(error_on_read) => {
+                if error_on_read.has_partial_data() {
+                    // Return partial data if available
+                    Ok(error_on_read.into_partial_data())
+                } else {
+                    // Convert to IO error
+                    match error_on_read.into_error() {
+                        ReadError::Io(io_wrapper) => Err(io_wrapper.to_io_error()),
+                        ReadError::XStream(xs_error) => {
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("XStream error: {}", xs_error)
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== WRITE OPERATIONS (UNCHANGED) =====
 
     /// Writes all data to the main stream
     pub async fn write_all(&self, buf: Vec<u8>) -> Result<(), std::io::Error> {
         self.execute_main_write_op(|writer| {
-            let data = buf.clone(); // Clone for move into async block
+            let data = buf.clone();
             Box::pin(async move {
                 writer.write_all(&data).await?;
                 Ok(())
@@ -351,10 +617,7 @@ impl XStream {
     }
 
     /// Closes only the write half of the main stream, sending EOF
-    /// This allows the peer to know all data has been sent
-    /// while still allowing us to read their response
     pub async fn write_eof(&self) -> Result<(), std::io::Error> {
-        // Check if the write half is already closed
         if self.state_manager.is_write_local_closed() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
@@ -368,18 +631,13 @@ impl XStream {
         let result = self
             .execute_main_write_op(|writer| {
                 Box::pin(async move {
-                    // Flush any pending data first
                     writer.flush().await?;
-
-                    // Shutdown only the write half (this is different from close())
                     writer.close().await?;
-
                     Ok(())
                 })
             })
             .await;
 
-        // Mark state change on success or connection errors
         match result {
             Ok(_) => {
                 debug!("Stream {:?} write half shutdown (EOF sent)", self.id);
@@ -387,7 +645,6 @@ impl XStream {
                 Ok(())
             }
             Err(e) => {
-                // If the remote has already closed, consider it a success
                 if self
                     .state_manager
                     .handle_connection_error(&e, "shutdown error during write_eof")
@@ -404,9 +661,7 @@ impl XStream {
     // ===== ERROR STREAM OPERATIONS =====
 
     /// Read from the error stream (only for outbound streams)
-    /// This method keeps the same signature but now waits for error from the background task
     pub async fn error_read(&self) -> Result<Vec<u8>, std::io::Error> {
-        // Only outbound streams should read from error stream
         if self.direction != XStreamDirection::Outbound {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -415,15 +670,11 @@ impl XStream {
         }
 
         debug!("Waiting for error data for stream {:?}", self.id);
-        
-        // Wait for error data from the background task
         self.error_data_store.wait_for_error().await
     }
 
     /// Internal method to read from error stream (used by background task)
-    /// This is the actual reading functionality that was moved from error_read
     pub async fn inner_error_read(&self) -> Result<Vec<u8>, std::io::Error> {
-        // Only outbound streams should read from error stream
         if self.direction != XStreamDirection::Outbound {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -431,28 +682,12 @@ impl XStream {
             ));
         }
 
-        // Read from the error stream using execute_error_read_op
-        let mut buf: Vec<u8> = Vec::new();
-
-        let read_result = self
-            .execute_error_read_op(|reader| {
-                Box::pin(async move {
-                    reader.read_to_end(&mut buf).await?;
-                    Ok(buf)
-                })
-            })
-            .await;
-
-        match read_result {
-            Ok(buf) => {
-                debug!("Read {} bytes from error stream for stream {:?}", buf.len(), self.id);
-                Ok(buf)
-            }
-            Err(e) => {
-                error!("Failed to read from error stream for stream {:?}: {:?}", self.id, e);
-                Err(e)
-            }
-        }
+        // This method is for the background task, not for direct use
+        debug!("Inner error read for stream {:?} - should not be called directly", self.id);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "inner_error_read is for internal use only"
+        ))
     }
 
     /// Check if error data is available without waiting
@@ -466,8 +701,8 @@ impl XStream {
     }
 
     /// Write to the error stream (only for inbound streams)
+    /// This method also closes the main write stream and error write stream
     pub async fn error_write(&self, error_data: Vec<u8>) -> Result<(), std::io::Error> {
-        // Only inbound streams should write to error stream
         if self.direction != XStreamDirection::Inbound {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -475,7 +710,6 @@ impl XStream {
             ));
         }
 
-        // Check if we've already written an error
         if self.state_manager.has_error_written() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
@@ -486,31 +720,42 @@ impl XStream {
         // Mark that we're writing an error
         self.state_manager.mark_error_written();
 
-        // Write the error data to the error stream using execute_error_write_op
+        // Write the error data to the error stream
         let data_clone = error_data.clone();
-        let result = self
+        let error_write_result = self
             .execute_error_write_op(|writer| {
                 let error_data = data_clone.clone();
                 Box::pin(async move {
                     writer.write_all(&error_data).await?;
                     writer.flush().await?;
-                    writer.close().await?;
+                    writer.close().await?; // Close error stream (EOF)
                     Ok(())
                 })
             })
             .await;
 
-        match result {
-            Ok(_) => {
-                // Mark stream state as error
-                self.state_manager
-                    .mark_error("Error written to error stream");
-                debug!("Error successfully written to stream {:?}", self.id);
+        // Also close the main write stream (EOF)
+        let main_write_result = self
+            .execute_main_write_op(|writer| {
+                Box::pin(async move {
+                    writer.flush().await?;
+                    writer.close().await?; // Close main write stream (EOF)
+                    Ok(())
+                })
+            })
+            .await;
+
+        match (error_write_result, main_write_result) {
+            (Ok(_), Ok(_)) => {
+                debug!("Error successfully written to stream {:?} and streams closed", self.id);
+                self.state_manager.mark_write_local_closed();
+                self.state_manager.mark_error("Error written to error stream");
                 Ok(())
             }
-            Err(e) => {
+            (Err(e), _) | (_, Err(e)) => {
+                error!("Failed to write error or close streams for stream {:?}: {:?}", self.id, e);
                 self.state_manager
-                    .handle_connection_error(&e, "write error during write_error");
+                    .handle_connection_error(&e, "error during error_write");
                 Err(e)
             }
         }
