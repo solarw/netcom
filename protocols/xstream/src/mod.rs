@@ -10,5 +10,6 @@ pub mod utils;
 pub mod xstream_state;
 pub mod xstream;
 pub mod error_handling;
+pub mod xstream_error;
 #[cfg(test)]
 pub mod tests;

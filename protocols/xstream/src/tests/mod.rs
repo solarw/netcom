@@ -9,3 +9,6 @@ pub mod xstream_coverage_tests;
 
 #[cfg(test)]
 pub mod xstream_edge_tests;
+
+#[cfg(test)]
+pub mod error_handling_tests;
