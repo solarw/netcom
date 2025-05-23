@@ -1,28 +1,17 @@
-// Файл: ./src/network/commands.rs
+// src/commands.rs
 
-use xstream::xstream::XStream;
 use libp2p::{swarm::ConnectionId, Multiaddr, PeerId};
 use std::error::Error;
 use tokio::sync::oneshot;
 use xauth::definitions::AuthResult;
+use xstream::xstream::XStream;
 
-// Update the NetworkCommand enum in commands.rs
+// Import XRoutes commands
+use crate::xroutes::XRoutesCommand;
+
 #[derive(Debug)]
 pub enum NetworkCommand {
-    // MDNS commands
-    EnableMdns,
-    DisableMdns,
-
-    // KAD commands
-    EnableKad,
-    DisableKad,
-
-    // NEW: Add BootstrapKad command
-    BootstrapKad {
-        response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
-    },
-
-    // Connection commands
+    // Core connection commands
     OpenListenPort {
         host: String,
         port: u16,
@@ -37,54 +26,39 @@ pub enum NetworkCommand {
         response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
     },
 
-    // Status commands
-    GetConnectionsForPeer {
-        peer_id: PeerId,
-        response: oneshot::Sender<Vec<Multiaddr>>,
-    },
-
-    GetPeersConnected {
-        peer_id: PeerId,
-        response: oneshot::Sender<Vec<(PeerId, Vec<Multiaddr>)>>,
-    },
-
-    GetListenAddresses {
-        response: oneshot::Sender<Vec<Multiaddr>>,
-    },
-
-    // Shutdown command
-    Shutdown,
-
-    GetKadKnownPeers {
-        response: oneshot::Sender<Vec<(PeerId, Vec<Multiaddr>)>>,
-    },
-
-    GetPeerAddresses {
-        peer_id: PeerId,
-        response: oneshot::Sender<Vec<Multiaddr>>,
-    },
-
-    // Initiate a network search for a peer's addresses
-    FindPeerAddresses {
-        peer_id: PeerId,
-        response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
-    },
-
-    // Check if a peer is authenticated
-    IsPeerAuthenticated {
-        peer_id: PeerId,
-        response: oneshot::Sender<bool>,
-    },
-
-    // Submit PoR verification result
-    SubmitPorVerification {
-        connection_id: ConnectionId,
-        result: AuthResult,
-    },
-
+    // Core stream commands
     OpenStream {
         peer_id: PeerId,
         connection_id: Option<ConnectionId>,
         response: oneshot::Sender<Result<XStream, String>>,
     },
+
+    // Core status commands
+    GetConnectionsForPeer {
+        peer_id: PeerId,
+        response: oneshot::Sender<Vec<Multiaddr>>,
+    },
+    GetPeersConnected {
+        peer_id: PeerId,
+        response: oneshot::Sender<Vec<(PeerId, Vec<Multiaddr>)>>,
+    },
+    GetListenAddresses {
+        response: oneshot::Sender<Vec<Multiaddr>>,
+    },
+
+    // Core authentication commands
+    IsPeerAuthenticated {
+        peer_id: PeerId,
+        response: oneshot::Sender<bool>,
+    },
+    SubmitPorVerification {
+        connection_id: ConnectionId,
+        result: AuthResult,
+    },
+
+    // Core system commands
+    Shutdown,
+
+    // Nested XRoutes commands
+    XRoutes(XRoutesCommand),
 }

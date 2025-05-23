@@ -1,15 +1,19 @@
-// Файл: ./src/network/events.rs
+// src/events.rs
 
 use std::sync::Arc;
 
-use {xauth::events::PorAuthEvent};
-use  xstream::xstream::XStream;
 use libp2p::{swarm::ConnectionId, Multiaddr, PeerId, StreamProtocol};
+use xauth::events::PorAuthEvent;
+use xstream::xstream::XStream;
+
+// Import XRoutes events
+use crate::xroutes::XRoutesEvent;
 
 #[derive(Debug, Clone)]
 pub enum NetworkEvent {
+    // Core peer connection events
     PeerConnected {
-        //when peer conencts for the first time
+        // when peer connects for the first time
         peer_id: PeerId,
     },
     PeerDisconnected {
@@ -21,7 +25,7 @@ pub enum NetworkEvent {
         error: String,
     },
 
-    // Connection events
+    // Core connection events
     ConnectionOpened {
         peer_id: PeerId,
         addr: Multiaddr,
@@ -33,6 +37,8 @@ pub enum NetworkEvent {
         addr: Multiaddr,
         connection_id: ConnectionId,
     },
+    
+    // Core listening events
     ListeningOnAddress {
         addr: Multiaddr,
         full_addr: Option<Multiaddr>,
@@ -41,26 +47,16 @@ pub enum NetworkEvent {
         addr: Multiaddr,
     },
 
-    // Discovery events
-    MdnsIsOn {},
-    MdnsIsOff {},
-
-    // Kademlia DHT events
-    KadAddressAdded {
-        peer_id: PeerId,
-        addr: Multiaddr,
-    },
-    KadRoutingUpdated {
-        peer_id: PeerId,
-        addresses: Vec<Multiaddr>,
-    },
-
-    // Authentication event wrapper
+    // Core authentication events
     AuthEvent {
         event: PorAuthEvent,
     },
 
+    // Core stream events
     IncomingStream {
         stream: Arc<XStream>,
     },
+
+    // Nested XRoutes events
+    XRoutes(XRoutesEvent),
 }

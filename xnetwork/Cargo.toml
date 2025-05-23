@@ -8,8 +8,8 @@ libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", f
 
 tokio = { version = "1.35", features = ["full"] }
 tracing = "0.1"
+thiserror = "1.0"
 libp2p-stream = { path = "/home/solarw/hyperion/rust-libp2p/protocols/stream"}
-
 
 xauth = {path = "/home/solarw/hyperion/netcom/protocols/xauth"}
 xstream = {path = "/home/solarw/hyperion/netcom/protocols/xstream"}

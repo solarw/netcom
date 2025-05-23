@@ -1,6 +1,7 @@
-use libp2p::futures::StreamExt;
+// src/node.rs
 
-use libp2p::{identify, identity, kad, mdns, Multiaddr, PeerId, Swarm};
+use libp2p::futures::StreamExt;
+use libp2p::{identify, identity, Multiaddr, PeerId, Swarm};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -12,23 +13,29 @@ use std::error::Error;
 use tracing::{info, warn};
 
 use xstream::events::XStreamEvent;
-
 use xauth::events::PorAuthEvent;
-use super::{
+
+use crate::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
     commands::NetworkCommand,
     events::NetworkEvent,
 };
 
+use crate::xroutes::{XRoutesCommand, XRoutesConfig, XRoutesHandler};
+
 pub struct NetworkNode {
     cmd_rx: mpsc::Receiver<NetworkCommand>,
     event_tx: mpsc::Sender<NetworkEvent>,
     swarm: Swarm<NodeBehaviour>,
-    mdns_enabled: bool,
     connected_peers: HashMap<PeerId, Vec<Multiaddr>>,
     local_peer_id: PeerId,
-    // New field for tracking authenticated peers
     authenticated_peers: HashSet<PeerId>,
+    
+    // XRoutes handler - optional
+    xroutes_handler: Option<XRoutesHandler>,
+    
+    // Store key for XRoutes operations
+    local_key: identity::Keypair,
 }
 
 impl NetworkNode {
@@ -37,7 +44,7 @@ impl NetworkNode {
         local_key: identity::Keypair,
         por: xauth::por::por::ProofOfRepresentation,
         enable_mdns: bool,
-        kad_server_mode: bool, // Add parameter
+        kad_server_mode: bool,
     ) -> Result<
         (
             Self,
@@ -47,8 +54,25 @@ impl NetworkNode {
         ),
         Box<dyn Error + Send + Sync>,
     > {
-        // Create a keypair for authentication
         let local_peer_id = PeerId::from(local_key.public());
+        
+        // Create XRoutes handler if discovery is enabled
+        let xroutes_handler = if enable_mdns || kad_server_mode {
+            let config = XRoutesConfig {
+                enable_mdns,
+                enable_kad: true,
+                kad_server_mode,
+                initial_role: if kad_server_mode {
+                    crate::xroutes::XRouteRole::Server
+                } else {
+                    crate::xroutes::XRouteRole::Client
+                },
+            };
+            Some(XRoutesHandler::new(config))
+        } else {
+            None
+        };
+
         // Create a SwarmBuilder with QUIC transport
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
@@ -68,10 +92,11 @@ impl NetworkNode {
                 cmd_rx,
                 event_tx,
                 swarm,
-                mdns_enabled: true,
                 connected_peers: HashMap::new(),
                 local_peer_id,
                 authenticated_peers: HashSet::new(),
+                xroutes_handler,
+                local_key,
             },
             cmd_tx,
             event_rx,
@@ -110,6 +135,7 @@ impl NetworkNode {
     // Handle commands sent to the network node
     async fn handle_command(&mut self, cmd: NetworkCommand) {
         match cmd {
+            // Core stream commands
             NetworkCommand::OpenStream {
                 peer_id,
                 connection_id: _,
@@ -122,13 +148,13 @@ impl NetworkNode {
                     .await;
             }
 
+            // Core authentication commands
             NetworkCommand::SubmitPorVerification {
                 connection_id,
                 result,
             } => {
                 info!("Submitting PoR verification result for connection {connection_id}");
 
-                // Submit the verification result to the por_auth behaviour
                 match self
                     .swarm
                     .behaviour_mut()
@@ -139,6 +165,7 @@ impl NetworkNode {
                     Err(e) => warn!("❌ Failed to submit verification result: {}", e),
                 }
             }
+
             NetworkCommand::IsPeerAuthenticated { peer_id, response } => {
                 let is_authenticated = self.authenticated_peers.contains(&peer_id)
                     || self
@@ -150,65 +177,7 @@ impl NetworkNode {
                 let _ = response.send(is_authenticated);
             }
 
-            NetworkCommand::GetPeerAddresses { peer_id, response } => {
-                // Use Kademlia's routing table to get addresses
-                let mut addresses = Vec::new();
-
-                // Get the Kademlia behavior from the swarm
-                // Iterate through all the k-buckets
-                for bucket in self.swarm.behaviour_mut().kad.kbuckets() {
-                    // Iterate through all entries in the bucket
-                    for entry in bucket.iter() {
-                        // Check if this entry matches the peer we're looking for
-                        if entry.node.key.preimage() == &peer_id {
-                            // Add the addresses to our result
-                            addresses = entry.node.value.clone().into_vec();
-                            break;
-                        }
-                    }
-
-                    // If we've found addresses, no need to check more buckets
-                    if !addresses.is_empty() {
-                        break;
-                    }
-                }
-
-                let _ = response.send(addresses);
-            }
-
-            NetworkCommand::FindPeerAddresses { peer_id, response } => {
-                // Initiate a Kademlia search for the peer
-                self.swarm.behaviour_mut().kad.get_closest_peers(peer_id);
-                // For now, just acknowledge that the search was started
-                let _ = response.send(Ok(()));
-            }
-
-            NetworkCommand::GetKadKnownPeers { response } => {
-                let mut peers = Vec::new();
-                // Access the routing table in a different way
-                // NOT IMPLEMENTED
-
-                for kbucketref in self.swarm.behaviour_mut().kad.kbuckets() {
-                    for i in kbucketref.iter() {
-                        let addresses = i.node.value.clone().into_vec();
-                        let peer_id = i.node.key.into_preimage();
-                        if !addresses.is_empty() {
-                            peers.push((peer_id, addresses));
-                        }
-                    }
-                }
-
-                let _ = response.send(peers);
-            }
-            NetworkCommand::EnableMdns => {
-                self.mdns_enabled = true;
-                info!("mDNS discovery enabled");
-            }
-            NetworkCommand::DisableMdns => {
-                self.mdns_enabled = false;
-                info!("mDNS discovery disabled");
-            }
-
+            // Core connection commands
             NetworkCommand::OpenListenPort {
                 host,
                 port,
@@ -222,7 +191,6 @@ impl NetworkNode {
                         for i in self.listening_addresses() {
                             println!("Listening on {}", i);
                         }
-
                         let _ = response.send(Ok(addr));
                     }
                     Err(err) => {
@@ -231,6 +199,7 @@ impl NetworkNode {
                     }
                 }
             }
+
             NetworkCommand::Connect { addr, response } => match self.swarm.dial(addr.clone()) {
                 Ok(_) => {
                     info!("Dialing {addr}");
@@ -241,6 +210,7 @@ impl NetworkNode {
                     let _ = response.send(Err(Box::new(err)));
                 }
             },
+
             NetworkCommand::Disconnect { peer_id, response } => {
                 if self.connected_peers.contains_key(&peer_id) {
                     if let Err(err) = self.swarm.disconnect_peer_id(peer_id) {
@@ -255,36 +225,24 @@ impl NetworkNode {
                     let _ = response.send(Err(format!("Not connected to {peer_id}").into()));
                 }
             }
+
+            // Core status commands
             NetworkCommand::GetConnectionsForPeer { peer_id, response } => {
                 let connections = self
                     .connected_peers
                     .get(&peer_id)
                     .unwrap_or(&Vec::new())
                     .to_vec();
-
                 let _ = response.send(connections);
             }
-            NetworkCommand::EnableKad => {
-                info!("Kademlia discovery enabled");
-                // Try to bootstrap immediately
-                if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
-                    warn!("Failed to bootstrap Kademlia: {}", e);
-                }
-            }
 
-            NetworkCommand::BootstrapKad { response } => {
-                info!("Bootstrapping Kademlia DHT");
-                let result = match self.swarm.behaviour_mut().kad.bootstrap() {
-                    Ok(_) => {
-                        info!("Kademlia bootstrap started successfully");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        warn!("Failed to bootstrap Kademlia: {}", e);
-                        Err(Box::new(e) as Box<dyn Error + Send + Sync>)
-                    }
-                };
-                let _ = response.send(result);
+            // XRoutes commands - delegate to handler
+            NetworkCommand::XRoutes(xroutes_cmd) => {
+                if let Some(ref mut handler) = self.xroutes_handler {
+                    handler.handle_command(xroutes_cmd, &mut self.swarm, &self.local_key).await;
+                } else {
+                    self.send_xroutes_disabled_error(xroutes_cmd);
+                }
             }
 
             NetworkCommand::Shutdown => {
@@ -294,6 +252,7 @@ impl NetworkNode {
             _ => {}
         }
     }
+
     async fn handle_swarm_event(&mut self, event: libp2p::swarm::SwarmEvent<NodeBehaviourEvent>) {
         match event {
             libp2p::swarm::SwarmEvent::ConnectionEstablished {
@@ -312,21 +271,6 @@ impl NetworkNode {
                     .push(addr.clone());
 
                 info!("Connected to {peer_id} at {addr}");
-
-                // Add the peer to Kademlia when connection is established
-                // This improves bootstrapping when using --find-peer
-
-                /*
-                self.swarm
-                    .behaviour_mut()
-                    .kad
-                    .add_address(&peer_id, addr.clone());
-
-                // Explicitly bootstrap Kademlia on new connections
-                if let Err(e) = self.swarm.behaviour_mut().kad.bootstrap() {
-                    warn!("Failed to bootstrap Kademlia on new connection: {}", e);
-                }
-                 */
 
                 let _ = self
                     .event_tx
@@ -347,27 +291,25 @@ impl NetworkNode {
                         .await;
                 }
             }
+
             libp2p::swarm::SwarmEvent::ConnectionClosed {
                 peer_id,
                 cause,
                 endpoint,
                 connection_id,
-                num_established, // Remaining established connections to this peer
+                num_established,
                 ..
             } => {
                 let addr = endpoint.get_remote_address().clone();
 
-                // Update our connection tracking - remove this specific connection
+                // Update our connection tracking
                 if let Some(connections) = self.connected_peers.get_mut(&peer_id) {
                     connections.retain(|a| a != &addr);
-
-                    // If we have no more connections, remove the peer entry
                     if connections.is_empty() {
                         self.connected_peers.remove(&peer_id);
                     }
                 }
 
-                // Always emit ConnectionClosed event
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ConnectionClosed {
@@ -377,7 +319,6 @@ impl NetworkNode {
                     })
                     .await;
 
-                // If no connections remain, emit PeerDisconnected
                 if num_established == 0 {
                     info!("Disconnected from {peer_id}, cause: {cause:?}");
                     let _ = self
@@ -388,7 +329,6 @@ impl NetworkNode {
             }
 
             libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
-                // Создаем полный адрес с Peer ID
                 let mut full_addr = address.clone();
                 full_addr.push(libp2p::multiaddr::Protocol::P2p(self.local_peer_id.into()));
 
@@ -448,6 +388,7 @@ impl NetworkNode {
     // Handle events from the network behaviour
     async fn handle_behaviour_event(&mut self, event: NodeBehaviourEvent) {
         match event {
+            // Core stream events
             NodeBehaviourEvent::Xstream(event) => match event {
                 XStreamEvent::IncomingStream { stream } => {
                     let _ = self
@@ -462,112 +403,53 @@ impl NetworkNode {
                 }
             },
 
-            NodeBehaviourEvent::Mdns(mdns::Event::Discovered(peers)) => {
-                if self.mdns_enabled {
-                    for (peer_id, addr) in peers {
-                        info!("mDNS discovered peer: {peer_id} at {addr}");
-                        // Log when we add an address to Kademlia
-                        self.swarm
-                            .behaviour_mut()
-                            .kad
-                            .add_address(&peer_id, addr.clone());
+            // Core identify events
+            NodeBehaviourEvent::Identify(identify_event) => {
+                match identify_event {
+                    identify::Event::Received { peer_id, info, .. } => {
+                        info!("Identified peer {peer_id}: {info:?}");
 
-                        info!("📚 Added address to Kademlia: {peer_id} at {addr}");
-
-                        // Optionally send an event about the Kademlia address addition
-                        let _ = self
-                            .event_tx
-                            .send(NetworkEvent::KadAddressAdded {
-                                peer_id,
-                                addr: addr.clone(),
-                            })
-                            .await;
-                    }
-                }
-            }
-
-            NodeBehaviourEvent::Kad(ref kad_event) => {
-                match kad_event {
-                    kad::Event::RoutingUpdated {
-                        peer, addresses, ..
-                    } => {
-                        info!("📔 Kademlia routing updated for peer: {peer}");
-                        for addr in addresses.iter() {
-                            info!("📕 Known address: {addr}");
-                        }
-
-                        // Отправляем событие об обновлении маршрута
-                        let _ = self
-                            .event_tx
-                            .send(NetworkEvent::KadRoutingUpdated {
-                                peer_id: *peer,
-                                addresses: addresses.iter().cloned().collect(),
-                            })
-                            .await;
-                    }
-
-                    kad::Event::PendingRoutablePeer { peer, .. } => {
-                        info!("🔍 Kademlia looking for addresses of peer: {peer}");
-
-                        // Proactively trigger a search for the peer
-                        //self.swarm.behaviour_mut().kad.get_closest_peers(*peer);
-                    }
-
-                    kad::Event::OutboundQueryProgressed { result, .. } => match result {
-                        kad::QueryResult::GetProviders(Ok(
-                            kad::GetProvidersOk::FoundProviders { key, providers, .. },
-                        )) => {
-                            for peer in providers {
-                                info!("Found provider for {key:?}: {peer}");
+                        // Add peer's listening addresses to XRoutes if enabled
+                        if let Some(ref mut handler) = self.xroutes_handler {
+                            if let Some(xroutes) = self.swarm.behaviour_mut().xroutes.as_mut() {
+                                for addr in &info.listen_addrs {
+                                    xroutes.add_address(&peer_id, addr.clone());
+                                    info!("Address added to XRoutes {peer_id} {addr}");
+                                }
                             }
                         }
-                        kad::QueryResult::GetClosestPeers(Ok(kad::GetClosestPeersOk {
-                            key,
-                            peers,
-                        })) => {
-                            for peer in peers {
-                                info!("Found peer info {} {:?}", peer.peer_id, peer.addrs);
-                            }
+
+                        // Detect peer role from protocols
+                        let peer_role = crate::xroutes::XRouteRole::from_protocols(&info.protocols);
+                        if peer_role != crate::xroutes::XRouteRole::Unknown {
+                            let _ = self
+                                .event_tx
+                                .send(NetworkEvent::XRoutes(crate::xroutes::XRoutesEvent::PeerRoleDetected {
+                                    peer_id,
+                                    role: peer_role,
+                                }))
+                                .await;
                         }
-                        _ => {}
-                    },
-
-                    kad::Event::InboundRequest { request, .. } => {
-                        info!(
-                            "📥 Received GET_CLOSEST_PEERS request for key: {:?} from peer",
-                            request
-                        );
                     }
-
-                    // Другие обработчики...
-                    some => {
-                        info!(" OTHER KAD KAD {some:?}");
+                    identify::Event::Sent { .. } => {
+                        // Identify info sent to peer - usually not important for application logic
+                    }
+                    identify::Event::Pushed { .. } => {
+                        // Identify info pushed to peer - usually not important for application logic
+                    }
+                    identify::Event::Error { peer_id, error, .. } => {
+                        warn!("Identify error with peer {peer_id:?}: {error}");
                     }
                 }
             }
 
-            NodeBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. }) => {
-                info!("Identified peer {peer_id}: {info:?}");
-
-                // Add peer's listening addresses to Kademlia
-                for addr in info.listen_addrs {
-                    self.swarm
-                        .behaviour_mut()
-                        .kad
-                        .add_address(&peer_id, addr.clone());
-                    info!("Address added {peer_id} {addr}");
-                }
-
-                // Check if peer supports relay protocol
-                if info
-                    .protocols
-                    .iter()
-                    .any(|p| p.as_ref().starts_with("/libp2p/circuit/relay"))
-                {
-                    info!("Peer {peer_id} is a relay");
-                }
+            // Core ping events
+            NodeBehaviourEvent::Ping(_) => {
+                // Ping events are mostly for internal connection maintenance
+                // We don't need to emit them as network events typically
             }
-            // Handle PorAuth events
+
+            // Core authentication events
             NodeBehaviourEvent::PorAuth(event) => {
                 match event {
                     PorAuthEvent::MutualAuthSuccess {
@@ -576,13 +458,9 @@ impl NetworkNode {
                         address,
                         metadata,
                     } => {
-                        info!(
-                            "✅ Mutual authentication successful with peer {peer_id} at {address}"
-                        );
-                        // Store authenticated peer
+                        info!("✅ Mutual authentication successful with peer {peer_id} at {address}");
                         self.authenticated_peers.insert(peer_id);
 
-                        // Forward the event to the main application
                         let _ = self
                             .event_tx
                             .send(NetworkEvent::AuthEvent {
@@ -595,141 +473,67 @@ impl NetworkNode {
                             })
                             .await;
                     }
-                    PorAuthEvent::VerifyPorRequest {
-                        peer_id,
-                        connection_id,
-                        address,
-                        por,
-                        metadata,
-                    } => {
-                        info!("🔐 Verification request from peer {peer_id} at {address}");
-
-                        // Forward the verification request to the main application for decision
+                    
+                    other_auth_event => {
+                        // Forward other auth events
                         let _ = self
                             .event_tx
                             .send(NetworkEvent::AuthEvent {
-                                event: PorAuthEvent::VerifyPorRequest {
-                                    peer_id,
-                                    connection_id,
-                                    address,
-                                    por,
-                                    metadata,
-                                },
-                            })
-                            .await;
-
-                        // The validation and decision will be made in main.rs
-                        // The main application will need to call submit_por_verification_result
-                    }
-                    PorAuthEvent::OutboundAuthSuccess {
-                        peer_id,
-                        connection_id,
-                        address,
-                        metadata,
-                    } => {
-                        info!("🔹 Outbound authentication successful with {peer_id}");
-
-                        // Forward the event to the main application
-                        let _ = self
-                            .event_tx
-                            .send(NetworkEvent::AuthEvent {
-                                event: PorAuthEvent::OutboundAuthSuccess {
-                                    peer_id,
-                                    connection_id,
-                                    address,
-                                    metadata,
-                                },
-                            })
-                            .await;
-                    }
-                    PorAuthEvent::InboundAuthSuccess {
-                        peer_id,
-                        connection_id,
-                        address,
-                    } => {
-                        info!("🔸 Inbound authentication successful with {peer_id}");
-
-                        // Forward the event to the main application
-                        let _ = self
-                            .event_tx
-                            .send(NetworkEvent::AuthEvent {
-                                event: PorAuthEvent::InboundAuthSuccess {
-                                    peer_id,
-                                    connection_id,
-                                    address,
-                                },
-                            })
-                            .await;
-                    }
-                    PorAuthEvent::OutboundAuthFailure {
-                        peer_id,
-                        connection_id,
-                        address,
-                        reason,
-                    } => {
-                        info!("❌ Outbound authentication failed with {peer_id}: {reason}");
-
-                        // Forward the event to the main application
-                        let _ = self
-                            .event_tx
-                            .send(NetworkEvent::AuthEvent {
-                                event: PorAuthEvent::OutboundAuthFailure {
-                                    peer_id,
-                                    connection_id,
-                                    address,
-                                    reason,
-                                },
-                            })
-                            .await;
-                    }
-                    PorAuthEvent::InboundAuthFailure {
-                        peer_id,
-                        connection_id,
-                        address,
-                        reason,
-                    } => {
-                        info!("❌ Inbound authentication failed with {peer_id}: {reason}");
-
-                        // Forward the event to the main application
-                        let _ = self
-                            .event_tx
-                            .send(NetworkEvent::AuthEvent {
-                                event: PorAuthEvent::InboundAuthFailure {
-                                    peer_id,
-                                    connection_id,
-                                    address,
-                                    reason,
-                                },
-                            })
-                            .await;
-                    }
-                    PorAuthEvent::AuthTimeout {
-                        peer_id,
-                        connection_id,
-                        address,
-                        direction,
-                    } => {
-                        info!(
-                            "⏱️ Authentication timeout with {peer_id}, direction: {:?}",
-                            direction
-                        );
-
-                        // Forward the event to the main application
-                        let _ = self
-                            .event_tx
-                            .send(NetworkEvent::AuthEvent {
-                                event: PorAuthEvent::AuthTimeout {
-                                    peer_id,
-                                    connection_id,
-                                    address,
-                                    direction,
-                                },
+                                event: other_auth_event,
                             })
                             .await;
                     }
                 }
             }
-            _ => {}
+
+            // XRoutes discovery events
+            NodeBehaviourEvent::Xroutes(xroutes_event) => {
+                if let Some(ref mut handler) = self.xroutes_handler {
+                    let network_events = handler
+                        .handle_behaviour_event(xroutes_event, &mut self.swarm)
+                        .await;
+
+                    // Send all resulting XRoutes events
+                    for event in network_events {
+                        let _ = self
+                            .event_tx
+                            .send(NetworkEvent::XRoutes(event))
+                            .await;
+                    }
+                }
+            }
+        }
+    }
+
+    // Helper method to send error when XRoutes is disabled
+    fn send_xroutes_disabled_error(&self, cmd: XRoutesCommand) {
+        match cmd {
+            XRoutesCommand::BootstrapKad { response } => {
+                let _ = response.send(Err("XRoutes discovery not enabled".into()));
+            }
+            XRoutesCommand::GetKadKnownPeers { response } => {
+                let _ = response.send(Vec::new());
+            }
+            XRoutesCommand::GetPeerAddresses { response, .. } => {
+                let _ = response.send(Vec::new());
+            }
+            XRoutesCommand::FindPeerAddresses { response, .. } => {
+                let _ = response.send(Err("XRoutes discovery not enabled".into()));
+            }
+            XRoutesCommand::SetRole { response, .. } => {
+                let _ = response.send(Err("XRoutes discovery not enabled".to_string()));
+            }
+            XRoutesCommand::GetRole { response } => {
+                let _ = response.send(crate::xroutes::XRouteRole::Unknown);
+            }
+            
+            XRoutesCommand::ConnectToBootstrap { response, .. } => {
+                let _ = response.send(Err(crate::xroutes::BootstrapError::DiscoveryNotEnabled));
+            }
+            _ => {
+                // For commands without response channel, just log
+                warn!("XRoutes command ignored - discovery not enabled: {:?}", cmd);
+            }
         }
     }
 }
