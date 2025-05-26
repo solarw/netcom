@@ -44,7 +44,6 @@ pub async fn create_test_node(
 }
 
 /// Создает тестовый узел с расширенной конфигурацией
-#[allow(dead_code)]
 pub async fn create_test_node_with_config(
     config: XRoutesConfig,
 ) -> Result<(NetworkNode, Commander, tokio::sync::mpsc::Receiver<NetworkEvent>, PeerId), Box<dyn std::error::Error + Send + Sync>> {
@@ -101,4 +100,132 @@ pub async fn cleanup_test_nodes(handles: Vec<tokio::task::JoinHandle<()>>) {
         handle.abort();
     }
     tokio::time::sleep(Duration::from_millis(100)).await;
+}
+
+/// Ожидает события подключения peer'а
+#[allow(dead_code)]
+pub async fn wait_for_peer_connection(
+    events: &mut tokio::sync::mpsc::Receiver<NetworkEvent>,
+    target_peer_id: PeerId,
+    timeout_secs: u64,
+) -> bool {
+    tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+        while let Some(event) = events.recv().await {
+            if let NetworkEvent::PeerConnected { peer_id } = event {
+                if peer_id == target_peer_id {
+                    return true;
+                }
+            }
+        }
+        false
+    }).await.unwrap_or(false)
+}
+
+/// Ожидает события отключения peer'а
+#[allow(dead_code)]
+pub async fn wait_for_peer_disconnection(
+    events: &mut tokio::sync::mpsc::Receiver<NetworkEvent>,
+    target_peer_id: PeerId,
+    timeout_secs: u64,
+) -> bool {
+    tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+        while let Some(event) = events.recv().await {
+            if let NetworkEvent::PeerDisconnected { peer_id } = event {
+                if peer_id == target_peer_id {
+                    return true;
+                }
+            }
+        }
+        false
+    }).await.unwrap_or(false)
+}
+
+/// Проверяет что peer подключен
+#[allow(dead_code)]
+pub async fn assert_peer_connected(
+    commander: &Commander,
+    peer_id: PeerId,
+) -> Result<(), String> {
+    let peer_info = commander.get_peer_info(peer_id).await
+        .map_err(|e| format!("Failed to get peer info: {}", e))?;
+    
+    match peer_info {
+        Some(info) if info.is_connected() => Ok(()),
+        Some(info) => Err(format!("Peer {} is not connected (has {} connections)", 
+                                 peer_id, info.connection_count())),
+        None => Err(format!("Peer {} not found", peer_id)),
+    }
+}
+
+/// Проверяет что соединение существует
+#[allow(dead_code)]
+pub async fn assert_connection_exists(
+    commander: &Commander,
+    connection_id: libp2p::swarm::ConnectionId,
+) -> Result<(), String> {
+    let connection_info = commander.get_connection_info(connection_id).await
+        .map_err(|e| format!("Failed to get connection info: {}", e))?;
+    
+    match connection_info {
+        Some(info) if info.is_active() => Ok(()),
+        Some(info) => Err(format!("Connection {:?} exists but is not active: {:?}", 
+                                 connection_id, info.connection_state)),
+        None => Err(format!("Connection {:?} not found", connection_id)),
+    }
+}
+
+/// Создает пару узлов и устанавливает соединение между ними
+#[allow(dead_code)]
+pub async fn create_connected_pair() -> Result<(
+    tokio::task::JoinHandle<()>, // server handle
+    tokio::task::JoinHandle<()>, // client handle
+    Commander,                   // server commander
+    Commander,                   // client commander
+    PeerId,                     // server peer id
+    PeerId,                     // client peer id
+    libp2p::Multiaddr,          // server address
+), Box<dyn std::error::Error + Send + Sync>> {
+    // Создаем сервер
+    let (mut server_node, server_commander, mut server_events, server_peer_id) = 
+        create_test_node_with_config(XRoutesConfig::client()).await?;
+    
+    let server_handle = tokio::spawn(async move {
+        server_node.run_with_cleanup_interval(Duration::from_secs(1)).await;
+    });
+    
+    // Запускаем слушатель
+    server_commander.listen_port(Some("127.0.0.1".to_string()), 0).await?;
+    
+    let server_addr = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(event) = server_events.recv().await {
+            if let NetworkEvent::ListeningOnAddress { full_addr: Some(addr), .. } = event {
+                return addr;
+            }
+        }
+        panic!("No server address");
+    }).await?;
+    
+    // Создаем клиента
+    let (mut client_node, client_commander, _client_events, client_peer_id) = 
+        create_test_node_with_config(XRoutesConfig::client()).await?;
+    
+    let client_handle = tokio::spawn(async move {
+        client_node.run_with_cleanup_interval(Duration::from_secs(1)).await;
+    });
+    
+    // Подключаемся
+    client_commander.connect(server_addr.clone()).await.ok(); // Игнорируем ошибки в тестовой среде
+    
+    // Даем время соединению установиться
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    
+    Ok((
+        server_handle,
+        client_handle,
+        server_commander,
+        client_commander,
+        server_peer_id,
+        client_peer_id,
+        server_addr,
+    ))
 }

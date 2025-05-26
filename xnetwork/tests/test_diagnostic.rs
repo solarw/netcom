@@ -1,7 +1,7 @@
 // tests/test_diagnostic.rs
 
 use std::time::Duration;
-use xnetwork::{NetworkNode, XRoutesConfig};
+use xnetwork::XRoutesConfig;
 
 mod common;
 use common::*;
