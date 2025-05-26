@@ -172,7 +172,7 @@ async fn test_open_stream_no_timeout() {
         client_commander.open_stream_with_timeout(unknown_peer, 0)
     ).await;
     
-    let elapsed = start_time.elapsed();
+    let _elapsed = start_time.elapsed(); // Fixed: add underscore prefix
     
     match result {
         Ok(Ok(_)) => {
@@ -180,7 +180,7 @@ async fn test_open_stream_no_timeout() {
         }
         Ok(Err(e)) => {
             println!("✅ Stream opening failed as expected: {}", e);
-            println!("   Elapsed time: {:?}", elapsed);
+            println!("   Elapsed time: {:?}", _elapsed);
             assert!(!e.contains("timed out after"), 
                    "Should not have explicit timeout message for timeout=0");
         }
@@ -212,7 +212,7 @@ async fn test_stream_api_convenience_methods() {
     
     // Test default open_stream (should use 30s timeout)
     println!("Testing default open_stream...");
-    let start_time = std::time::Instant::now();
+    let _start_time = std::time::Instant::now();
     
     let result1 = tokio::time::timeout(Duration::from_secs(2), 
         commander.open_stream(unknown_peer)
@@ -229,7 +229,6 @@ async fn test_stream_api_convenience_methods() {
     // Test explicit timeout
     println!("Testing explicit 1s timeout...");
     let result2 = commander.open_stream_with_timeout(unknown_peer, 1).await;
-    let elapsed = start_time.elapsed();
     
     match result2 {
         Ok(_) => panic!("Should not succeed"),
