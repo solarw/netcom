@@ -23,6 +23,7 @@ pub fn create_test_por() -> ProofOfRepresentation {
 }
 
 /// Создает тестовый узел с заданными параметрами
+#[allow(dead_code)]
 pub async fn create_test_node(
     server_mode: bool,
     enable_mdns: bool,
@@ -43,6 +44,7 @@ pub async fn create_test_node(
 }
 
 /// Создает тестовый узел с расширенной конфигурацией
+#[allow(dead_code)]
 pub async fn create_test_node_with_config(
     config: XRoutesConfig,
 ) -> Result<(NetworkNode, Commander, tokio::sync::mpsc::Receiver<NetworkEvent>, PeerId), Box<dyn std::error::Error + Send + Sync>> {
@@ -61,6 +63,7 @@ pub async fn create_test_node_with_config(
 }
 
 /// Создает bootstrap сервер для тестов
+#[allow(dead_code)]
 pub async fn create_bootstrap_server() -> Result<(tokio::task::JoinHandle<()>, libp2p::Multiaddr, PeerId), Box<dyn std::error::Error + Send + Sync>> {
     let (mut bootstrap_node, bootstrap_commander, mut bootstrap_events, bootstrap_peer_id) = 
         create_test_node(true, false).await?;
@@ -92,6 +95,7 @@ pub async fn create_bootstrap_server() -> Result<(tokio::task::JoinHandle<()>, l
 }
 
 /// Очистка ресурсов после тестов
+#[allow(dead_code)]
 pub async fn cleanup_test_nodes(handles: Vec<tokio::task::JoinHandle<()>>) {
     for handle in handles {
         handle.abort();

@@ -16,9 +16,13 @@ use tracing::{info, warn, debug};
 use xstream::events::XStreamEvent;
 use xauth::events::PorAuthEvent;
 
+// ADD: Import ConnectionId from libp2p
+use libp2p::swarm::ConnectionId;
+
 use crate::{
     behaviour::{make_behaviour, NodeBehaviour, NodeBehaviourEvent},
     commands::NetworkCommand,
+    connection_management::{ConnectionInfo, PeerInfo, NetworkState, AuthStatus, ConnectionDirection, ConnectionState},
     events::NetworkEvent,
 };
 
@@ -37,6 +41,14 @@ pub struct NetworkNode {
     
     // Store key for XRoutes operations
     local_key: identity::Keypair,
+    
+    // NEW: Connection Management State
+    /// All active connections indexed by ConnectionId
+    connections: HashMap<ConnectionId, ConnectionInfo>,
+    /// All peers with their connection info indexed by PeerId
+    peers: HashMap<PeerId, PeerInfo>,
+    /// Network state information
+    network_state: NetworkState,
 }
 
 impl NetworkNode {
@@ -98,6 +110,10 @@ impl NetworkNode {
                 authenticated_peers: HashSet::new(),
                 xroutes_handler,
                 local_key,
+                // NEW: Initialize connection management state
+                connections: HashMap::new(),
+                peers: HashMap::new(),
+                network_state: NetworkState::new(local_peer_id),
             },
             cmd_tx,
             event_rx,
@@ -159,6 +175,10 @@ impl NetworkNode {
                 authenticated_peers: HashSet::new(),
                 xroutes_handler,
                 local_key,
+                // NEW: Initialize connection management state
+                connections: HashMap::new(),
+                peers: HashMap::new(),
+                network_state: NetworkState::new(local_peer_id),
             },
             cmd_tx,
             event_rx,
@@ -207,6 +227,15 @@ impl NetworkNode {
         }
     }
 
+    /// Extract peer_id from auth event if available
+    fn extract_peer_id_from_auth_event(&self, event: &PorAuthEvent) -> Option<PeerId> {
+        match event {
+            PorAuthEvent::MutualAuthSuccess { peer_id, .. } => Some(*peer_id),
+            // FIXED: Use correct event variant names based on actual xauth library
+            _ => None,
+        }
+    }
+
     /// Periodic cleanup of timed out waiters and other maintenance tasks
     async fn periodic_cleanup(&mut self) {
         if let Some(ref mut handler) = self.xroutes_handler {
@@ -246,6 +275,110 @@ impl NetworkNode {
         for peer_id in disconnected_peers {
             self.authenticated_peers.remove(&peer_id);
             debug!("Removed authentication record for disconnected peer {}", peer_id);
+        }
+    }
+
+    // ==========================================
+    // NEW: Connection Management Methods
+    // ==========================================
+
+    /// Update network state with current information
+    fn update_network_state(&mut self) {
+        self.network_state.listening_addresses = self.listening_addresses();
+        self.network_state.total_connections = self.connections.len();
+        self.network_state.authenticated_peers = self.peers.values()
+            .filter(|peer| peer.is_authenticated)
+            .count();
+        self.network_state.active_streams = 0; // TODO: Track active streams
+        self.network_state.update_uptime();
+    }
+
+    /// Add or update connection information
+    fn add_connection(&mut self, connection_info: ConnectionInfo) {
+        let peer_id = connection_info.peer_id;
+        let connection_id = connection_info.connection_id;
+
+        // Add to connections map
+        self.connections.insert(connection_id, connection_info.clone());
+
+        // Add to peer info
+        let peer_info = self.peers.entry(peer_id).or_insert_with(|| PeerInfo::new(peer_id));
+        peer_info.add_connection(connection_info);
+
+        debug!("Added connection {} for peer {}", connection_id, peer_id);
+    }
+
+    /// Remove connection information
+    fn remove_connection(&mut self, connection_id: ConnectionId) -> Option<ConnectionInfo> {
+        if let Some(connection_info) = self.connections.remove(&connection_id) {
+            let peer_id = connection_info.peer_id;
+
+            // Remove from peer info
+            if let Some(peer_info) = self.peers.get_mut(&peer_id) {
+                peer_info.remove_connection(connection_id);
+
+                // Remove peer info if no connections left
+                if !peer_info.is_connected() {
+                    self.peers.remove(&peer_id);
+                    debug!("Removed peer info for {} (no active connections)", peer_id);
+                }
+            }
+
+            debug!("Removed connection {} for peer {}", connection_id, peer_id);
+            Some(connection_info)
+        } else {
+            None
+        }
+    }
+
+    /// Update authentication status for a peer
+    fn update_peer_auth_status(&mut self, peer_id: PeerId, status: AuthStatus) {
+        if let Some(peer_info) = self.peers.get_mut(&peer_id) {
+            peer_info.update_auth_status(status.clone()); // FIXED: Clone status
+            debug!("Updated auth status for peer {}: {:?}", peer_id, peer_info.auth_status);
+        }
+
+        // Also update our authenticated_peers set for compatibility
+        match status {
+            AuthStatus::Authenticated => {
+                self.authenticated_peers.insert(peer_id);
+            }
+            _ => {
+                self.authenticated_peers.remove(&peer_id);
+            }
+        }
+    }
+
+    /// Disconnect a specific connection
+    async fn disconnect_connection_by_id(&mut self, connection_id: ConnectionId) -> Result<(), String> {
+        if let Some(connection_info) = self.connections.get(&connection_id) {
+            let peer_id = connection_info.peer_id;
+            
+            // FIXED: Use correct swarm method
+            self.swarm.close_connection(connection_id);
+            info!("Disconnected connection {} for peer {}", connection_id, peer_id);
+            Ok(())
+        } else {
+            Err(format!("Connection {} not found", connection_id))
+        }
+    }
+
+    /// Disconnect all connections
+    async fn disconnect_all_connections(&mut self) -> Result<(), String> {
+        let connection_ids: Vec<ConnectionId> = self.connections.keys().cloned().collect();
+        let mut errors = Vec::new();
+
+        for connection_id in connection_ids {
+            if let Err(e) = self.disconnect_connection_by_id(connection_id).await {
+                errors.push(e);
+            }
+        }
+
+        if errors.is_empty() {
+            info!("Disconnected all connections");
+            Ok(())
+        } else {
+            Err(format!("Some disconnections failed: {}", errors.join(", ")))
         }
     }
 
@@ -367,6 +500,43 @@ impl NetworkNode {
                 let _ = response.send(addresses);
             }
 
+            // FIXED: Add missing connection management commands
+            NetworkCommand::GetAllConnections { response } => {
+                self.update_network_state();
+                let connections: Vec<ConnectionInfo> = self.connections.values().cloned().collect();
+                let _ = response.send(connections);
+            }
+
+            NetworkCommand::GetPeerInfo { peer_id, response } => {
+                let peer_info = self.peers.get(&peer_id).cloned();
+                let _ = response.send(peer_info);
+            }
+
+            NetworkCommand::GetConnectedPeers { response } => {
+                let peers: Vec<PeerInfo> = self.peers.values().cloned().collect();
+                let _ = response.send(peers);
+            }
+
+            NetworkCommand::GetConnectionInfo { connection_id, response } => {
+                let connection_info = self.connections.get(&connection_id).cloned();
+                let _ = response.send(connection_info);
+            }
+
+            NetworkCommand::GetNetworkState { response } => {
+                self.update_network_state();
+                let _ = response.send(self.network_state.clone());
+            }
+
+            NetworkCommand::DisconnectConnection { connection_id, response } => {
+                let result = self.disconnect_connection_by_id(connection_id).await;
+                let _ = response.send(result);
+            }
+
+            NetworkCommand::DisconnectAll { response } => {
+                let result = self.disconnect_all_connections().await;
+                let _ = response.send(result);
+            }
+
             // XRoutes commands - delegate to handler with enhanced error handling
             NetworkCommand::XRoutes(xroutes_cmd) => {
                 if let Some(ref mut handler) = self.xroutes_handler {
@@ -391,21 +561,45 @@ impl NetworkNode {
                 connection_id,
                 ..
             } => {
-                let addr = endpoint.get_remote_address().clone();
+                let remote_addr = endpoint.get_remote_address().clone();
+                // FIXED: Use a simpler approach to get local address - just use the remote address for now
+                // since local address extraction requires private types
+                let local_addr = if endpoint.is_dialer() {
+                    None // For outbound connections, we don't need to track local addr
+                } else {
+                    None // For inbound connections, we could derive it but it's optional
+                };
+                let direction = if endpoint.is_dialer() {
+                    ConnectionDirection::Outbound
+                } else {
+                    ConnectionDirection::Inbound
+                };
 
-                // Track this connection
+                // Create connection info
+                let connection_info = ConnectionInfo::new(
+                    connection_id,
+                    peer_id,
+                    remote_addr.clone(),
+                    local_addr,
+                    direction,
+                );
+
+                // Add to our connection tracking
+                self.add_connection(connection_info);
+
+                // Track this connection (legacy)
                 self.connected_peers
                     .entry(peer_id)
                     .or_insert_with(Vec::new)
-                    .push(addr.clone());
+                    .push(remote_addr.clone());
 
-                info!("Connected to {peer_id} at {addr}");
+                info!("Connected to {peer_id} at {remote_addr}");
 
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ConnectionOpened {
                         peer_id,
-                        addr: addr.clone(),
+                        addr: remote_addr.clone(),
                         connection_id,
                         protocols: Vec::new(),
                     })
@@ -429,11 +623,14 @@ impl NetworkNode {
                 num_established,
                 ..
             } => {
-                let addr = endpoint.get_remote_address().clone();
+                let remote_addr = endpoint.get_remote_address().clone();
 
-                // Update our connection tracking
+                // Remove from our connection tracking
+                self.remove_connection(connection_id);
+
+                // Update legacy connection tracking
                 if let Some(connections) = self.connected_peers.get_mut(&peer_id) {
-                    connections.retain(|a| a != &addr);
+                    connections.retain(|a| a != &remote_addr);
                     if connections.is_empty() {
                         self.connected_peers.remove(&peer_id);
                     }
@@ -443,7 +640,7 @@ impl NetworkNode {
                     .event_tx
                     .send(NetworkEvent::ConnectionClosed {
                         peer_id,
-                        addr,
+                        addr: remote_addr,
                         connection_id,
                     })
                     .await;
@@ -588,7 +785,9 @@ impl NetworkNode {
                         metadata,
                     } => {
                         info!("✅ Mutual authentication successful with peer {peer_id} at {address}");
-                        self.authenticated_peers.insert(peer_id);
+                        
+                        // Update our new connection management
+                        self.update_peer_auth_status(peer_id, AuthStatus::Authenticated);
 
                         let _ = self
                             .event_tx
@@ -604,6 +803,12 @@ impl NetworkNode {
                     }
                     
                     other_auth_event => {
+                        // Handle other auth events and update status accordingly
+                        if let Some(peer_id) = self.extract_peer_id_from_auth_event(&other_auth_event) {
+                            let status = AuthStatus::NotStarted; // FIXED: Simplified status handling
+                            self.update_peer_auth_status(peer_id, status);
+                        }
+
                         // Forward other auth events
                         let _ = self
                             .event_tx

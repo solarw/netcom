@@ -9,6 +9,9 @@ use xstream::xstream::XStream;
 // Import XRoutes commands
 use crate::xroutes::XRoutesCommand;
 
+// Import connection management types
+use crate::connection_management::{ConnectionInfo, PeerInfo, NetworkState};
+
 #[derive(Debug)]
 pub enum NetworkCommand {
     // Core connection commands
@@ -33,7 +36,7 @@ pub enum NetworkCommand {
         response: oneshot::Sender<Result<XStream, String>>,
     },
 
-    // Core status commands
+    // Core status commands (legacy)
     GetConnectionsForPeer {
         peer_id: PeerId,
         response: oneshot::Sender<Vec<Multiaddr>>,
@@ -56,9 +59,49 @@ pub enum NetworkCommand {
         result: AuthResult,
     },
 
+    // NEW: Connection Management Commands
+    
+    /// Get all active connections
+    GetAllConnections {
+        response: oneshot::Sender<Vec<ConnectionInfo>>,
+    },
+    
+    /// Get information about a specific peer
+    GetPeerInfo {
+        peer_id: PeerId,
+        response: oneshot::Sender<Option<PeerInfo>>,
+    },
+    
+    /// Get all connected peers
+    GetConnectedPeers {
+        response: oneshot::Sender<Vec<PeerInfo>>,
+    },
+    
+    /// Get information about a specific connection
+    GetConnectionInfo {
+        connection_id: ConnectionId,
+        response: oneshot::Sender<Option<ConnectionInfo>>,
+    },
+    
+    /// Get overall network state
+    GetNetworkState {
+        response: oneshot::Sender<NetworkState>,
+    },
+    
+    /// Disconnect a specific connection
+    DisconnectConnection {
+        connection_id: ConnectionId,
+        response: oneshot::Sender<Result<(), String>>,
+    },
+    
+    /// Disconnect all connections (shutdown)
+    DisconnectAll {
+        response: oneshot::Sender<Result<(), String>>,
+    },
+
     // Core system commands
     Shutdown,
 
-    // Nested XRoutes commands - all XRoutes functionality is handled through this
+    // Nested XRoutes commands
     XRoutes(XRoutesCommand),
 }

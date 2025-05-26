@@ -6,6 +6,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::commands::NetworkCommand;
 use crate::xroutes::{XRoutesCommand, XRouteRole, XRoutesCommander, BootstrapNodeInfo, BootstrapError};
+use crate::connection_management::{ConnectionInfo, PeerInfo, NetworkState};
 use xauth::definitions::AuthResult;
 use xstream::xstream::XStream;
 
@@ -69,11 +70,28 @@ impl Commander {
         &self,
         addr: Multiaddr,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Default timeout of 30 seconds
+        self.connect_with_timeout(addr, 30).await
+    }
+
+    /// Connect to a peer with explicit timeout
+    /// 
+    /// # Arguments
+    /// * `addr` - The multiaddr to connect to
+    /// * `timeout_secs` - Timeout in seconds:
+    ///   - `0` - No timeout, wait until internal node timeout or cancellation
+    ///   - `>0` - Timeout after specified seconds
+    /// 
+    pub async fn connect_with_timeout(
+        &self,
+        addr: Multiaddr,
+        timeout_secs: u32,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
 
         self.cmd_tx
             .send(NetworkCommand::Connect {
-                addr,
+                addr: addr.clone(),
                 response: response_tx,
             })
             .await
@@ -81,9 +99,19 @@ impl Commander {
                 format!("Failed to send connect command: {}", e).into()
             })?;
 
-        match response_rx.await? {
-            Ok(_) => Ok(()),
-            Err(e) => Err(format!("Failed to connect: {}", e).into()),
+        if timeout_secs == 0 {
+            // No timeout - wait indefinitely (until internal timeout or cancellation)
+            match response_rx.await? {
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!("Failed to connect to {}: {}", addr, e).into()),
+            }
+        } else {
+            // With timeout
+            match tokio::time::timeout(Duration::from_secs(timeout_secs as u64), response_rx).await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => Err(format!("Failed to connect to {}: {}", addr, e).into()),
+                Err(_) => Err(format!("Connection to {} timed out after {}s", addr, timeout_secs).into()),
+            }
         }
     }
 
@@ -147,8 +175,8 @@ impl Commander {
         Ok(response_rx.await?)
     }
 
-    /// Get all connected peers
-    pub async fn get_connected_peers(
+    /// Get all connected peers (legacy - returns simple format)
+    pub async fn get_connected_peers_simple(
         &self,
     ) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
@@ -208,6 +236,19 @@ impl Commander {
 
     /// Core stream methods
     pub async fn open_stream(&self, peer_id: PeerId) -> Result<XStream, String> {
+        // Default timeout of 30 seconds
+        self.open_stream_with_timeout(peer_id, 30).await
+    }
+
+    /// Open stream to peer with explicit timeout
+    /// 
+    /// # Arguments
+    /// * `peer_id` - The peer to open stream to
+    /// * `timeout_secs` - Timeout in seconds:
+    ///   - `0` - No timeout, wait until internal node timeout or cancellation
+    ///   - `>0` - Timeout after specified seconds
+    /// 
+    pub async fn open_stream_with_timeout(&self, peer_id: PeerId, timeout_secs: u32) -> Result<XStream, String> {
         let (response_tx, response_rx) = oneshot::channel();
 
         self.cmd_tx
@@ -217,13 +258,19 @@ impl Commander {
                 response: response_tx,
             })
             .await
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                format!("Failed to send open stream command: {}", e).into()
-            });
+            .map_err(|e| format!("Failed to send open stream command: {}", e))?;
 
-        match response_rx.await {
-            Ok(result) => result,
-            Err(e) => Err(format!("Failed to receive response: {}", e).into()),
+        if timeout_secs == 0 {
+            // No timeout - wait indefinitely (until internal timeout or cancellation)
+            response_rx
+                .await
+                .map_err(|e| format!("Failed to receive response: {}", e))?
+        } else {
+            // With timeout
+            match tokio::time::timeout(Duration::from_secs(timeout_secs as u64), response_rx).await {
+                Ok(result) => result.map_err(|e| format!("Failed to receive response: {}", e))?,
+                Err(_) => return Err(format!("Stream opening to peer {} timed out after {}s", peer_id, timeout_secs)),
+            }
         }
     }
 
@@ -329,5 +376,124 @@ impl Commander {
             })?;
 
         Ok(())
+    }
+
+    // ==========================================
+    // NEW: Connection Management API
+    // ==========================================
+
+    /// Get all active connections
+    pub async fn get_all_connections(&self) -> Result<Vec<ConnectionInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::GetAllConnections {
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get all connections command: {}", e).into()
+            })?;
+
+        Ok(response_rx.await?)
+    }
+
+    /// Get information about a specific peer
+    pub async fn get_peer_info(&self, peer_id: PeerId) -> Result<Option<PeerInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::GetPeerInfo {
+                peer_id,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get peer info command: {}", e).into()
+            })?;
+
+        Ok(response_rx.await?)
+    }
+
+    /// Get all connected peers
+    pub async fn get_connected_peers(&self) -> Result<Vec<PeerInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::GetConnectedPeers {
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get connected peers command: {}", e).into()
+            })?;
+
+        Ok(response_rx.await?)
+    }
+
+    /// Get information about a specific connection
+    pub async fn get_connection_info(&self, connection_id: ConnectionId) -> Result<Option<ConnectionInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::GetConnectionInfo {
+                connection_id,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get connection info command: {}", e).into()
+            })?;
+
+        Ok(response_rx.await?)
+    }
+
+    /// Get overall network state
+    pub async fn get_network_state(&self) -> Result<NetworkState, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::GetNetworkState {
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get network state command: {}", e).into()
+            })?;
+
+        Ok(response_rx.await?)
+    }
+
+    /// Disconnect a specific connection
+    pub async fn disconnect_connection(&self, connection_id: ConnectionId) -> Result<(), String> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::DisconnectConnection {
+                connection_id,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| format!("Failed to send disconnect connection command: {}", e))?;
+
+        response_rx
+            .await
+            .map_err(|e| format!("Failed to receive response: {}", e))?
+    }
+
+    /// Disconnect all connections
+    pub async fn disconnect_all(&self) -> Result<(), String> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::DisconnectAll {
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| format!("Failed to send disconnect all command: {}", e))?;
+
+        response_rx
+            .await
+            .map_err(|e| format!("Failed to receive response: {}", e))?
     }
 }

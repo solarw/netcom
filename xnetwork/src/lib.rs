@@ -5,6 +5,7 @@
 pub mod behaviour;
 pub mod commander;
 pub mod commands;
+pub mod connection_management;
 pub mod events;
 pub mod node;
 pub mod utils;
@@ -14,6 +15,7 @@ pub mod xroutes;
 pub use behaviour::{make_behaviour, make_behaviour_with_config, NodeBehaviour};
 pub use commander::Commander;
 pub use commands::NetworkCommand;
+pub use connection_management::{ConnectionInfo, PeerInfo, NetworkState, AuthStatus, ConnectionDirection, ConnectionState};
 pub use events::NetworkEvent;
 pub use node::NetworkNode;
 pub use utils::make_new_key;
