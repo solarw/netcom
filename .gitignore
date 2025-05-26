@@ -5,3 +5,4 @@ Cargo.lock
 /src/xauth
 *.log
 Makefile
+todo.md

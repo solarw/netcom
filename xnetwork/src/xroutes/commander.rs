@@ -67,7 +67,7 @@ impl XRoutesCommander {
         Ok(response_rx.await?)
     }
 
-    /// Get addresses for a specific peer
+    /// Get addresses for a specific peer from local tables only
     pub async fn get_peer_addresses(&self, peer_id: PeerId) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -80,7 +80,7 @@ impl XRoutesCommander {
         Ok(response_rx.await?)
     }
 
-    /// Find peer addresses via DHT
+    /// Find peer addresses via DHT (legacy method - kept for compatibility)
     pub async fn find_peer_addresses(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -91,6 +91,104 @@ impl XRoutesCommander {
             .await?;
 
         response_rx.await?
+    }
+
+    /// Find peer addresses with advanced timeout control
+    /// 
+    /// # Arguments
+    /// * `peer_id` - The peer to find addresses for
+    /// * `timeout_secs` - Timeout behavior:
+    ///   - `0` - Check local tables only, no DHT search
+    ///   - `>0` - Search with specified timeout in seconds
+    ///   - `-1` - Infinite search until explicitly cancelled
+    /// 
+    /// # Returns
+    /// * `Ok(Vec<Multiaddr>)` - Found addresses (may be empty)
+    /// * `Err(String)` - Error description (timeout, DHT disabled, etc.)
+    pub async fn find_peer_addresses_advanced(
+        &self,
+        peer_id: PeerId,
+        timeout_secs: i32,
+    ) -> Result<Vec<Multiaddr>, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(crate::commands::NetworkCommand::XRoutes(
+                XRoutesCommand::FindPeerAddressesAdvanced {
+                    peer_id,
+                    timeout_secs,
+                    response: response_tx,
+                }
+            ))
+            .await
+            .map_err(|e| format!("Failed to send command: {}", e))?;
+
+        response_rx
+            .await
+            .map_err(|e| format!("Failed to receive response: {}", e))?
+    }
+
+    /// Convenience method: Find peer addresses with timeout in seconds
+    pub async fn find_peer_addresses_with_timeout(
+        &self,
+        peer_id: PeerId,
+        timeout_secs: u32,
+    ) -> Result<Vec<Multiaddr>, String> {
+        self.find_peer_addresses_advanced(peer_id, timeout_secs as i32).await
+    }
+
+    /// Convenience method: Find peer addresses from local tables only
+    pub async fn find_peer_addresses_local_only(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Vec<Multiaddr>, String> {
+        self.find_peer_addresses_advanced(peer_id, 0).await
+    }
+
+    /// Convenience method: Find peer addresses with infinite timeout
+    pub async fn find_peer_addresses_infinite(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Vec<Multiaddr>, String> {
+        self.find_peer_addresses_advanced(peer_id, -1).await
+    }
+
+    /// Cancel active search for a specific peer
+    pub async fn cancel_peer_search(&self, peer_id: PeerId) -> Result<(), String> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(crate::commands::NetworkCommand::XRoutes(
+                XRoutesCommand::CancelPeerSearch {
+                    peer_id,
+                    response: response_tx,
+                }
+            ))
+            .await
+            .map_err(|e| format!("Failed to send command: {}", e))?;
+
+        response_rx
+            .await
+            .map_err(|e| format!("Failed to receive response: {}", e))?
+    }
+
+    /// Get information about active searches
+    /// Returns list of (peer_id, waiters_count, search_duration)
+    pub async fn get_active_searches(&self) -> Result<Vec<(PeerId, usize, Duration)>, String> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(crate::commands::NetworkCommand::XRoutes(
+                XRoutesCommand::GetActiveSearches {
+                    response: response_tx,
+                }
+            ))
+            .await
+            .map_err(|e| format!("Failed to send command: {}", e))?;
+
+        response_rx
+            .await
+            .map_err(|e| format!("Failed to receive response: {}", e))
     }
 
     /// Set XRoute role

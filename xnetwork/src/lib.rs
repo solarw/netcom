@@ -19,4 +19,21 @@ pub use node::NetworkNode;
 pub use utils::make_new_key;
 
 // Re-export XRoutes components
-pub use xroutes::{XRoutesConfig, XRoutesCommand, XRoutesEvent, XRouteRole, XRoutesCommander, BootstrapNodeInfo, BootstrapError};
+pub use xroutes::{
+    XRoutesConfig, 
+    XRoutesCommand, 
+    XRoutesEvent, 
+    XRouteRole, 
+    XRoutesCommander, 
+    BootstrapNodeInfo, 
+    BootstrapError,
+    XRoutesDiscoveryBehaviour,
+    XRoutesDiscoveryBehaviourEvent,
+    XRoutesHandler,
+};
+
+// Re-export XRoutes behaviour components for advanced usage
+pub use xroutes::behaviour::KadStats;
+
+// Re-export protocol constants
+pub use xroutes::{XROUTE_CLIENT_PROTOCOL, XROUTE_SERVER_PROTOCOL};

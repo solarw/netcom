@@ -59,6 +59,6 @@ pub enum NetworkCommand {
     // Core system commands
     Shutdown,
 
-    // Nested XRoutes commands
+    // Nested XRoutes commands - all XRoutes functionality is handled through this
     XRoutes(XRoutesCommand),
 }

@@ -9,8 +9,9 @@ use tracing::error;
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::time::Duration;
 
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 
 use xstream::events::XStreamEvent;
 use xauth::events::PorAuthEvent;
@@ -104,6 +105,67 @@ impl NetworkNode {
         ))
     }
 
+    // Create a new NetworkNode with extended XRoutes configuration
+    pub async fn new_with_config(
+        local_key: identity::Keypair,
+        por: xauth::por::por::ProofOfRepresentation,
+        xroutes_config: Option<XRoutesConfig>,
+    ) -> Result<
+        (
+            Self,
+            mpsc::Sender<NetworkCommand>,
+            mpsc::Receiver<NetworkEvent>,
+            PeerId,
+        ),
+        Box<dyn Error + Send + Sync>,
+    > {
+        let local_peer_id = PeerId::from(local_key.public());
+        
+        // Create XRoutes handler if config provided
+        let xroutes_handler = if let Some(config) = xroutes_config.clone() {
+            if config.is_discovery_enabled() {
+                config.validate().map_err(|e| format!("Invalid XRoutes config: {}", e))?;
+                Some(XRoutesHandler::new(config.clone()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Create a SwarmBuilder with QUIC transport
+        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
+            .with_tokio()
+            .with_quic()
+            .with_behaviour(|key| {
+                crate::behaviour::make_behaviour_with_config(key, por, xroutes_config)
+            })?
+            .with_swarm_config(|c| {
+                c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
+            })
+            .build();
+
+        // Set up communication channels
+        let (cmd_tx, cmd_rx) = mpsc::channel(100);
+        let (event_tx, event_rx) = mpsc::channel(100);
+
+        Ok((
+            Self {
+                cmd_rx,
+                event_tx,
+                swarm,
+                connected_peers: HashMap::new(),
+                local_peer_id,
+                authenticated_peers: HashSet::new(),
+                xroutes_handler,
+                local_key,
+            },
+            cmd_tx,
+            event_rx,
+            local_peer_id,
+        ))
+    }
+
     // Get the local peer ID
     pub fn local_peer_id(&self) -> PeerId {
         self.local_peer_id
@@ -115,6 +177,15 @@ impl NetworkNode {
     }
 
     pub async fn run(&mut self) {
+        self.run_with_cleanup_interval(Duration::from_secs(30)).await;
+    }
+
+    /// Run the network node with custom cleanup interval
+    pub async fn run_with_cleanup_interval(&mut self, cleanup_interval_duration: Duration) {
+        // Create periodic cleanup timer
+        let mut cleanup_interval = tokio::time::interval(cleanup_interval_duration);
+        cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         loop {
             tokio::select! {
                 Some(cmd) = self.cmd_rx.recv() => {
@@ -128,7 +199,53 @@ impl NetworkNode {
                 event = self.swarm.select_next_some() => {
                     self.handle_swarm_event(event).await;
                 }
+                _ = cleanup_interval.tick() => {
+                    // Periodic cleanup of timed out waiters
+                    self.periodic_cleanup().await;
+                }
             }
+        }
+    }
+
+    /// Periodic cleanup of timed out waiters and other maintenance tasks
+    async fn periodic_cleanup(&mut self) {
+        if let Some(ref mut handler) = self.xroutes_handler {
+            // Clean up timed out search waiters
+            handler.cleanup_timed_out_waiters();
+
+            // Optional: Log active searches for monitoring
+            let active_searches = handler.get_active_searches_info();
+            if !active_searches.is_empty() {
+                debug!("Active searches: {} searches with {} total waiters", 
+                       active_searches.len(),
+                       active_searches.iter().map(|(_, count, _)| count).sum::<usize>());
+                
+                // Log searches that have been running for a long time
+                for (peer_id, waiter_count, duration) in active_searches {
+                    if duration.as_secs() > 300 { // 5 minutes
+                        warn!("Long-running search for peer {}: {} waiters, running for {:?}", 
+                              peer_id, waiter_count, duration);
+                    }
+                }
+            }
+        }
+
+        // Optional: Clean up old authenticated peers that are no longer connected
+        self.cleanup_disconnected_authenticated_peers();
+    }
+
+    /// Clean up authenticated peers that are no longer connected
+    fn cleanup_disconnected_authenticated_peers(&mut self) {
+        let disconnected_peers: Vec<PeerId> = self
+            .authenticated_peers
+            .iter()
+            .filter(|&peer_id| !self.connected_peers.contains_key(peer_id))
+            .cloned()
+            .collect();
+
+        for peer_id in disconnected_peers {
+            self.authenticated_peers.remove(&peer_id);
+            debug!("Removed authentication record for disconnected peer {}", peer_id);
         }
     }
 
@@ -236,7 +353,21 @@ impl NetworkNode {
                 let _ = response.send(connections);
             }
 
-            // XRoutes commands - delegate to handler
+            NetworkCommand::GetPeersConnected { peer_id: _, response } => {
+                let peers: Vec<(PeerId, Vec<Multiaddr>)> = self
+                    .connected_peers
+                    .iter()
+                    .map(|(peer_id, addrs)| (*peer_id, addrs.clone()))
+                    .collect();
+                let _ = response.send(peers);
+            }
+
+            NetworkCommand::GetListenAddresses { response } => {
+                let addresses = self.listening_addresses();
+                let _ = response.send(addresses);
+            }
+
+            // XRoutes commands - delegate to handler with enhanced error handling
             NetworkCommand::XRoutes(xroutes_cmd) => {
                 if let Some(ref mut handler) = self.xroutes_handler {
                     handler.handle_command(xroutes_cmd, &mut self.swarm, &self.local_key).await;
@@ -248,8 +379,6 @@ impl NetworkNode {
             NetworkCommand::Shutdown => {
                 // Handled in the run loop
             }
-
-            _ => {}
         }
     }
 
@@ -505,9 +634,18 @@ impl NetworkNode {
         }
     }
 
-    // Helper method to send error when XRoutes is disabled
+    // Helper method to send error when XRoutes is disabled - enhanced for new commands
     fn send_xroutes_disabled_error(&self, cmd: XRoutesCommand) {
         match cmd {
+            XRoutesCommand::FindPeerAddressesAdvanced { response, .. } => {
+                let _ = response.send(Err("XRoutes discovery not enabled".to_string()));
+            }
+            XRoutesCommand::CancelPeerSearch { response, .. } => {
+                let _ = response.send(Err("XRoutes discovery not enabled".to_string()));
+            }
+            XRoutesCommand::GetActiveSearches { response } => {
+                let _ = response.send(Vec::new());
+            }
             XRoutesCommand::BootstrapKad { response } => {
                 let _ = response.send(Err("XRoutes discovery not enabled".into()));
             }
@@ -526,7 +664,6 @@ impl NetworkNode {
             XRoutesCommand::GetRole { response } => {
                 let _ = response.send(crate::xroutes::XRouteRole::Unknown);
             }
-            
             XRoutesCommand::ConnectToBootstrap { response, .. } => {
                 let _ = response.send(Err(crate::xroutes::BootstrapError::DiscoveryNotEnabled));
             }
