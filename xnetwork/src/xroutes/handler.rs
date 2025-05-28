@@ -75,30 +75,11 @@ impl XRoutesHandler {
     ) {
         match cmd {
             XRoutesCommand::DiscoveryCommand(discover_cmd) => {
-                //noop
-            }
-            XRoutesCommand::EnableMdns => {
                 if let Some(ref mut xroutes) = swarm.behaviour_mut().xroutes.as_mut() {
-                    match xroutes.enable_mdns(key) {
-                        Ok(_) => {
-                            self.mdns_enabled = true;
-                            info!("mDNS discovery enabled");
-                        }
-                        Err(e) => {
-                            warn!("Failed to enable mDNS: {}", e);
-                        }
-                    }
+                    xroutes.discovery.handle_command(discover_cmd)
                 }
             }
-
-            XRoutesCommand::DisableMdns => {
-                if let Some(ref mut xroutes) = swarm.behaviour_mut().xroutes.as_mut() {
-                    xroutes.disable_mdns();
-                    self.mdns_enabled = false;
-                    info!("mDNS discovery disabled");
-                }
-            }
-
+          
             XRoutesCommand::EnableKad => {
                 self.kad_enabled = true;
                 info!("Kademlia discovery enabled");
@@ -489,17 +470,12 @@ impl XRoutesHandler {
         swarm: &mut Swarm<NodeBehaviour>,
     ) -> Vec<XRoutesEvent> {
         match event {
-            XRoutesDiscoveryBehaviourEvent::Mdns(mdns_event) => {
-                self.handle_mdns_event(mdns_event, swarm).await
-            }
             XRoutesDiscoveryBehaviourEvent::Kad(kad_event) => {
                 self.handle_kad_event(kad_event, swarm).await
             }
 
             XRoutesDiscoveryBehaviourEvent::Discovery(discovery_event) => {
-                //TODO!!!!!!
-                let vec = Vec::new();
-                return vec;
+                self.handle_discovery_event(discovery_event, swarm).await
             }
         }
     }
@@ -510,79 +486,8 @@ impl XRoutesHandler {
         swarm: &mut Swarm<NodeBehaviour>,
     ) -> Vec<XRoutesEvent> {
         let mut events = Vec::new();
-        events.push(XRoutesEvent::DiscoveryEvent(event));
-        events
-    }
-
-    /// Handle mDNS events
-    async fn handle_mdns_event(
-        &mut self,
-        event: mdns::Event,
-        swarm: &mut Swarm<NodeBehaviour>,
-    ) -> Vec<XRoutesEvent> {
-        let mut events = Vec::new();
-
-        match event {
-            mdns::Event::Discovered(peers) => {
-                if self.mdns_enabled {
-                    let mut discovered_addresses = Vec::new();
-
-                    for (peer_id, addr) in peers {
-                        info!("mDNS discovered peer: {peer_id} at {addr}");
-
-                        // Add to our discovered peers map
-                        self.discovered_peers
-                            .entry(peer_id)
-                            .or_insert_with(Vec::new)
-                            .push(addr.clone());
-
-                        discovered_addresses.push((peer_id, addr.clone()));
-
-                        // Check if we have active searches for this peer
-                        if let Some(search_state) = self.active_searches.get(&peer_id) {
-                            let addresses = vec![addr.clone()];
-                            self.complete_search_for_peer(peer_id, addresses).await;
-                        }
-
-                        // Add to Kademlia if enabled
-                        if self.kad_enabled {
-                            if let Some(ref mut xroutes) = swarm.behaviour_mut().xroutes.as_mut() {
-                                xroutes.add_address(&peer_id, addr.clone());
-                                info!("📚 Added address to Kademlia: {peer_id} at {addr}");
-
-                                events.push(XRoutesEvent::KadAddressAdded {
-                                    peer_id,
-                                    addr: addr.clone(),
-                                });
-                            }
-                        }
-                    }
-
-                    // Group discovered peers by peer_id
-                    let mut peer_groups: HashMap<PeerId, Vec<Multiaddr>> = HashMap::new();
-                    for (peer_id, addr) in discovered_addresses {
-                        peer_groups
-                            .entry(peer_id)
-                            .or_insert_with(Vec::new)
-                            .push(addr);
-                    }
-
-                    // Generate discovery events
-                    for (peer_id, addresses) in peer_groups {
-                        events.push(XRoutesEvent::MdnsPeerDiscovered { peer_id, addresses });
-                    }
-                }
-            }
-            mdns::Event::Expired(peers) => {
-                for (peer_id, _addr) in peers {
-                    info!("mDNS peer expired: {peer_id}");
-                    self.discovered_peers.remove(&peer_id);
-                    events.push(XRoutesEvent::MdnsPeerExpired { peer_id });
-                }
-            }
-        }
-
-        events
+        events.push(XRoutesEvent::DiscoveryEvent(event.clone()));
+        return events;
     }
 
     /// Handle Kademlia events

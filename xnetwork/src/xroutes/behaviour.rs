@@ -22,22 +22,14 @@ use super::{
 #[behaviour(to_swarm = "XRoutesDiscoveryBehaviourEvent")]
 pub struct XRoutesDiscoveryBehaviour {
     pub kad: kad::Behaviour<kad::store::MemoryStore>,
-    pub mdns: Toggle<mdns::tokio::Behaviour>,
     pub discovery: DiscoveryBehaviour,
 }
 
 // Events from XRoutes behaviour - manually defined to match NetworkBehaviour expectation
 #[derive(Debug)]
 pub enum XRoutesDiscoveryBehaviourEvent {
-    Mdns(mdns::Event),
     Kad(kad::Event),
     Discovery(DiscoveryEvent),
-}
-
-impl From<mdns::Event> for XRoutesDiscoveryBehaviourEvent {
-    fn from(event: mdns::Event) -> Self {
-        XRoutesDiscoveryBehaviourEvent::Mdns(event)
-    }
 }
 
 impl From<kad::Event> for XRoutesDiscoveryBehaviourEvent {
@@ -89,55 +81,12 @@ impl XRoutesDiscoveryBehaviour {
             kad_behaviour.set_mode(Some(kad::Mode::Client));
         }
 
-        // Create mDNS behaviour wrapped in Toggle
-        let mdns = if config.enable_mdns {
-            match mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id()) {
-                Ok(mdns_behaviour) => Toggle::from(Some(mdns_behaviour)),
-                Err(e) => {
-                    tracing::warn!("Failed to create mDNS behavior: {}", e);
-                    Toggle::from(None)
-                }
-            }
-        } else {
-            Toggle::from(None)
-        };
+      
 
         Ok(XRoutesDiscoveryBehaviour {
             kad: kad_behaviour,
-            mdns,
             discovery: DiscoveryBehaviour::new(key, config.enable_mdns)?,
         })
-    }
-
-    /// Enable mDNS discovery
-    pub fn enable_mdns(
-        &mut self,
-        key: &identity::Keypair,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.mdns.is_enabled() {
-            return Ok(());
-        }
-
-        match mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id()) {
-            Ok(mdns_behaviour) => {
-                self.mdns = Toggle::from(Some(mdns_behaviour));
-                Ok(())
-            }
-            Err(e) => {
-                tracing::warn!("Failed to enable mDNS behavior: {}", e);
-                Err(Box::new(e))
-            }
-        }
-    }
-
-    /// Disable mDNS discovery
-    pub fn disable_mdns(&mut self) {
-        self.mdns = Toggle::from(None);
-    }
-
-    /// Check if mDNS is enabled
-    pub fn is_mdns_enabled(&self) -> bool {
-        self.mdns.is_enabled()
     }
 
     /// Bootstrap Kademlia DHT

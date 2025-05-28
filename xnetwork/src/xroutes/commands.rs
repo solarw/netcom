@@ -10,9 +10,7 @@ use super::xroute::XRouteRole;
 
 #[derive(Debug)]
 pub enum XRoutesCommand {
-    // mDNS commands
-    EnableMdns,
-    DisableMdns,
+    // mDNS commands now in discovery
     DiscoveryCommand(DiscoveryCommand),
 
     // Kademlia commands

@@ -36,7 +36,7 @@ impl DiscoveryBehaviour {
             mdns: MdnsBehaviour::new(key, enable_mdns)?,
         })
     }
-    fn handle_command(&mut self, cmd: DiscoveryCommand) {
+    pub fn handle_command(&mut self, cmd: DiscoveryCommand) {
         match cmd {
             DiscoveryCommand::Mdns(mdns_command) => self.mdns.handle_command(mdns_command),
         }

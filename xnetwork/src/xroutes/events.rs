@@ -7,16 +7,17 @@ use super::{discovery::events::DiscoveryEvent, xroute::XRouteRole};
 #[derive(Debug, Clone)]
 pub enum XRoutesEvent {
     // mDNS events
-    MdnsEnabled,
-    MdnsDisabled,
-    MdnsPeerDiscovered {
-        peer_id: PeerId,
-        addresses: Vec<Multiaddr>,
-    },
-    MdnsPeerExpired {
-        peer_id: PeerId,
-    },
+    //MdnsEnabled,
+    //MdnsDisabled,
+    //MdnsPeerDiscovered {
+        //peer_id: PeerId,
+        //addresses: Vec<Multiaddr>,
+    //},
+    //MdnsPeerExpired {
+        //peer_id: PeerId,
+    //},
 
+    // all mdns events in discovery events
     DiscoveryEvent (DiscoveryEvent),
     
     // Kademlia events
