@@ -73,6 +73,10 @@ impl XRoutesHandler {
         key: &identity::Keypair,
     ) {
         match cmd {
+
+            XRoutesCommand::DiscoveryCommand(discover_cmd) => {
+                //noop
+            }
             XRoutesCommand::EnableMdns => {
                 if let Some(ref mut xroutes) = swarm.behaviour_mut().xroutes.as_mut() {
                     match xroutes.enable_mdns(key) {

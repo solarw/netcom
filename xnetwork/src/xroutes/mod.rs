@@ -7,6 +7,7 @@ pub mod events;
 pub mod handler;
 pub mod types;
 pub mod xroute;
+pub mod discovery;
 
 // Re-export main XRoutes components
 pub use behaviour::{XRoutesDiscoveryBehaviour, XRoutesDiscoveryBehaviourEvent, KadStats};
