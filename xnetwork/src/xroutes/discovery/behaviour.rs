@@ -1,113 +1,137 @@
-// XRoutes discovery behaviour combining mDNS and Kademlia
-use libp2p::Multiaddr;
-use libp2p::PeerId;
-use libp2p::core::Endpoint;
-use libp2p::core::transport::PortUse;
-use libp2p::identity;
-use libp2p::swarm::ConnectionDenied;
-use libp2p::swarm::ConnectionId;
-use libp2p::swarm::FromSwarm;
-use libp2p::swarm::NetworkBehaviour;
-use libp2p::swarm::THandler;
-use libp2p::swarm::THandlerInEvent;
-use libp2p::swarm::THandlerOutEvent;
-use libp2p::swarm::ToSwarm;
-use libp2p::swarm::behaviour::toggle::Toggle;
-use std::collections::HashMap;
+// ./xroutes/discovery/behaviour.rs
+
+use libp2p::{
+    Multiaddr, PeerId, identity,
+    swarm::{
+        NetworkBehaviour, THandlerInEvent, ToSwarm, derive_prelude::*,
+    },
+};
 use std::collections::VecDeque;
 use std::task::{Context, Poll};
-use tracing::info;
+use tracing::{info, debug};
 
 use super::commands::DiscoveryCommand;
 use super::events::DiscoveryEvent;
-use super::mdns;
 use super::mdns::behaviour::MdnsBehaviour;
+use super::kad::behaviour::KadBehaviour;
 
 pub struct DiscoveryBehaviour {
     pub mdns: MdnsBehaviour,
+    pub kad: KadBehaviour,
+    pending_events: VecDeque<DiscoveryEvent>,
 }
 
 impl DiscoveryBehaviour {
     pub fn new(
         key: &identity::Keypair,
         enable_mdns: bool,
+        enable_kad: bool,
+        kad_server_mode: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(DiscoveryBehaviour {
             mdns: MdnsBehaviour::new(key, enable_mdns)?,
+            kad: KadBehaviour::new(key, enable_kad, kad_server_mode)?,
+            pending_events: VecDeque::new(),
         })
     }
+
     pub fn handle_command(&mut self, cmd: DiscoveryCommand) {
         match cmd {
-            DiscoveryCommand::Mdns(mdns_command) => self.mdns.handle_command(mdns_command),
+            DiscoveryCommand::Mdns(mdns_command) => {
+                self.mdns.handle_command(mdns_command);
+            }
+            DiscoveryCommand::Kad(kad_command) => {
+                self.kad.handle_command(kad_command);
+            }
         }
     }
 }
 
 impl NetworkBehaviour for DiscoveryBehaviour {
-    type ConnectionHandler = <MdnsBehaviour as NetworkBehaviour>::ConnectionHandler;
+    type ConnectionHandler = libp2p::swarm::dummy::ConnectionHandler;
     type ToSwarm = DiscoveryEvent;
 
     fn handle_established_inbound_connection(
         &mut self,
-        connection_id: ConnectionId,
-        peer: PeerId,
-        local_addr: &Multiaddr,
-        remote_addr: &Multiaddr,
+        _connection_id: ConnectionId,
+        _peer: PeerId,
+        _local_addr: &Multiaddr,
+        _remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        self.mdns.handle_established_inbound_connection(
-            connection_id,
-            peer,
-            local_addr,
-            remote_addr,
-        )
+        Ok(libp2p::swarm::dummy::ConnectionHandler)
     }
 
     fn handle_established_outbound_connection(
         &mut self,
-        connection_id: ConnectionId,
-        peer: PeerId,
-        addr: &Multiaddr,
-        role_override: Endpoint,
-        port_use: PortUse,
+        _connection_id: ConnectionId,
+        _peer: PeerId,
+        _addr: &Multiaddr,
+        _role_override: Endpoint,
+        _port_use: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        self.mdns.handle_established_outbound_connection(
-            connection_id,
-            peer,
-            addr,
-            role_override,
-            port_use,
-        )
+        Ok(libp2p::swarm::dummy::ConnectionHandler)
     }
 
     fn on_swarm_event(&mut self, event: FromSwarm) {
-        self.mdns.on_swarm_event(event)
+        // Forward relevant events to child behaviours
+        self.mdns.on_swarm_event(event.clone());
+        self.kad.on_swarm_event(event.clone());
+        
     }
 
     fn on_connection_handler_event(
         &mut self,
-        peer_id: PeerId,
-        connection_id: ConnectionId,
-        event: THandlerOutEvent<Self>,
+        _peer_id: PeerId,
+        _connection_id: ConnectionId,
+        _event: THandlerOutEvent<Self>,
     ) {
-        self.mdns
-            .on_connection_handler_event(peer_id, connection_id, event)
+        // Dummy handler produces no events
     }
 
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
-        // Получаем события от mdns
-        match self.mdns.poll(cx) {
-            Poll::Ready(ToSwarm::GenerateEvent(event)) => {
-                return Poll::Ready(ToSwarm::GenerateEvent(event));
-            }
-            Poll::Ready(some_event) => {
-                info!("Discovery some event {:?}", some_event);
-            }
-
-            Poll::Pending => {}
+        // Return pending events first
+        if let Some(event) = self.pending_events.pop_front() {
+            return Poll::Ready(ToSwarm::GenerateEvent(event));
         }
+
+        // Poll mDNS for events
+        loop {
+            match self.mdns.poll(cx) {
+                Poll::Ready(ToSwarm::GenerateEvent(event)) => {
+                    return Poll::Ready(ToSwarm::GenerateEvent(event));
+                }
+                Poll::Ready(_other_event) => {
+                    // Ignore non-event ToSwarm variants from mDNS
+                    continue;
+                }
+                Poll::Pending => break,
+            }
+        }
+
+        // Poll Kademlia for events
+        loop {
+            match self.kad.poll(cx) {
+                Poll::Ready(ToSwarm::GenerateEvent(event)) => {
+                    return Poll::Ready(ToSwarm::GenerateEvent(event));
+                }
+                Poll::Ready(_other_event) => {
+                    // Ignore non-event ToSwarm variants from Kademlia for now
+                    // In a more sophisticated implementation, we might want to
+                    // forward these events appropriately
+                    continue;
+                }
+                Poll::Pending => break,
+            }
+        }
+
+        // Check for pending events one more time
+        if let Some(event) = self.pending_events.pop_front() {
+            return Poll::Ready(ToSwarm::GenerateEvent(event));
+        }
+
         Poll::Pending
     }
 }

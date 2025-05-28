@@ -11,10 +11,7 @@ use libp2p::{
 
 use super::{
     XRoutesConfig,
-    discovery::{
-        behaviour::{DiscoveryBehaviour},
-        events::DiscoveryEvent,
-    },
+    discovery::{behaviour::DiscoveryBehaviour, events::DiscoveryEvent},
 };
 
 // XRoutes discovery behaviour combining mDNS and Kademlia
@@ -81,11 +78,14 @@ impl XRoutesDiscoveryBehaviour {
             kad_behaviour.set_mode(Some(kad::Mode::Client));
         }
 
-      
-
         Ok(XRoutesDiscoveryBehaviour {
             kad: kad_behaviour,
-            discovery: DiscoveryBehaviour::new(key, config.enable_mdns)?,
+            discovery: DiscoveryBehaviour::new(
+                key,
+                config.enable_mdns,
+                config.enable_kad,
+                config.kad_server_mode,
+            )?,
         })
     }
 
