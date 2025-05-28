@@ -3,14 +3,19 @@
 use std::num::NonZeroUsize;
 
 use libp2p::{
-    identity,
+    Multiaddr, PeerId, identity,
     kad::{self, BucketInserts, QueryId},
     mdns,
-    swarm::{behaviour::toggle::Toggle, NetworkBehaviour},
-    Multiaddr, PeerId,
+    swarm::{NetworkBehaviour, behaviour::toggle::Toggle},
 };
 
-use super::XRoutesConfig;
+use super::{
+    XRoutesConfig,
+    discovery::{
+        behaviour::{DiscoveryBehaviour},
+        events::DiscoveryEvent,
+    },
+};
 
 // XRoutes discovery behaviour combining mDNS and Kademlia
 #[derive(NetworkBehaviour)]
@@ -18,6 +23,7 @@ use super::XRoutesConfig;
 pub struct XRoutesDiscoveryBehaviour {
     pub kad: kad::Behaviour<kad::store::MemoryStore>,
     pub mdns: Toggle<mdns::tokio::Behaviour>,
+    pub discovery: DiscoveryBehaviour,
 }
 
 // Events from XRoutes behaviour - manually defined to match NetworkBehaviour expectation
@@ -25,6 +31,7 @@ pub struct XRoutesDiscoveryBehaviour {
 pub enum XRoutesDiscoveryBehaviourEvent {
     Mdns(mdns::Event),
     Kad(kad::Event),
+    Discovery(DiscoveryEvent),
 }
 
 impl From<mdns::Event> for XRoutesDiscoveryBehaviourEvent {
@@ -39,8 +46,17 @@ impl From<kad::Event> for XRoutesDiscoveryBehaviourEvent {
     }
 }
 
+impl From<DiscoveryEvent> for XRoutesDiscoveryBehaviourEvent {
+    fn from(event: DiscoveryEvent) -> Self {
+        XRoutesDiscoveryBehaviourEvent::Discovery(event)
+    }
+}
+
 impl XRoutesDiscoveryBehaviour {
-    pub fn new(key: &identity::Keypair, config: XRoutesConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        key: &identity::Keypair,
+        config: XRoutesConfig,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // Configure Kademlia
         let mut kad_config = kad::Config::default();
 
@@ -64,11 +80,8 @@ impl XRoutesDiscoveryBehaviour {
 
         // Create Kademlia behaviour
         let kad_store = kad::store::MemoryStore::new(key.public().to_peer_id());
-        let mut kad_behaviour = kad::Behaviour::with_config(
-            key.public().to_peer_id(),
-            kad_store,
-            kad_config,
-        );
+        let mut kad_behaviour =
+            kad::Behaviour::with_config(key.public().to_peer_id(), kad_store, kad_config);
 
         if config.kad_server_mode {
             kad_behaviour.set_mode(Some(kad::Mode::Server));
@@ -92,11 +105,15 @@ impl XRoutesDiscoveryBehaviour {
         Ok(XRoutesDiscoveryBehaviour {
             kad: kad_behaviour,
             mdns,
+            discovery: DiscoveryBehaviour::new(key, config.enable_mdns)?,
         })
     }
 
     /// Enable mDNS discovery
-    pub fn enable_mdns(&mut self, key: &identity::Keypair) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn enable_mdns(
+        &mut self,
+        key: &identity::Keypair,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if self.mdns.is_enabled() {
             return Ok(());
         }
@@ -131,7 +148,7 @@ impl XRoutesDiscoveryBehaviour {
     /// Get known peers from Kademlia routing table
     pub fn get_known_peers(&mut self) -> Vec<(PeerId, Vec<Multiaddr>)> {
         let mut peers = Vec::new();
-        
+
         for kbucket in self.kad.kbuckets() {
             for entry in kbucket.iter() {
                 let addresses = entry.node.value.clone().into_vec();
@@ -141,7 +158,7 @@ impl XRoutesDiscoveryBehaviour {
                 }
             }
         }
-        
+
         peers
     }
 
@@ -228,9 +245,13 @@ impl XRoutesDiscoveryBehaviour {
     }
 
     /// Get the closest peers to a given peer ID from local routing table
-    pub fn get_closest_local_peers(&mut self, peer_id: &PeerId, count: usize) -> Vec<(PeerId, Vec<Multiaddr>)> {
+    pub fn get_closest_local_peers(
+        &mut self,
+        peer_id: &PeerId,
+        count: usize,
+    ) -> Vec<(PeerId, Vec<Multiaddr>)> {
         let mut peers = Vec::new();
-        
+
         // This is a simplified implementation - Kademlia has more sophisticated
         // methods for finding closest peers based on XOR distance
         for bucket in self.kad.kbuckets() {
@@ -240,7 +261,7 @@ impl XRoutesDiscoveryBehaviour {
                 if !addresses.is_empty() && entry_peer_id != *peer_id {
                     peers.push((entry_peer_id, addresses));
                 }
-                
+
                 if peers.len() >= count {
                     break;
                 }
@@ -249,7 +270,7 @@ impl XRoutesDiscoveryBehaviour {
                 break;
             }
         }
-        
+
         peers
     }
 

@@ -2,7 +2,7 @@
 
 use libp2p::{Multiaddr, PeerId};
 
-use super::xroute::XRouteRole;
+use super::{discovery::events::DiscoveryEvent, xroute::XRouteRole};
 
 #[derive(Debug, Clone)]
 pub enum XRoutesEvent {
@@ -16,6 +16,8 @@ pub enum XRoutesEvent {
     MdnsPeerExpired {
         peer_id: PeerId,
     },
+
+    DiscoveryEvent (DiscoveryEvent),
     
     // Kademlia events
     KadEnabled,
