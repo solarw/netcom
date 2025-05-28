@@ -404,6 +404,22 @@ impl KadBehaviour {
         self.search_handler.cleanup_timed_out_waiters()
     }
 
+    /// Handle identify events for address management
+    pub fn handle_identify_event(&mut self, event: &libp2p::identify::Event) {
+        match event {
+            libp2p::identify::Event::Received { peer_id, info, .. } => {
+                // Add peer's listening addresses to Kademlia routing table
+                for addr in &info.listen_addrs {
+                    self.add_address(peer_id, addr.clone());
+                    debug!("Added address from identify: {} -> {}", peer_id, addr);
+                }
+            }
+            _ => {
+                // Handle other identify events if needed
+            }
+        }
+    }
+
     // ==========================================
     // COMPATIBILITY API (Legacy Methods)
     // ==========================================

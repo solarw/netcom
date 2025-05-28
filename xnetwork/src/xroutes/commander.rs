@@ -5,6 +5,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{XRoutesCommand, XRouteRole};
+use super::discovery::commands::DiscoveryCommand;
+use super::discovery::kad::commands::KadCommand;
 use super::types::{BootstrapNodeInfo, BootstrapError};
 
 pub struct XRoutesCommander {
@@ -43,15 +45,13 @@ impl XRoutesCommander {
 
     /// Bootstrap Kademlia DHT
     pub async fn bootstrap_kad(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let (response_tx, response_rx) = oneshot::channel();
-
         self.cmd_tx
             .send(crate::commands::NetworkCommand::XRoutes(
-                XRoutesCommand::BootstrapKad { response: response_tx }
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::Bootstrap))
             ))
             .await?;
 
-        response_rx.await?
+        Ok(())
     }
 
     /// Get known peers from Kademlia
@@ -60,7 +60,7 @@ impl XRoutesCommander {
 
         self.cmd_tx
             .send(crate::commands::NetworkCommand::XRoutes(
-                XRoutesCommand::GetKadKnownPeers { response: response_tx }
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::GetKnownPeers { response: response_tx }))
             ))
             .await?;
 
@@ -73,24 +73,11 @@ impl XRoutesCommander {
 
         self.cmd_tx
             .send(crate::commands::NetworkCommand::XRoutes(
-                XRoutesCommand::GetPeerAddresses { peer_id, response: response_tx }
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::GetPeerAddresses { peer_id, response: response_tx }))
             ))
             .await?;
 
         Ok(response_rx.await?)
-    }
-
-    /// Find peer addresses via DHT (legacy method - kept for compatibility)
-    pub async fn find_peer_addresses(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let (response_tx, response_rx) = oneshot::channel();
-
-        self.cmd_tx
-            .send(crate::commands::NetworkCommand::XRoutes(
-                XRoutesCommand::FindPeerAddresses { peer_id, response: response_tx }
-            ))
-            .await?;
-
-        response_rx.await?
     }
 
     /// Find peer addresses with advanced timeout control
@@ -114,11 +101,11 @@ impl XRoutesCommander {
 
         self.cmd_tx
             .send(crate::commands::NetworkCommand::XRoutes(
-                XRoutesCommand::FindPeerAddressesAdvanced {
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::FindPeerAddressesAdvanced {
                     peer_id,
                     timeout_secs,
                     response: response_tx,
-                }
+                }))
             ))
             .await
             .map_err(|e| format!("Failed to send command: {}", e))?;
@@ -134,7 +121,22 @@ impl XRoutesCommander {
         peer_id: PeerId,
         timeout_secs: u32,
     ) -> Result<Vec<Multiaddr>, String> {
-        self.find_peer_addresses_advanced(peer_id, timeout_secs as i32).await
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(crate::commands::NetworkCommand::XRoutes(
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::FindPeerAddressesWithTimeout {
+                    peer_id,
+                    timeout_secs,
+                    response: response_tx,
+                }))
+            ))
+            .await
+            .map_err(|e| format!("Failed to send command: {}", e))?;
+
+        response_rx
+            .await
+            .map_err(|e| format!("Failed to receive response: {}", e))?
     }
 
     /// Convenience method: Find peer addresses from local tables only
@@ -142,7 +144,21 @@ impl XRoutesCommander {
         &self,
         peer_id: PeerId,
     ) -> Result<Vec<Multiaddr>, String> {
-        self.find_peer_addresses_advanced(peer_id, 0).await
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(crate::commands::NetworkCommand::XRoutes(
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::FindPeerAddressesLocalOnly {
+                    peer_id,
+                    response: response_tx,
+                }))
+            ))
+            .await
+            .map_err(|e| format!("Failed to send command: {}", e))?;
+
+        response_rx
+            .await
+            .map_err(|e| format!("Failed to receive response: {}", e))?
     }
 
     /// Convenience method: Find peer addresses with infinite timeout
@@ -150,7 +166,21 @@ impl XRoutesCommander {
         &self,
         peer_id: PeerId,
     ) -> Result<Vec<Multiaddr>, String> {
-        self.find_peer_addresses_advanced(peer_id, -1).await
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(crate::commands::NetworkCommand::XRoutes(
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::FindPeerAddressesInfinite {
+                    peer_id,
+                    response: response_tx,
+                }))
+            ))
+            .await
+            .map_err(|e| format!("Failed to send command: {}", e))?;
+
+        response_rx
+            .await
+            .map_err(|e| format!("Failed to receive response: {}", e))?
     }
 
     /// Cancel active search for a specific peer
@@ -159,10 +189,10 @@ impl XRoutesCommander {
 
         self.cmd_tx
             .send(crate::commands::NetworkCommand::XRoutes(
-                XRoutesCommand::CancelPeerSearch {
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::CancelPeerSearch {
                     peer_id,
                     response: response_tx,
-                }
+                }))
             ))
             .await
             .map_err(|e| format!("Failed to send command: {}", e))?;
@@ -179,9 +209,9 @@ impl XRoutesCommander {
 
         self.cmd_tx
             .send(crate::commands::NetworkCommand::XRoutes(
-                XRoutesCommand::GetActiveSearches {
+                XRoutesCommand::Discovery(DiscoveryCommand::Kad(KadCommand::GetActiveSearches {
                     response: response_tx,
-                }
+                }))
             ))
             .await
             .map_err(|e| format!("Failed to send command: {}", e))?;
@@ -216,5 +246,14 @@ impl XRoutesCommander {
             .await?;
 
         Ok(response_rx.await?)
+    }
+
+    /// Legacy method: Find peer addresses (compatibility)
+    pub async fn find_peer_addresses(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Use advanced search with 30 second timeout for compatibility
+        match self.find_peer_addresses_advanced(peer_id, 30).await {
+            Ok(_addresses) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 }

@@ -80,6 +80,9 @@ impl NetworkNode {
                 } else {
                     crate::xroutes::XRouteRole::Client
                 },
+                enable_relay_client: true,
+                enable_relay_server: false,
+                known_relay_servers: Vec::new(),
             };
             Some(XRoutesHandler::new(config))
         } else {
@@ -139,7 +142,7 @@ impl NetworkNode {
         
         // Create XRoutes handler if config provided
         let xroutes_handler = if let Some(config) = xroutes_config.clone() {
-            if config.is_discovery_enabled() {
+            if config.is_xroutes_enabled() {
                 config.validate().map_err(|e| format!("Invalid XRoutes config: {}", e))?;
                 Some(XRoutesHandler::new(config.clone()))
             } else {
@@ -238,27 +241,7 @@ impl NetworkNode {
 
     /// Periodic cleanup of timed out waiters and other maintenance tasks
     async fn periodic_cleanup(&mut self) {
-        if let Some(ref mut handler) = self.xroutes_handler {
-            // Clean up timed out search waiters
-            handler.cleanup_timed_out_waiters();
-
-            // Optional: Log active searches for monitoring
-            let active_searches = handler.get_active_searches_info();
-            if !active_searches.is_empty() {
-                debug!("Active searches: {} searches with {} total waiters", 
-                       active_searches.len(),
-                       active_searches.iter().map(|(_, count, _)| count).sum::<usize>());
-                
-                // Log searches that have been running for a long time
-                for (peer_id, waiter_count, duration) in active_searches {
-                    if duration.as_secs() > 300 { // 5 minutes
-                        warn!("Long-running search for peer {}: {} waiters, running for {:?}", 
-                              peer_id, waiter_count, duration);
-                    }
-                }
-            }
-        }
-
+        // XRoutes cleanup is now handled internally by discovery layer
         // Optional: Clean up old authenticated peers that are no longer connected
         self.cleanup_disconnected_authenticated_peers();
     }
@@ -537,12 +520,10 @@ impl NetworkNode {
                 let _ = response.send(result);
             }
 
-            // XRoutes commands - delegate to handler with enhanced error handling
+            // XRoutes commands - delegate to handler
             NetworkCommand::XRoutes(xroutes_cmd) => {
                 if let Some(ref mut handler) = self.xroutes_handler {
                     handler.handle_command(xroutes_cmd, &mut self.swarm, &self.local_key).await;
-                } else {
-                    self.send_xroutes_disabled_error(xroutes_cmd);
                 }
             }
 
@@ -731,19 +712,18 @@ impl NetworkNode {
 
             // Core identify events
             NodeBehaviourEvent::Identify(identify_event) => {
+                // Forward identify events to XRoutes discovery for processing
+                if let Some(ref mut handler) = self.xroutes_handler {
+                    if let Some(xroutes) = self.swarm.behaviour_mut().xroutes.as_mut() {
+                        // Forward the identify event to discovery behaviour
+                        // This allows kad, mdns and other discovery protocols to handle it
+                        xroutes.discovery.handle_identify_event(&identify_event);
+                    }
+                }
+
                 match identify_event {
                     identify::Event::Received { peer_id, info, .. } => {
                         info!("Identified peer {peer_id}: {info:?}");
-
-                        // Add peer's listening addresses to XRoutes if enabled
-                        if let Some(ref mut handler) = self.xroutes_handler {
-                            if let Some(xroutes) = self.swarm.behaviour_mut().xroutes.as_mut() {
-                                for addr in &info.listen_addrs {
-                                    xroutes.add_address(&peer_id, addr.clone());
-                                    info!("Address added to XRoutes {peer_id} {addr}");
-                                }
-                            }
-                        }
 
                         // Detect peer role from protocols
                         let peer_role = crate::xroutes::XRouteRole::from_protocols(&info.protocols);
@@ -839,43 +819,5 @@ impl NetworkNode {
         }
     }
 
-    // Helper method to send error when XRoutes is disabled - enhanced for new commands
-    fn send_xroutes_disabled_error(&self, cmd: XRoutesCommand) {
-        match cmd {
-            XRoutesCommand::FindPeerAddressesAdvanced { response, .. } => {
-                let _ = response.send(Err("XRoutes discovery not enabled".to_string()));
-            }
-            XRoutesCommand::CancelPeerSearch { response, .. } => {
-                let _ = response.send(Err("XRoutes discovery not enabled".to_string()));
-            }
-            XRoutesCommand::GetActiveSearches { response } => {
-                let _ = response.send(Vec::new());
-            }
-            XRoutesCommand::BootstrapKad { response } => {
-                let _ = response.send(Err("XRoutes discovery not enabled".into()));
-            }
-            XRoutesCommand::GetKadKnownPeers { response } => {
-                let _ = response.send(Vec::new());
-            }
-            XRoutesCommand::GetPeerAddresses { response, .. } => {
-                let _ = response.send(Vec::new());
-            }
-            XRoutesCommand::FindPeerAddresses { response, .. } => {
-                let _ = response.send(Err("XRoutes discovery not enabled".into()));
-            }
-            XRoutesCommand::SetRole { response, .. } => {
-                let _ = response.send(Err("XRoutes discovery not enabled".to_string()));
-            }
-            XRoutesCommand::GetRole { response } => {
-                let _ = response.send(crate::xroutes::XRouteRole::Unknown);
-            }
-            XRoutesCommand::ConnectToBootstrap { response, .. } => {
-                let _ = response.send(Err(crate::xroutes::BootstrapError::DiscoveryNotEnabled));
-            }
-            _ => {
-                // For commands without response channel, just log
-                warn!("XRoutes command ignored - discovery not enabled: {:?}", cmd);
-            }
-        }
-    }
+
 }

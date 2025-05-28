@@ -24,6 +24,9 @@ async fn main() -> Result<(), String> {
         enable_kad: true,
         kad_server_mode: false,
         initial_role: XRouteRole::Client,
+        enable_relay_client: false,
+        enable_relay_server: false,
+        known_relay_servers: Vec::new(),
     };
 
     let key = identity::Keypair::generate_ed25519();

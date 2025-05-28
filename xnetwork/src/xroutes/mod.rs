@@ -8,6 +8,7 @@ pub mod handler;
 pub mod types;
 pub mod xroute;
 pub mod discovery;
+pub mod connectivity;
 
 // Re-export main XRoutes components
 pub use behaviour::{XRoutesDiscoveryBehaviour, XRoutesDiscoveryBehaviourEvent, KadStats};
@@ -17,8 +18,9 @@ pub use events::XRoutesEvent;
 pub use handler::XRoutesHandler;
 pub use types::{BootstrapNodeInfo, BootstrapError};
 pub use xroute::{XRouteRole, XROUTE_CLIENT_PROTOCOL, XROUTE_SERVER_PROTOCOL};
+pub use connectivity::{ConnectivityBehaviour, ConnectivityCommand, ConnectivityEvent, RelayClientStats, RelayServerStats};
 
-/// Configuration for XRoutes discovery system
+/// Configuration for XRoutes discovery and connectivity system
 #[derive(Debug, Clone)]
 pub struct XRoutesConfig {
     /// Enable mDNS local discovery
@@ -29,6 +31,12 @@ pub struct XRoutesConfig {
     pub kad_server_mode: bool,
     /// Initial role for this node
     pub initial_role: XRouteRole,
+    /// Enable relay client functionality
+    pub enable_relay_client: bool,
+    /// Enable relay server functionality
+    pub enable_relay_server: bool,
+    /// Known relay server addresses (for explicit connections)
+    pub known_relay_servers: Vec<libp2p::Multiaddr>,
 }
 
 impl Default for XRoutesConfig {
@@ -38,6 +46,9 @@ impl Default for XRoutesConfig {
             enable_kad: true,
             kad_server_mode: false,
             initial_role: XRouteRole::default(),
+            enable_relay_client: true,
+            enable_relay_server: false,
+            known_relay_servers: Vec::new(),
         }
     }
 }
@@ -72,6 +83,30 @@ impl XRoutesConfig {
         self
     }
 
+    /// Enable relay client functionality
+    pub fn with_relay_client(mut self, enable: bool) -> Self {
+        self.enable_relay_client = enable;
+        self
+    }
+
+    /// Enable relay server functionality
+    pub fn with_relay_server(mut self, enable: bool) -> Self {
+        self.enable_relay_server = enable;
+        self
+    }
+
+    /// Add known relay server addresses
+    pub fn with_relay_servers(mut self, servers: Vec<libp2p::Multiaddr>) -> Self {
+        self.known_relay_servers = servers;
+        self
+    }
+
+    /// Add a single relay server address
+    pub fn with_relay_server_addr(mut self, server: libp2p::Multiaddr) -> Self {
+        self.known_relay_servers.push(server);
+        self
+    }
+
     /// Create configuration for a bootstrap server
     pub fn bootstrap_server() -> Self {
         Self {
@@ -79,6 +114,9 @@ impl XRoutesConfig {
             enable_kad: true,
             kad_server_mode: true,
             initial_role: XRouteRole::Server,
+            enable_relay_client: true,
+            enable_relay_server: false,
+            known_relay_servers: Vec::new(),
         }
     }
 
@@ -89,6 +127,9 @@ impl XRoutesConfig {
             enable_kad: true,
             kad_server_mode: false,
             initial_role: XRouteRole::Client,
+            enable_relay_client: true,
+            enable_relay_server: false,
+            known_relay_servers: Vec::new(),
         }
     }
 
@@ -99,6 +140,9 @@ impl XRoutesConfig {
             enable_kad: false,
             kad_server_mode: false,
             initial_role: XRouteRole::Client,
+            enable_relay_client: true,
+            enable_relay_server: false,
+            known_relay_servers: Vec::new(),
         }
     }
 
@@ -109,6 +153,9 @@ impl XRoutesConfig {
             enable_kad: true,
             kad_server_mode: false,
             initial_role: XRouteRole::Client,
+            enable_relay_client: true,
+            enable_relay_server: false,
+            known_relay_servers: Vec::new(),
         }
     }
 
@@ -119,12 +166,20 @@ impl XRoutesConfig {
             enable_kad: false,
             kad_server_mode: false,
             initial_role: XRouteRole::Unknown,
+            enable_relay_client: false,
+            enable_relay_server: false,
+            known_relay_servers: Vec::new(),
         }
     }
 
     /// Check if any discovery mechanism is enabled
     pub fn is_discovery_enabled(&self) -> bool {
         self.enable_mdns || self.enable_kad
+    }
+
+    /// Check if XRoutes should be enabled (discovery or connectivity features)
+    pub fn is_xroutes_enabled(&self) -> bool {
+        self.is_discovery_enabled() || self.enable_relay_client || self.enable_relay_server
     }
 
     /// Validate the configuration

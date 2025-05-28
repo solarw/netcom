@@ -2,46 +2,15 @@
 
 use libp2p::{Multiaddr, PeerId};
 
-use super::{discovery::events::DiscoveryEvent, xroute::XRouteRole};
+use super::{discovery::events::DiscoveryEvent, connectivity::events::ConnectivityEvent, xroute::XRouteRole};
 
 #[derive(Debug, Clone)]
 pub enum XRoutesEvent {
-    // mDNS events
-    //MdnsEnabled,
-    //MdnsDisabled,
-    //MdnsPeerDiscovered {
-        //peer_id: PeerId,
-        //addresses: Vec<Multiaddr>,
-    //},
-    //MdnsPeerExpired {
-        //peer_id: PeerId,
-    //},
-
-    // all mdns events in discovery events
-    DiscoveryEvent (DiscoveryEvent),
+    // Discovery events (includes mDNS and Kademlia)
+    DiscoveryEvent(DiscoveryEvent),
     
-    // Kademlia events
-    KadEnabled,
-    KadDisabled,
-    KadAddressAdded {
-        peer_id: PeerId,
-        addr: Multiaddr,
-    },
-    KadRoutingUpdated {
-        peer_id: PeerId,
-        addresses: Vec<Multiaddr>,
-    },
-    KadBootstrapCompleted {
-        bootstrap_peers: Vec<PeerId>,
-    },
-    KadQueryCompleted {
-        query_id: String,
-        result: String,
-    },
-    KadPeerDiscovered {
-        peer_id: PeerId,
-        addresses: Vec<Multiaddr>,
-    },
+    // Connectivity events (includes relay)
+    ConnectivityEvent(ConnectivityEvent),
     
     // XRoute role events
     RoleChanged {

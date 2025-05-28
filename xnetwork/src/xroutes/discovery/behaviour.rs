@@ -45,6 +45,15 @@ impl DiscoveryBehaviour {
             }
         }
     }
+
+    /// Handle identify events and forward to appropriate discovery protocols
+    pub fn handle_identify_event(&mut self, event: &libp2p::identify::Event) {
+        // Forward identify events to kad behaviour for processing
+        self.kad.handle_identify_event(event);
+        
+        // Could also forward to mDNS if needed in the future
+        // self.mdns.handle_identify_event(event);
+    }
 }
 
 impl NetworkBehaviour for DiscoveryBehaviour {

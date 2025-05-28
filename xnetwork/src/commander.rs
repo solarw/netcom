@@ -338,7 +338,11 @@ impl Commander {
 
     /// Legacy method - kept for compatibility
     pub async fn find_peer_addresses(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.xroutes.find_peer_addresses(peer_id).await
+        // Use advanced search with 30 second timeout for compatibility
+        match self.xroutes.find_peer_addresses_advanced(peer_id, 30).await {
+            Ok(_addresses) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Bootstrap Kademlia DHT

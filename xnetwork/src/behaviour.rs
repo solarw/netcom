@@ -55,6 +55,9 @@ pub fn make_behaviour(
             } else {
                 crate::xroutes::XRouteRole::Client
             },
+            enable_relay_client: true,
+            enable_relay_server: false,
+            known_relay_servers: Vec::new(),
         };
         
         match XRoutesDiscoveryBehaviour::new(key, config) {
