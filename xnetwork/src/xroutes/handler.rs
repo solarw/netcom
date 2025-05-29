@@ -2,12 +2,12 @@
 
 use libp2p::{Multiaddr, PeerId, Swarm, identity, kad};
 use std::collections::HashMap;
-use tracing::{info};
+use tracing::info;
 
 use crate::behaviour::NodeBehaviour;
 
-use super::discovery::events::DiscoveryEvent;
 use super::connectivity::behaviour::ConnectivityBehaviourEvent;
+use super::discovery::events::DiscoveryEvent;
 use super::{
     XRoutesConfig,
     behaviour::XRoutesDiscoveryBehaviourEvent,
@@ -89,7 +89,8 @@ impl XRoutesHandler {
             }
             XRoutesDiscoveryBehaviourEvent::Connectivity(connectivity_event) => {
                 // Handle connectivity events
-                self.handle_connectivity_event(connectivity_event, swarm).await
+                self.handle_connectivity_event(connectivity_event, swarm)
+                    .await
             }
         }
     }
@@ -112,11 +113,6 @@ impl XRoutesHandler {
     ) -> Vec<XRoutesEvent> {
         // Convert connectivity events to XRoutes events
         match event {
-            ConnectivityBehaviourEvent::RelayClient(relay_client_event) => {
-                // For now, we don't emit relay client events as XRoutes events
-                // In the future, we might want to convert some relay events
-                vec![]
-            }
             ConnectivityBehaviourEvent::RelayServer(relay_server_event) => {
                 // For now, we don't emit relay server events as XRoutes events
                 // In the future, we might want to convert some relay events

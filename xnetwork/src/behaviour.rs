@@ -1,15 +1,14 @@
 // src/behaviour.rs
 
 use libp2p::{
-    identify, identity, ping,
-    swarm::{behaviour::toggle::Toggle, NetworkBehaviour},
+    identify, identity, ping, relay, swarm::{behaviour::toggle::Toggle, NetworkBehaviour}
 };
 
 use xauth::behaviours::PorAuthBehaviour;
 use xauth::por::por::ProofOfRepresentation;
 use xstream::behaviour::XStreamNetworkBehaviour;
 
-use crate::xroutes::{XRoutesDiscoveryBehaviour, XRoutesDiscoveryBehaviourEvent, XRoutesConfig};
+use crate::xroutes::{XRoutesConfig, XRoutesDiscoveryBehaviour, XRoutesDiscoveryBehaviourEvent};
 
 // Main node behaviour combining all protocols
 #[derive(NetworkBehaviour)]

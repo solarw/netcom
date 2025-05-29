@@ -1,7 +1,7 @@
 // src/node.rs
 
 use libp2p::futures::StreamExt;
-use libp2p::{identify, identity, Multiaddr, PeerId, Swarm};
+use libp2p::{identify, identity, noise, Multiaddr, PeerId, Swarm, relay, tcp, yamux};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -88,11 +88,11 @@ impl NetworkNode {
         } else {
             None
         };
-
         // Create a SwarmBuilder with QUIC transport
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
             .with_quic()
+            .with_dns()?
             .with_behaviour(|key| make_behaviour(key, por, enable_mdns, kad_server_mode))?
             .with_swarm_config(|c| {
                 c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
@@ -816,6 +816,7 @@ impl NetworkNode {
                     }
                 }
             }
+
         }
     }
 

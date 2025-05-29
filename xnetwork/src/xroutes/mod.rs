@@ -18,7 +18,7 @@ pub use events::XRoutesEvent;
 pub use handler::XRoutesHandler;
 pub use types::{BootstrapNodeInfo, BootstrapError};
 pub use xroute::{XRouteRole, XROUTE_CLIENT_PROTOCOL, XROUTE_SERVER_PROTOCOL};
-pub use connectivity::{ConnectivityBehaviour, ConnectivityCommand, ConnectivityEvent, RelayClientStats, RelayServerStats};
+pub use connectivity::{ConnectivityBehaviour, ConnectivityCommand, ConnectivityEvent, RelayServerStats};
 
 /// Configuration for XRoutes discovery and connectivity system
 #[derive(Debug, Clone)]

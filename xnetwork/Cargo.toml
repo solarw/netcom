@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics']}
+libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics', 'tcp', 'yamux']}
 
 tokio = { version = "1.35", features = ["full"] }
 tracing = "0.1"
@@ -13,3 +13,4 @@ libp2p-stream = { path = "/home/solarw/hyperion/rust-libp2p/protocols/stream"}
 
 xauth = {path = "/home/solarw/hyperion/netcom/protocols/xauth"}
 xstream = {path = "/home/solarw/hyperion/netcom/protocols/xstream"}
+yamux = "0.13.5"
