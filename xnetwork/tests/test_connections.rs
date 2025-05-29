@@ -22,7 +22,7 @@ async fn test_basic_connection_establishment() {
     
     let result = tokio::time::timeout(test_timeout, async {
         // Создаем два узла
-        let (mut server_node, server_commander, mut server_events, server_peer_id) = 
+        let (mut server_node, server_commander, mut server_events, _server_peer_id) = 
             create_test_node_with_config(XRoutesConfig::client()).await
             .expect("Failed to create server node");
         
@@ -60,16 +60,17 @@ async fn test_basic_connection_establishment() {
         println!("Connect result: {:?}", connect_result);
         
         // Ждем события подключения или таймаута
+        let target_peer_id = _server_peer_id;
         let connection_established = tokio::time::timeout(Duration::from_secs(3), async {
             while let Some(event) = client_events.recv().await {
                 match event {
                     NetworkEvent::PeerConnected { peer_id } => {
-                        if peer_id == server_peer_id {
+                        if peer_id == target_peer_id {
                             return true;
                         }
                     }
                     NetworkEvent::ConnectionOpened { peer_id, .. } => {
-                        if peer_id == server_peer_id {
+                        if peer_id == target_peer_id {
                             return true;
                         }
                     }
@@ -91,7 +92,7 @@ async fn test_basic_connection_establishment() {
             println!("Found connection: {:?} -> {} (direction: {:?}, active: {})", 
                      connection.connection_id, connection.peer_id, connection.direction, connection.is_active());
             
-            if connection.peer_id == server_peer_id {
+            if connection.peer_id == target_peer_id {
                 println!("✅ Connection verified successfully");
             }
         } else {
