@@ -19,6 +19,7 @@ pub struct NodeBehaviour {
     pub xstream: XStreamNetworkBehaviour,
     // XRoutes discovery is optional - use Toggle to make it optional
     pub xroutes: libp2p::swarm::behaviour::toggle::Toggle<XRoutesDiscoveryBehaviour>,
+    pub relay_client: relay::client::Behaviour,
 }
 
 /// Create the main node behaviour
@@ -27,6 +28,7 @@ pub fn make_behaviour(
     por: ProofOfRepresentation,
     enable_mdns: bool,
     kad_server_mode: bool,
+    relay_client: relay::client::Behaviour,
 ) -> Result<NodeBehaviour, Box<dyn std::error::Error + Send + Sync>> {
     // Set up the Identify protocol
     let identify = identify::Behaviour::new(
@@ -76,6 +78,7 @@ pub fn make_behaviour(
         por_auth,
         xstream,
         xroutes,
+        relay_client
     })
 }
 
@@ -84,6 +87,7 @@ pub fn make_behaviour_with_config(
     key: &identity::Keypair,
     por: ProofOfRepresentation,
     xroutes_config: Option<XRoutesConfig>,
+    relay_client: relay::client::Behaviour,
 ) -> Result<NodeBehaviour, Box<dyn std::error::Error + Send + Sync>> {
     // Set up the Identify protocol
     let identify = identify::Behaviour::new(
@@ -119,5 +123,6 @@ pub fn make_behaviour_with_config(
         por_auth,
         xstream,
         xroutes,
+        relay_client
     })
 }

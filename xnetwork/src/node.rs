@@ -92,8 +92,8 @@ impl NetworkNode {
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
             .with_quic()
-            .with_dns()?
-            .with_behaviour(|key| make_behaviour(key, por, enable_mdns, kad_server_mode))?
+            .with_relay_client(noise::Config::new, yamux::Config::default)?
+            .with_behaviour(|key, relay_client| make_behaviour(key, por, enable_mdns, kad_server_mode, relay_client))?
             .with_swarm_config(|c| {
                 c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
             })
@@ -156,8 +156,9 @@ impl NetworkNode {
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
             .with_quic()
-            .with_behaviour(|key| {
-                crate::behaviour::make_behaviour_with_config(key, por, xroutes_config)
+            .with_relay_client(noise::Config::new, yamux::Config::default)?
+            .with_behaviour(|key, relay_client| {
+                crate::behaviour::make_behaviour_with_config(key, por, xroutes_config, relay_client)
             })?
             .with_swarm_config(|c| {
                 c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
@@ -815,6 +816,9 @@ impl NetworkNode {
                             .await;
                     }
                 }
+            }
+
+            NodeBehaviourEvent::RelayClient(_event) => {
             }
 
         }

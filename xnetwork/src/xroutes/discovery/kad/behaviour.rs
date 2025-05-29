@@ -62,7 +62,6 @@ impl KadBehaviour {
             kad_config.set_query_timeout(Duration::from_secs(20));
             kad_config.disjoint_query_paths(true);
             kad_config.set_kbucket_inserts(kad::BucketInserts::OnConnected);
-            kad_config.set_automatic_bootstrap_throttle(None);
             kad_config.set_replication_factor(NonZeroUsize::new(5).unwrap());
         } else {
             // Client mode settings
@@ -72,7 +71,6 @@ impl KadBehaviour {
 
         kad_config.set_kbucket_inserts(kad::BucketInserts::Manual);
         kad_config.set_periodic_bootstrap_interval(None);
-        kad_config.set_automatic_bootstrap_throttle(None);
 
         // Create Kademlia behaviour
         let kad_store = kad::store::MemoryStore::new(key.public().to_peer_id());
