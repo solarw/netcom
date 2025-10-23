@@ -20,6 +20,10 @@ pub enum NetworkCommand {
         port: u16,
         response: oneshot::Sender<Result<Multiaddr, Box<dyn Error + Send + Sync>>>,
     },
+    ListenOn {
+        addr: Multiaddr,
+        response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
+    },
     Connect {
         addr: Multiaddr,
         response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,

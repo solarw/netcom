@@ -11,7 +11,7 @@ use xauth::definitions::AuthResult;
 use xstream::xstream::XStream;
 
 pub struct Commander {
-    cmd_tx: mpsc::Sender<NetworkCommand>,
+    pub cmd_tx: mpsc::Sender<NetworkCommand>,
     pub xroutes: XRoutesCommander,
 }
 
@@ -25,6 +25,38 @@ impl Commander {
     }
 
     /// Core connection methods
+    pub async fn listen_on(
+        &self,
+        addr: Multiaddr,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::ListenOn {
+                addr: addr.clone(),
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send listen on command: {}", e).into()
+            })?;
+
+        match response_rx.await? {
+            Ok(_) => {
+                println!("Server is listening on {}", addr);
+                return Ok(());
+            }
+            Err(e) => {
+                println!("Failed to listen: {}", e);
+                return Err(format!(
+                    "Failed to listen on {}: {}",
+                    addr, e
+                )
+                .into());
+            }
+        }
+    }
+
     pub async fn listen_port(
         &self,
         host: Option<String>,

@@ -434,6 +434,19 @@ impl NetworkNode {
                 }
             }
 
+            NetworkCommand::ListenOn { addr, response } => {
+                match self.swarm.listen_on(addr.clone()) {
+                    Ok(_) => {
+                        info!("Started listening on {}", addr);
+                        let _ = response.send(Ok(()));
+                    }
+                    Err(err) => {
+                        error!("Failed to listen on {addr}: {err}");
+                        let _ = response.send(Err(Box::new(err)));
+                    }
+                }
+            }
+
             NetworkCommand::Connect { addr, response } => match self.swarm.dial(addr.clone()) {
                 Ok(_) => {
                     info!("Dialing {addr}");
@@ -819,6 +832,11 @@ impl NetworkNode {
             }
 
             NodeBehaviourEvent::RelayClient(_event) => {
+                // Handle relay client events if needed
+            }
+
+            NodeBehaviourEvent::RelayServer(_event) => {
+                // Handle relay server events if needed
             }
 
         }
