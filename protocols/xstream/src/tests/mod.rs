@@ -51,3 +51,15 @@ pub mod connection_handler_substream_tests;
 
 #[cfg(test)]
 pub mod connection_handler_outbound_tests;
+
+#[cfg(test)]
+pub mod utils_tests;
+
+#[cfg(test)]
+pub mod xstream_error_comprehensive_tests;
+
+#[cfg(test)]
+pub mod xstream_error_coverage_tests;
+
+#[cfg(test)]
+pub mod pending_streams_coverage_tests;
