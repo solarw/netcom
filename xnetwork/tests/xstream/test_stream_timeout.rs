@@ -4,8 +4,7 @@ use std::time::Duration;
 use libp2p::PeerId;
 use xnetwork::{XRoutesConfig, events::NetworkEvent};
 
-mod common;
-use common::*;
+use crate::common::*;
 
 #[tokio::test]
 async fn test_open_stream_between_connected_peers() {

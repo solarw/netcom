@@ -8,8 +8,7 @@ use xnetwork::{
     events::NetworkEvent,
 };
 
-mod common;
-use common::*;
+use crate::common::*;
 
 #[tokio::test]
 async fn test_find_peer_local_only() {

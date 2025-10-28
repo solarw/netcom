@@ -13,12 +13,32 @@ cache-persistence = "cargo-metadata"
 
 # Группировка тестов по приоритетам
 [[profile.default.overrides]]
-filter = 'test(test_node_creation_and_startup) | test(test_peer_information) | test(test_node_diagnostics)'
+filter = 'package(xnetwork) & test(/node_core/)'
 test-timeout = "10s"
 
 [[profile.default.overrides]]
-filter = 'test(test_basic_connection_establishment) | test(test_connection_with_timeout_success) | test(test_disconnect_peer)'
+filter = 'package(xnetwork) & test(/core_connections/)'
 test-timeout = "15s"
+
+[[profile.default.overrides]]
+filter = 'package(xnetwork) & test(/bootstrap/)'
+test-timeout = "15s"
+
+[[profile.default.overrides]]
+filter = 'package(xnetwork) & test(/xauth/)'
+test-timeout = "15s"
+
+[[profile.default.overrides]]
+filter = 'package(xnetwork) & test(/xstream/)'
+test-timeout = "20s"
+
+[[profile.default.overrides]]
+filter = 'package(xnetwork) & test(/discovery/)'
+test-timeout = "25s"
+
+[[profile.default.overrides]]
+filter = 'package(xnetwork) & test(/connectivity/)'
+test-timeout = "30s"
 
 # Профиль для быстрого тестирования
 [profile.ci]

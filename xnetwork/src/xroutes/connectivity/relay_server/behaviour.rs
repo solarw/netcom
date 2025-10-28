@@ -256,6 +256,7 @@ impl RelayServerBehaviour {
             relay::Event::CircuitReqDenied {
                 src_peer_id,
                 dst_peer_id,
+                status: _,
             } => {
                 self.stats.failed_circuit_requests += 1;
 

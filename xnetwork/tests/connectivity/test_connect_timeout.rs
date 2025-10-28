@@ -5,8 +5,7 @@ use std::str::FromStr;
 use libp2p::Multiaddr;
 use xnetwork::XRoutesConfig;
 
-mod common;
-use common::*;
+use crate::common::*;
 
 #[tokio::test]
 async fn test_connect_with_valid_timeout() {

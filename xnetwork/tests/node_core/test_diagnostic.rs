@@ -3,8 +3,7 @@
 use std::time::Duration;
 use xnetwork::XRoutesConfig;
 
-mod common;
-use common::*;
+use crate::common::*;
 
 #[tokio::test]
 async fn test_node_lifecycle() {
