@@ -8,7 +8,7 @@ name = "pyxnetwork"
 crate-type = ["cdylib"]
 
 [dependencies]
-libp2p = {version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics']}
+libp2p = {version = "0.56", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics']}
 
 # PyO3 dependencies for Python bindings
 pyo3 = { version = "^0.20", features = ["extension-module"] }

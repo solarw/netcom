@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # Используйте точно такую же версию libp2p, как в xstream
-libp2p = { version = "0.55", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics'] }
+libp2p = { version = "0.56", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics'] }
 
 # Используйте тот же xstream
 xstream = { path = "/home/solarw/hyperion/netcom/protocols/xstream" }
