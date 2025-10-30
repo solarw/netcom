@@ -13,6 +13,14 @@ pub struct XRoutesCommander {
     cmd_tx: mpsc::Sender<crate::commands::NetworkCommand>,
 }
 
+impl Clone for XRoutesCommander {
+    fn clone(&self) -> Self {
+        XRoutesCommander {
+            cmd_tx: self.cmd_tx.clone(),
+        }
+    }
+}
+
 impl XRoutesCommander {
     pub fn new(cmd_tx: mpsc::Sender<crate::commands::NetworkCommand>) -> Self {
         Self { cmd_tx }

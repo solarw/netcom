@@ -1,7 +1,7 @@
 // src/behaviour.rs
 
 use libp2p::{
-    identify, identity, ping, relay, swarm::{behaviour::toggle::Toggle, NetworkBehaviour}
+    identify, identity, ping, swarm::{behaviour::toggle::Toggle, NetworkBehaviour}
 };
 
 use xauth::behaviours::PorAuthBehaviour;
@@ -15,12 +15,10 @@ use crate::xroutes::{XRoutesConfig, XRoutesDiscoveryBehaviour, XRoutesDiscoveryB
 pub struct NodeBehaviour {
     pub identify: identify::Behaviour,
     pub ping: ping::Behaviour,
-    pub por_auth: PorAuthBehaviour,
+    pub por_auth: libp2p::swarm::behaviour::toggle::Toggle<PorAuthBehaviour>,
     pub xstream: XStreamNetworkBehaviour,
     // XRoutes discovery is optional - use Toggle to make it optional
     pub xroutes: libp2p::swarm::behaviour::toggle::Toggle<XRoutesDiscoveryBehaviour>,
-    pub relay_client: relay::client::Behaviour,
-    pub relay_server: libp2p::swarm::behaviour::toggle::Toggle<relay::Behaviour>,
 }
 
 /// Create the main node behaviour
@@ -29,7 +27,6 @@ pub fn make_behaviour(
     por: ProofOfRepresentation,
     enable_mdns: bool,
     kad_server_mode: bool,
-    relay_client: relay::client::Behaviour,
 ) -> Result<NodeBehaviour, Box<dyn std::error::Error + Send + Sync>> {
     // Set up the Identify protocol
     let identify = identify::Behaviour::new(
@@ -41,7 +38,7 @@ pub fn make_behaviour(
     let ping = ping::Behaviour::new(ping::Config::default());
 
     // Set up PoR authentication behavior
-    let por_auth = PorAuthBehaviour::new(por);
+    let por_auth = libp2p::swarm::behaviour::toggle::Toggle::from(Some(PorAuthBehaviour::new(por)));
 
     // Set up stream behavior
     let xstream = XStreamNetworkBehaviour::new();
@@ -57,9 +54,6 @@ pub fn make_behaviour(
             } else {
                 crate::xroutes::XRouteRole::Client
             },
-            enable_relay_client: true,
-            enable_relay_server: false,
-            known_relay_servers: Vec::new(),
         };
         
         match XRoutesDiscoveryBehaviour::new(key, config) {
@@ -73,17 +67,12 @@ pub fn make_behaviour(
         libp2p::swarm::behaviour::toggle::Toggle::from(None)
     };
 
-    // Set up relay server (disabled by default)
-    let relay_server = libp2p::swarm::behaviour::toggle::Toggle::from(None);
-
     Ok(NodeBehaviour {
         identify,
         ping,
         por_auth,
         xstream,
         xroutes,
-        relay_client,
-        relay_server
     })
 }
 
@@ -92,7 +81,6 @@ pub fn make_behaviour_with_config(
     key: &identity::Keypair,
     por: ProofOfRepresentation,
     xroutes_config: Option<XRoutesConfig>,
-    relay_client: relay::client::Behaviour,
 ) -> Result<NodeBehaviour, Box<dyn std::error::Error + Send + Sync>> {
     // Set up the Identify protocol
     let identify = identify::Behaviour::new(
@@ -104,7 +92,7 @@ pub fn make_behaviour_with_config(
     let ping = ping::Behaviour::new(ping::Config::default());
 
     // Set up PoR authentication behavior
-    let por_auth = PorAuthBehaviour::new(por);
+    let por_auth = libp2p::swarm::behaviour::toggle::Toggle::from(Some(PorAuthBehaviour::new(por)));
 
     // Set up stream behavior
     let xstream = XStreamNetworkBehaviour::new();
@@ -122,33 +110,11 @@ pub fn make_behaviour_with_config(
         libp2p::swarm::behaviour::toggle::Toggle::from(None)
     };
 
-    // Set up relay server if enabled in config
-    let relay_server = if let Some(ref config) = xroutes_config {
-        if config.enable_relay_server {
-            let local_peer_id = key.public().to_peer_id();
-            let relay_config = relay::Config {
-                max_reservations: 128,
-                max_circuits: 16,
-                reservation_duration: std::time::Duration::from_secs(3600),
-                max_circuit_duration: std::time::Duration::from_secs(120),
-                ..Default::default()
-            };
-            let relay_behaviour = relay::Behaviour::new(local_peer_id, relay_config);
-            libp2p::swarm::behaviour::toggle::Toggle::from(Some(relay_behaviour))
-        } else {
-            libp2p::swarm::behaviour::toggle::Toggle::from(None)
-        }
-    } else {
-        libp2p::swarm::behaviour::toggle::Toggle::from(None)
-    };
-
     Ok(NodeBehaviour {
         identify,
         ping,
         por_auth,
         xstream,
         xroutes,
-        relay_client,
-        relay_server
     })
 }

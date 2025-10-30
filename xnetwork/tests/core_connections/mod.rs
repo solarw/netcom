@@ -3,3 +3,4 @@
 pub mod test_connection_events;
 pub mod test_connection_info;
 pub mod test_connection_management;
+pub mod test_multiple_connections;

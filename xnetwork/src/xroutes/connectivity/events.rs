@@ -1,14 +1,5 @@
-use super::relay_server::events::RelayServerEvent;
-
 #[derive(Debug, Clone)]
+/// Connectivity events placeholder
+/// (Relay functionality has been removed from the project)
 pub enum ConnectivityEvent {
-    /// Relay server events
-    RelayServer(RelayServerEvent),
-}
-
-
-impl From<RelayServerEvent> for ConnectivityEvent {
-    fn from(event: RelayServerEvent) -> Self {
-        ConnectivityEvent::RelayServer(event)
-    }
 }

@@ -54,6 +54,8 @@ pub async fn create_test_node_with_config(
         key,
         por,
         Some(config),
+        None, // cmd_queue_size
+        None, // event_queue_size
     ).await?;
 
     let commander = Commander::new(cmd_tx);
@@ -172,60 +174,4 @@ pub async fn assert_connection_exists(
                                  connection_id, info.connection_state)),
         None => Err(format!("Connection {:?} not found", connection_id)),
     }
-}
-
-/// Создает пару узлов и устанавливает соединение между ними
-#[allow(dead_code)]
-pub async fn create_connected_pair() -> Result<(
-    tokio::task::JoinHandle<()>, // server handle
-    tokio::task::JoinHandle<()>, // client handle
-    Commander,                   // server commander
-    Commander,                   // client commander
-    PeerId,                     // server peer id
-    PeerId,                     // client peer id
-    libp2p::Multiaddr,          // server address
-), Box<dyn std::error::Error + Send + Sync>> {
-    // Создаем сервер
-    let (mut server_node, server_commander, mut server_events, server_peer_id) = 
-        create_test_node_with_config(XRoutesConfig::client()).await?;
-    
-    let server_handle = tokio::spawn(async move {
-        server_node.run_with_cleanup_interval(Duration::from_secs(1)).await;
-    });
-    
-    // Запускаем слушатель
-    server_commander.listen_port(Some("127.0.0.1".to_string()), 0).await?;
-    
-    let server_addr = tokio::time::timeout(Duration::from_secs(5), async {
-        while let Some(event) = server_events.recv().await {
-            if let NetworkEvent::ListeningOnAddress { full_addr: Some(addr), .. } = event {
-                return addr;
-            }
-        }
-        panic!("No server address");
-    }).await?;
-    
-    // Создаем клиента
-    let (mut client_node, client_commander, _client_events, client_peer_id) = 
-        create_test_node_with_config(XRoutesConfig::client()).await?;
-    
-    let client_handle = tokio::spawn(async move {
-        client_node.run_with_cleanup_interval(Duration::from_secs(1)).await;
-    });
-    
-    // Подключаемся
-    client_commander.connect(server_addr.clone()).await.ok(); // Игнорируем ошибки в тестовой среде
-    
-    // Даем время соединению установиться
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    
-    Ok((
-        server_handle,
-        client_handle,
-        server_commander,
-        client_commander,
-        server_peer_id,
-        client_peer_id,
-        server_addr,
-    ))
 }

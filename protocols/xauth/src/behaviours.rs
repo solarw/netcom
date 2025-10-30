@@ -165,6 +165,7 @@ impl PorAuthBehaviour {
                     ) {
                         // Generate mutual auth success event
                         if let Some(metadata) = conn.get_metadata() {
+                            println!("✅ MUTUAL AUTH SUCCESS: Generating MutualAuthSuccess event for peer {:?} on connection {:?}", peer_id, connection_id);
                             self.pending_events.push_back(ToSwarm::GenerateEvent(
                                 PorAuthEvent::MutualAuthSuccess {
                                     peer_id,
@@ -173,7 +174,12 @@ impl PorAuthBehaviour {
                                     metadata,
                                 },
                             ));
+                        } else {
+                            println!("⚠️  MUTUAL AUTH: No metadata available for peer {:?} on connection {:?}", peer_id, connection_id);
                         }
+                    } else {
+                        println!("🔍 MUTUAL AUTH CHECK: Combined state is {:?} for peer {:?} on connection {:?}", 
+                                conn.get_combined_state(), peer_id, connection_id);
                     }
                 }
                 AuthResult::Error(reason) => {
@@ -292,6 +298,7 @@ impl PorAuthBehaviour {
                     if is_fully_authenticated {
                         // Generate mutual auth success event
                         if let Some(metadata) = metadata_opt {
+                            println!("✅ MUTUAL AUTH SUCCESS: Generating MutualAuthSuccess event for peer {:?} on connection {:?}", peer_id, connection_id);
                             self.pending_events.push_back(ToSwarm::GenerateEvent(
                                 PorAuthEvent::MutualAuthSuccess {
                                     peer_id,
@@ -300,7 +307,12 @@ impl PorAuthBehaviour {
                                     metadata,
                                 },
                             ));
+                        } else {
+                            println!("⚠️  MUTUAL AUTH: No metadata available for peer {:?} on connection {:?}", peer_id, connection_id);
                         }
+                    } else {
+                        println!("🔍 MUTUAL AUTH CHECK: Combined state is {:?} for peer {:?} on connection {:?}", 
+                                conn.get_combined_state(), peer_id, connection_id);
                     }
                 }
                 AuthResult::Error(reason) => {

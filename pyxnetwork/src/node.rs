@@ -126,7 +126,6 @@ impl Node {
                         while let Some(event) = event_rx.recv().await {
                             // Print the event for debugging
                             debug!("Received event: {:?}", event);
-
                             // Add the event to the queue
                             event_queue_clone.lock().await.push_back(event);
                         }

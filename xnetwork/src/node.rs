@@ -1,7 +1,7 @@
 // src/node.rs
 
 use libp2p::futures::StreamExt;
-use libp2p::{identify, identity, noise, Multiaddr, PeerId, Swarm, relay, tcp, yamux};
+use libp2p::{identify, identity, Multiaddr, PeerId, Swarm};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -80,20 +80,21 @@ impl NetworkNode {
                 } else {
                     crate::xroutes::XRouteRole::Client
                 },
-                enable_relay_client: true,
-                enable_relay_server: false,
-                known_relay_servers: Vec::new(),
             };
             Some(XRoutesHandler::new(config))
         } else {
             None
         };
-        // Create a SwarmBuilder with QUIC transport
+        // Create Swarm without relay - use explicit transport configuration
+        let transport = libp2p::quic::tokio::Transport::new(libp2p::quic::Config::new(&local_key));
+        
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
-            .with_quic()
-            .with_relay_client(noise::Config::new, yamux::Config::default)?
-            .with_behaviour(|key, relay_client| make_behaviour(key, por, enable_mdns, kad_server_mode, relay_client))?
+            .with_other_transport(|_key| transport)
+            .expect("Failed to create QUIC transport")
+            .with_behaviour(|key| {
+                crate::behaviour::make_behaviour(key, por, enable_mdns, kad_server_mode)
+            })?
             .with_swarm_config(|c| {
                 c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
             })
@@ -129,6 +130,8 @@ impl NetworkNode {
         local_key: identity::Keypair,
         por: xauth::por::por::ProofOfRepresentation,
         xroutes_config: Option<XRoutesConfig>,
+        cmd_queue_size: Option<usize>,
+        event_queue_size: Option<usize>,
     ) -> Result<
         (
             Self,
@@ -152,22 +155,27 @@ impl NetworkNode {
             None
         };
 
-        // Create a SwarmBuilder with QUIC transport
+        // Create Swarm without relay - use custom QUIC config to disable relay
+        let quic_config = libp2p::quic::Config::new(&local_key);
+        let quic_transport = libp2p::quic::tokio::Transport::new(quic_config);
+        
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
-            .with_quic()
-            .with_relay_client(noise::Config::new, yamux::Config::default)?
-            .with_behaviour(|key, relay_client| {
-                crate::behaviour::make_behaviour_with_config(key, por, xroutes_config, relay_client)
+            .with_other_transport(|_key| quic_transport)
+            .expect("Failed to create QUIC transport")
+            .with_behaviour(|key| {
+                crate::behaviour::make_behaviour_with_config(key, por, xroutes_config.clone())
             })?
             .with_swarm_config(|c| {
                 c.with_idle_connection_timeout(std::time::Duration::from_secs(60000))
             })
             .build();
 
-        // Set up communication channels
-        let (cmd_tx, cmd_rx) = mpsc::channel(100);
-        let (event_tx, event_rx) = mpsc::channel(100);
+        // Set up communication channels with custom sizes
+        let cmd_queue_size = cmd_queue_size.unwrap_or(100);
+        let event_queue_size = event_queue_size.unwrap_or(100);
+        let (cmd_tx, cmd_rx) = mpsc::channel(cmd_queue_size);
+        let (event_tx, event_rx) = mpsc::channel(event_queue_size);
 
         Ok((
             Self {
@@ -389,26 +397,49 @@ impl NetworkNode {
             } => {
                 info!("Submitting PoR verification result for connection {connection_id}");
 
-                match self
-                    .swarm
-                    .behaviour_mut()
-                    .por_auth
-                    .submit_por_verification_result(connection_id, result)
-                {
-                    Ok(_) => info!("✅ Successfully submitted verification result"),
-                    Err(e) => warn!("❌ Failed to submit verification result: {}", e),
+                if let Some(por_auth) = self.swarm.behaviour_mut().por_auth.as_mut() {
+                    match por_auth.submit_por_verification_result(connection_id, result)
+                    {
+                        Ok(_) => info!("✅ Successfully submitted verification result"),
+                        Err(e) => warn!("❌ Failed to submit verification result: {}", e),
+                    }
+                } else {
+                    warn!("❌ XAuth is disabled, cannot submit verification result");
                 }
             }
 
             NetworkCommand::IsPeerAuthenticated { peer_id, response } => {
                 let is_authenticated = self.authenticated_peers.contains(&peer_id)
-                    || self
-                        .swarm
-                        .behaviour()
-                        .por_auth
-                        .is_peer_authenticated(&peer_id);
+                    || if let Some(por_auth) = self.swarm.behaviour().por_auth.as_ref() {
+                        por_auth.is_peer_authenticated(&peer_id)
+                    } else {
+                        false
+                    };
 
                 let _ = response.send(is_authenticated);
+            }
+
+            // NEW: Enhanced authentication commands
+            NetworkCommand::GetAuthenticatedPeers { response } => {
+                let mut authenticated_peers = self.authenticated_peers.clone();
+                
+                // Also include peers authenticated through PorAuthBehaviour
+                if let Some(por_auth) = self.swarm.behaviour().por_auth.as_ref() {
+                    // Note: PorAuthBehaviour doesn't expose a method to get all authenticated peers
+                    // So we rely on our internal tracking and events
+                }
+                
+                let _ = response.send(authenticated_peers.into_iter().collect());
+            }
+
+            NetworkCommand::GetAuthMetadata { peer_id, response } => {
+                let metadata = if let Some(por_auth) = self.swarm.behaviour().por_auth.as_ref() {
+                    por_auth.get_peer_metadata(&peer_id)
+                } else {
+                    None
+                };
+                
+                let _ = response.send(metadata);
             }
 
             // Core connection commands
@@ -447,14 +478,24 @@ impl NetworkNode {
                 }
             }
 
-            NetworkCommand::Connect { addr, response } => match self.swarm.dial(addr.clone()) {
-                Ok(_) => {
-                    info!("Dialing {addr}");
-                    let _ = response.send(Ok(()));
-                }
-                Err(err) => {
-                    error!("Failed to dial {addr}: {err}");
-                    let _ = response.send(Err(Box::new(err)));
+            NetworkCommand::Connect { addr, response } => {
+                // Детальное логирование dial операции
+                info!("📞 DIAL COMMAND: dialing address={}", addr);
+                debug!("   Current listening addresses: {:?}", self.listening_addresses());
+                debug!("   Current connected peers: {:?}", self.connected_peers.keys().collect::<Vec<_>>());
+                
+                match self.swarm.dial(addr.clone()) {
+                    Ok(_) => {
+                        info!("✅ DIAL SUCCESS: initiated dial to {}", addr);
+                        debug!("   Swarm state after dial: listeners={:?}", self.swarm.listeners().collect::<Vec<_>>());
+                        let _ = response.send(Ok(()));
+                    }
+                    Err(err) => {
+                        error!("❌ DIAL FAILED: failed to dial {}: {}", addr, err);
+                        debug!("   Error details: {:?}", err);
+                        debug!("   Swarm state: listeners={:?}", self.swarm.listeners().collect::<Vec<_>>());
+                        let _ = response.send(Err(Box::new(err)));
+                    }
                 }
             },
 
@@ -548,6 +589,9 @@ impl NetworkNode {
     }
 
     async fn handle_swarm_event(&mut self, event: libp2p::swarm::SwarmEvent<NodeBehaviourEvent>) {
+        // Детальное логирование всех Swarm событий для диагностики
+        debug!("🔍 SWARM EVENT: {:?}", event);
+        
         match event {
             libp2p::swarm::SwarmEvent::ConnectionEstablished {
                 peer_id,
@@ -557,8 +601,6 @@ impl NetworkNode {
                 ..
             } => {
                 let remote_addr = endpoint.get_remote_address().clone();
-                // FIXED: Use a simpler approach to get local address - just use the remote address for now
-                // since local address extraction requires private types
                 let local_addr = if endpoint.is_dialer() {
                     None // For outbound connections, we don't need to track local addr
                 } else {
@@ -569,6 +611,14 @@ impl NetworkNode {
                 } else {
                     ConnectionDirection::Inbound
                 };
+
+                // Детальное логирование установления соединения
+                info!("🔗 CONNECTION ESTABLISHED: peer_id={}, connection_id={}, endpoint={:?}, num_established={}, direction={:?}", 
+                      peer_id, connection_id, endpoint, num_established, direction);
+                debug!("   Remote address: {}", remote_addr);
+                debug!("   Local address: {:?}", local_addr);
+                debug!("   Is dialer: {}", endpoint.is_dialer());
+                debug!("   Is listener: {}", endpoint.is_listener());
 
                 // Create connection info
                 let connection_info = ConnectionInfo::new(
@@ -588,7 +638,7 @@ impl NetworkNode {
                     .or_insert_with(Vec::new)
                     .push(remote_addr.clone());
 
-                info!("Connected to {peer_id} at {remote_addr}");
+                info!("✅ Connected to {peer_id} at {remote_addr}");
 
                 let _ = self
                     .event_tx
@@ -672,7 +722,12 @@ impl NetworkNode {
             }
 
             libp2p::swarm::SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                warn!("Failed to connect to {:?}: {error}", peer_id);
+                // Детальное логирование ошибки исходящего подключения
+                error!("❌ OUTGOING CONNECTION ERROR: peer_id={:?}, error={}", peer_id, error);
+                debug!("   Error details: {:?}", error);
+                debug!("   Current connections: {:?}", self.connections.keys().collect::<Vec<_>>());
+                debug!("   Current listening addresses: {:?}", self.listening_addresses());
+                
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ConnectionError {
@@ -688,7 +743,12 @@ impl NetworkNode {
                 error,
                 ..
             } => {
-                warn!("Failed incoming connection from {send_back_addr} to {local_addr}: {error}");
+                // Детальное логирование ошибки входящего подключения
+                error!("❌ INCOMING CONNECTION ERROR: local_addr={}, send_back_addr={}, error={}", 
+                      local_addr, send_back_addr, error);
+                debug!("   Error details: {:?}", error);
+                debug!("   Current connections: {:?}", self.connections.keys().collect::<Vec<_>>());
+                
                 let _ = self
                     .event_tx
                     .send(NetworkEvent::ConnectionError {
@@ -831,13 +891,7 @@ impl NetworkNode {
                 }
             }
 
-            NodeBehaviourEvent::RelayClient(_event) => {
-                // Handle relay client events if needed
-            }
-
-            NodeBehaviourEvent::RelayServer(_event) => {
-                // Handle relay server events if needed
-            }
+            // Relay events are no longer present after removing relay functionality
 
         }
     }

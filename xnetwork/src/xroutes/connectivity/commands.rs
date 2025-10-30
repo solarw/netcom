@@ -1,14 +1,5 @@
-use super::relay_server::commands::RelayServerCommand;
-
 #[derive(Debug)]
+/// Connectivity commands placeholder
+/// (Relay functionality has been removed from the project)
 pub enum ConnectivityCommand {
-    /// Relay server commands
-    RelayServer(RelayServerCommand),
-}
-
-
-impl From<RelayServerCommand> for ConnectivityCommand {
-    fn from(command: RelayServerCommand) -> Self {
-        ConnectivityCommand::RelayServer(command)
-    }
 }

@@ -1,38 +1,37 @@
 // examples/advanced_search_demo.rs
 
 use std::time::Duration;
-use libp2p::{identity, PeerId};
-use xnetwork::{NetworkNode, XRoutesConfig, XRouteRole};
+use libp2p::{PeerId, identity};
+use xnetwork::{XRoutesConfig, XRouteRole, NodeBuilder};
+use xauth::por::por::ProofOfRepresentation;
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
     // Initialize simple logging
     println!("🚀 Starting Advanced Search Demo");
 
-    // Create test PoR
-    let keypair = identity::Keypair::generate_ed25519();
-    let peer_id = PeerId::from(keypair.public());
-    let por = xauth::por::por::ProofOfRepresentation::create(
-        &keypair,
-        peer_id,
-        Duration::from_secs(3600),
-    ).map_err(|e| format!("Failed to create PoR: {}", e))?;
-
-    // Create client node with DHT enabled
+    // Create client node with DHT enabled using NodeBuilder
     let config = XRoutesConfig {
         enable_mdns: true,
         enable_kad: true,
         kad_server_mode: false,
         initial_role: XRouteRole::Client,
-        enable_relay_client: false,
-        enable_relay_server: false,
-        known_relay_servers: Vec::new(),
     };
 
-    let key = identity::Keypair::generate_ed25519();
+    // Create keypair and PoR for the node
+    let local_key = identity::Keypair::generate_ed25519();
+    let por = ProofOfRepresentation::create(
+        &local_key,
+        local_key.public().to_peer_id(),
+        Duration::from_secs(3600),
+    ).map_err(|e| format!("Failed to create PoR: {}", e))?;
+    
     let (mut node, cmd_tx, mut _event_rx, local_peer_id) = 
-        NetworkNode::new_with_config(key, por, Some(config)).await
-        .map_err(|e| format!("Failed to create node: {}", e))?;
+        NodeBuilder::new(local_key, por)
+            .with_config(config)
+            .build()
+            .await
+            .map_err(|e| format!("Failed to create node: {}", e))?;
 
     let commander = std::sync::Arc::new(xnetwork::Commander::new(cmd_tx));
 

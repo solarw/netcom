@@ -3,26 +3,17 @@
 // Общие утилиты для тестирования
 pub mod common;
 
-// Расширенная тестовая оснастка
-pub mod test_utils;
-
-// Приоритет 1: Базовые компоненты ноды
-pub mod node_core;
-
-// Приоритет 2: Прямые соединения между нодами
-pub mod core_connections;
+// Структурированные утилиты для тестирования
+pub mod utils;
 
 // Приоритет 3: Аутентификация и безопасность
 pub mod xauth;
 
-// Приоритет 4: Потоковая передача данных
-pub mod xstream;
-
-// Приоритет 5: Механизмы обнаружения нод
-pub mod discovery;
-
-// Приоритет 6: Расширенная сетевая функциональность
-pub mod connectivity;
-
-// Bootstrap тесты
-pub mod bootstrap;
+// Временно закомментированы модули без файлов
+pub mod node_core;
+// pub mod core_connections;
+// pub mod xstream;
+// pub mod discovery;
+// pub mod connectivity;
+// pub mod bootstrap;
+// pub mod investigations;

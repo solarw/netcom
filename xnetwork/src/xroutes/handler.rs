@@ -113,11 +113,7 @@ impl XRoutesHandler {
     ) -> Vec<XRoutesEvent> {
         // Convert connectivity events to XRoutes events
         match event {
-            ConnectivityBehaviourEvent::RelayServer(relay_server_event) => {
-                // For now, we don't emit relay server events as XRoutes events
-                // In the future, we might want to convert some relay events
-                vec![]
-            }
+            // Relay server events are no longer supported - relay functionality has been removed
             ConnectivityBehaviourEvent::ConnectivityEvent(connectivity_event) => {
                 vec![XRoutesEvent::ConnectivityEvent(connectivity_event)]
             }

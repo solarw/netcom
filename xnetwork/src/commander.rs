@@ -15,6 +15,15 @@ pub struct Commander {
     pub xroutes: XRoutesCommander,
 }
 
+impl Clone for Commander {
+    fn clone(&self) -> Self {
+        Commander {
+            cmd_tx: self.cmd_tx.clone(),
+            xroutes: self.xroutes.clone(),
+        }
+    }
+}
+
 impl Commander {
     pub fn new(cmd_tx: mpsc::Sender<NetworkCommand>) -> Commander {
         let xroutes = XRoutesCommander::new(cmd_tx.clone());
@@ -246,6 +255,44 @@ impl Commander {
         response_rx
             .await
             .map_err(|e| format!("Failed to receive response: {}", e).into())
+    }
+
+    /// NEW: Get all authenticated peers
+    pub async fn get_authenticated_peers(
+        &self,
+    ) -> Result<Vec<PeerId>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::GetAuthenticatedPeers {
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get authenticated peers command: {}", e).into()
+            })?;
+
+        Ok(response_rx.await?)
+    }
+
+    /// NEW: Get authentication metadata for a peer
+    pub async fn get_auth_metadata(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Option<std::collections::HashMap<String, String>>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.cmd_tx
+            .send(NetworkCommand::GetAuthMetadata {
+                peer_id,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                format!("Failed to send get auth metadata command: {}", e).into()
+            })?;
+
+        Ok(response_rx.await?)
     }
 
     pub async fn submit_por_verification(

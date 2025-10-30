@@ -62,6 +62,15 @@ pub enum NetworkCommand {
         connection_id: ConnectionId,
         result: AuthResult,
     },
+    
+    // NEW: Enhanced authentication commands
+    GetAuthenticatedPeers {
+        response: oneshot::Sender<Vec<PeerId>>,
+    },
+    GetAuthMetadata {
+        peer_id: PeerId,
+        response: oneshot::Sender<Option<std::collections::HashMap<String, String>>>,
+    },
 
     // NEW: Connection Management Commands
     

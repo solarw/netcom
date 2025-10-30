@@ -8,6 +8,7 @@ pub mod commands;
 pub mod connection_management;
 pub mod events;
 pub mod node;
+pub mod node_builder;
 pub mod utils;
 pub mod xroutes;
 
@@ -18,6 +19,7 @@ pub use commands::NetworkCommand;
 pub use connection_management::{ConnectionInfo, PeerInfo, NetworkState, AuthStatus, ConnectionDirection, ConnectionState};
 pub use events::NetworkEvent;
 pub use node::NetworkNode;
+pub use node_builder::NodeBuilder;
 pub use utils::make_new_key;
 
 // Re-export XRoutes components

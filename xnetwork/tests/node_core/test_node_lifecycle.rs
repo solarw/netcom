@@ -1,133 +1,167 @@
-// tests/node_core/test_node_lifecycle.rs - Жизненный цикл ноды (PRIORITY 1)
+//! Тест жизненного цикла ноды NetCom
+//! 
+//! Этот тест проверяет полный жизненный цикл ноды от создания до завершения:
+//! - Создание ноды
+//! - Запуск прослушивания порта
+//! - Получение сетевого состояния
+//! - Корректное завершение работы
+//! 
+//! PRIORITY 1: CORE - критический функционал
 
 use std::time::Duration;
-use xnetwork::{XRoutesConfig, events::NetworkEvent};
 
-use crate::common::*;
+use crate::utils::node::create_node;
+use crate::utils::event_handlers::create_listening_address_handler;
 
 #[tokio::test]
-async fn test_node_creation_and_startup() {
+async fn test_node_lifecycle_basic() {
+    println!("🧪 Testing basic node lifecycle");
+    
     let test_timeout = Duration::from_secs(10);
     
-    println!("🧪 Testing node creation and startup");
-    
     let result = tokio::time::timeout(test_timeout, async {
-        // Создаем ноду с клиентской конфигурацией
-        let (mut node, commander, mut events, peer_id) = 
-            create_test_node_with_config(XRoutesConfig::client()).await
-            .expect("Failed to create test node");
+        // ✅ ПРАВИЛЬНО: создаем ноду
+        println!("🔄 Создаем ноду...");
+        let (commander, mut events, handle, peer_id) = 
+            create_node().await.expect("Failed to create node");
         
-        println!("Created node with peer ID: {}", peer_id);
+        println!("✅ Нода создана: {:?}", peer_id);
         
-        let node_handle = tokio::spawn(async move {
-            node.run_with_cleanup_interval(Duration::from_secs(1)).await;
+        // ✅ ПРАВИЛЬНО: создаем обработчики событий
+        println!("🔄 Создаем обработчики событий...");
+        let (listening_rx, mut listening_handler) = 
+            create_listening_address_handler();
+        
+        // ✅ ПРАВИЛЬНО: сначала запускаем обработку событий
+        println!("🔄 Запускаем обработку событий...");
+        let events_task = tokio::spawn(async move {
+            while let Some(event) = events.recv().await {
+                println!("📡 NODE EVENT: {:?}", event);
+                // обрабатывает событие прослушивания
+                listening_handler(&event);
+            }
         });
         
-        // Проверяем что нода создана корректно
-        assert!(!peer_id.to_string().is_empty(), "Peer ID should not be empty");
+        // ✅ ПРАВИЛЬНО: потом операции с командой
         
-        // Проверяем что нода может получать команды
-        let network_state = commander.get_network_state().await;
-        println!("Network state: {:?}", network_state);
+        // Запускаем прослушивание порта
+        println!("🔄 Запускаем прослушивание порта...");
+        commander.listen_port(Some("127.0.0.1".to_string()), 0).await
+            .expect("Failed to start listening");
         
-        // Проверяем что нода может слушать события
-        let event_received = tokio::time::timeout(Duration::from_secs(2), async {
-            events.recv().await.is_some()
-        }).await.unwrap_or(false);
+        // ✅ ПРАВИЛЬНО: ожидаем события прослушивания
+        println!("⏳ Ожидаем события прослушивания...");
+        let listening_addr = tokio::time::timeout(Duration::from_secs(5), listening_rx).await
+            .expect("Node should start listening within timeout")
+            .expect("Failed to get listening address");
         
-        println!("Node can receive events: {}", event_received);
+        println!("✅ Нода запущена на адресе: {}", listening_addr);
         
-        // Запускаем слушатель
-        let listen_result = commander.listen_port(Some("127.0.0.1".to_string()), 0).await;
-        println!("Listen result: {:?}", listen_result);
+        // Проверяем сетевой статус
+        println!("🔄 Получаем сетевой статус...");
+        let network_state = commander.get_network_state().await
+            .expect("Failed to get network state");
         
-        // Ждем события прослушивания
-        let listening_event = tokio::time::timeout(Duration::from_secs(3), async {
-            while let Some(event) = events.recv().await {
-                if let NetworkEvent::ListeningOnAddress { .. } = event {
-                    return Some(event);
-                }
-            }
-            None
-        }).await.unwrap_or(None);
+        println!("📊 СЕТЕВОЙ СТАТУС:");
+        println!("   Local Peer ID: {:?}", network_state.local_peer_id);
+        println!("   Listening addresses: {:?}", network_state.listening_addresses);
+        println!("   Total connections: {:?}", network_state.total_connections);
+        println!("   Authenticated peers: {:?}", network_state.authenticated_peers);
         
-        println!("Listening event received: {}", listening_event.is_some());
+        // Проверяем, что нода действительно слушает
+        assert!(!network_state.listening_addresses.is_empty(), 
+                "Node should have listening addresses");
+        assert!(network_state.listening_addresses.contains(&listening_addr),
+                "Listening address should be in network state");
         
-        // Проверяем что нода работает стабильно
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // Проверяем, что нода имеет корректный Peer ID
+        assert_eq!(network_state.local_peer_id, peer_id, 
+                   "Network state should have correct peer ID");
         
-        // Останавливаем слушатель (если метод существует)
-        // let stop_result = commander.stop_listening().await;
-        // println!("Stop listening result: {:?}", stop_result);
+        // ✅ ПРАВИЛЬНО: корректное завершение работы
+        println!("🔄 Завершаем работу ноды...");
+        commander.shutdown().await.expect("Failed to shutdown node");
         
-        // Cleanup
-        node_handle.abort();
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Ждем завершения задачи обработки событий
+        let _ = tokio::join!(handle, events_task);
+        
+        println!("✅ Node lifecycle test completed!");
         
         Result::<(), Box<dyn std::error::Error>>::Ok(())
     }).await;
     
     match result {
-        Ok(_) => println!("✅ Node creation and startup test completed"),
-        Err(_) => panic!("⏰ Node creation and startup test timed out ({}s)", test_timeout.as_secs()),
+        Ok(Ok(())) => println!("✅ Node lifecycle test completed successfully"),
+        Ok(Err(e)) => panic!("❌ Node lifecycle test failed: {}", e),
+        Err(_) => panic!("⏰ Node lifecycle test timed out ({}s)", test_timeout.as_secs()),
     }
 }
 
 #[tokio::test]
-async fn test_node_diagnostics() {
-    let test_timeout = Duration::from_secs(10);
+async fn test_node_lifecycle_multiple_restarts() {
+    println!("🧪 Testing node lifecycle with multiple restarts");
     
-    println!("🧪 Testing node diagnostics");
+    let test_timeout = Duration::from_secs(15);
     
     let result = tokio::time::timeout(test_timeout, async {
-        let (mut node, commander, _events, peer_id) = 
-            create_test_node_with_config(XRoutesConfig::client()).await
-            .expect("Failed to create test node");
-        
-        let node_handle = tokio::spawn(async move {
-            node.run_with_cleanup_interval(Duration::from_secs(1)).await;
-        });
-        
-        // Получаем диагностическую информацию (если метод существует)
-        // let diagnostics = commander.get_diagnostics().await;
-        // println!("Diagnostics: {:?}", diagnostics);
-        
-        // Проверяем что диагностика содержит разумные значения
-        // if let Ok(diag) = diagnostics {
-        //     assert!(!diag.peer_id.to_string().is_empty(), "Diagnostics should contain peer ID");
-        //     assert_eq!(diag.peer_id, peer_id, "Diagnostics peer ID should match node peer ID");
+        // Тестируем несколько циклов создания/завершения
+        for i in 0..3 {
+            println!("🔄 Цикл {}: создаем ноду...", i + 1);
+            let (commander, mut events, handle, peer_id) = 
+                create_node().await.expect("Failed to create node");
             
-        //     // Проверяем что метрики разумны
-        //     println!("Connections: {}", diag.connections);
-        //     println!("Active streams: {}", diag.active_streams);
-        //     println!("Uptime: {}s", diag.uptime_seconds);
+            println!("✅ Цикл {}: нода создана: {:?}", i + 1, peer_id);
             
-        //     assert!(diag.uptime_seconds >= 0, "Uptime should be non-negative");
-        //     assert!(diag.connections >= 0, "Connections count should be non-negative");
-        //     assert!(diag.active_streams >= 0, "Active streams count should be non-negative");
-        // }
-        
-        // Получаем сетевое состояние
-        let network_state = commander.get_network_state().await;
-        println!("Network state: {:?}", network_state);
-        
-        // Проверяем что сетевое состояние разумно
-        if let Ok(state) = network_state {
-            assert!(state.total_connections >= 0, "Total connections should be non-negative");
-            // assert!(state.active_connections >= 0, "Active connections should be non-negative");
-            // assert!(state.total_connections >= state.active_connections, 
-            //        "Total connections should be >= active connections");
+            // Создаем обработчики
+            let (listening_rx, mut listening_handler) = 
+                create_listening_address_handler();
+            
+            // Запускаем обработку событий
+            let events_task = tokio::spawn(async move {
+                while let Some(event) = events.recv().await {
+                    println!("📡 CYCLE {} EVENT: {:?}", i + 1, event);
+                    listening_handler(&event);
+                }
+            });
+            
+            // Запускаем прослушивание
+            commander.listen_port(Some("127.0.0.1".to_string()), 0).await
+                .expect("Failed to start listening");
+            
+            // Ожидаем события прослушивания
+            let listening_addr = tokio::time::timeout(Duration::from_secs(5), listening_rx).await
+                .expect("Node should start listening within timeout")
+                .expect("Failed to get listening address");
+            
+            println!("✅ Цикл {}: нода запущена на {}", i + 1, listening_addr);
+            
+            // Проверяем состояние
+            let network_state = commander.get_network_state().await
+                .expect("Failed to get network state");
+            
+            assert!(!network_state.listening_addresses.is_empty(), 
+                    "Node should have listening addresses in cycle {}", i + 1);
+            
+            // Корректно завершаем
+            commander.shutdown().await.expect("Failed to shutdown node");
+            
+            // Ждем завершения
+            let _ = tokio::join!(handle, events_task);
+            
+            println!("✅ Цикл {} завершен успешно", i + 1);
+            
+            // Небольшая пауза между циклами
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         
-        // Cleanup
-        node_handle.abort();
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        println!("✅ Multiple restarts test completed!");
         
         Result::<(), Box<dyn std::error::Error>>::Ok(())
     }).await;
     
     match result {
-        Ok(_) => println!("✅ Node diagnostics test completed"),
-        Err(_) => panic!("⏰ Node diagnostics test timed out ({}s)", test_timeout.as_secs()),
+        Ok(Ok(())) => println!("✅ Multiple restarts test completed successfully"),
+        Ok(Err(e)) => panic!("❌ Multiple restarts test failed: {}", e),
+        Err(_) => panic!("⏰ Multiple restarts test timed out ({}s)", test_timeout.as_secs()),
     }
 }
