@@ -76,7 +76,7 @@ macro_rules! make_command_swarm {
         // Embed code from generate_handyswarm_types_xhandler directly
         paste::item! {
             pub struct [< $behaviour_name HandlerDispatcher >] {
-                swarm_handler: $swarm_handler_type,
+                pub swarm_handler: $swarm_handler_type,
                 $(
                     pub $field: $handler_type,
                 )*
