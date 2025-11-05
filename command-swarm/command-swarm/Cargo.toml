@@ -1,0 +1,20 @@
+[package]
+name = "command-swarm"
+version = "0.1.0"
+edition = "2024"
+description = "A library for building libp2p applications with command-based swarm management"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-username/command-swarm"
+readme = "README.md"
+
+[dependencies]
+libp2p = {version = "0.56", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = ['quic', 'dns', 'noise', 'autonat', 'dcutr', 'relay', 'mdns', 'kad', 'identify', 'ping', 'rendezvous', 'request-response', 'cbor', 'serde', 'macros', 'tokio', 'metrics', 'tcp', 'yamux', 'websocket']}
+
+tokio = { version = "1.48", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+paste = "1.0.15"
+tracing = "0.1"
+
+[dev-dependencies]
+libp2p-swarm-test = { path = "/home/solarw/hyperion/rust-libp2p/swarm-test" , features = ['tokio']}

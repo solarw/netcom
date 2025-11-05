@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "command-swarm",
+    "command-swarm-example"
+]
+
+resolver = "2"
