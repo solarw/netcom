@@ -9,11 +9,13 @@ pub mod utils;
 // Приоритет 3: Аутентификация и безопасность
 pub mod xauth;
 
+// Приоритет 4: Потоковая передача данных
+pub mod xstream;
+
 // Временно закомментированы модули без файлов
 pub mod node_core;
-// pub mod core_connections;
-// pub mod xstream;
-// pub mod discovery;
-// pub mod connectivity;
+pub mod core_connections;
+pub mod discovery;
+pub mod connectivity;
 // pub mod bootstrap;
 // pub mod investigations;

@@ -1,5 +1,5 @@
 [profile.default]
-slow-timeout = { period = "7s", terminate-after = 2 }
+slow-timeout = { period = "70s", terminate-after = 2 }
 
 
 

@@ -434,6 +434,11 @@ impl Commander {
         self.xroutes.get_kad_known_peers().await
     }
 
+    /// Add address to Kademlia routing table
+    pub async fn add_address_to_kad(&self, peer_id: PeerId, addr: Multiaddr) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.xroutes.add_address_to_kad(peer_id, addr).await
+    }
+
     /// Get addresses for a specific peer from local tables
     pub async fn get_peer_addresses(&self, peer_id: PeerId) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
         self.xroutes.get_peer_addresses(peer_id).await

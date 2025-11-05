@@ -3,6 +3,9 @@
 // Эталонный тест интеграции XAuth
 pub mod test_auth_integration;
 
+// Тесты граничных случаев аутентификации
+pub mod test_auth_edge_cases;
+
 // Временно закомментированы модули без файлов
 // pub mod test_auth_on_connection;
 // pub mod test_auth_events;

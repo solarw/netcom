@@ -1,1 +1,0 @@
-Everytime you complete the task or need some user input use an mcp action via notifyy mcp server to send a notification with brief summary of the task result, question or problem.

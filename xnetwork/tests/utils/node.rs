@@ -49,7 +49,7 @@ pub async fn create_node() -> Result<
     let por = create_test_por();
     
     let builder = NodeBuilder::new(key, por)
-        .with_config(XRoutesConfig::client());
+        .with_config(XRoutesConfig::bootstrap_server());
     
     let (mut node, cmd_tx, event_rx, peer_id) = builder.build().await?;
     let commander = Commander::new(cmd_tx);
