@@ -49,16 +49,6 @@ impl Commander {
         response_rx.await?
     }
 
-    /// Disconnect from a peer
-    pub async fn disconnect(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::Disconnect {
-            peer_id,
-            response: response_tx,
-        });
-        self.send(command).await?;
-        response_rx.await?
-    }
 
     /// Get network state
     pub async fn get_network_state(&self) -> Result<NetworkState, Box<dyn std::error::Error + Send + Sync>> {
@@ -92,23 +82,6 @@ impl Commander {
         response_rx.await?
     }
 
-    /// Start authentication with a peer
-    pub async fn start_auth(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let command = XNetworkCommands::xauth(XAuthCommand::StartAuth { peer_id });
-        self.send(command).await
-    }
-
-    /// Approve authentication request
-    pub async fn approve_auth(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let command = XNetworkCommands::xauth(XAuthCommand::ApproveAuth { peer_id });
-        self.send(command).await
-    }
-
-    /// Reject authentication request
-    pub async fn reject_auth(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let command = XNetworkCommands::xauth(XAuthCommand::RejectAuth { peer_id });
-        self.send(command).await
-    }
 
     /// Submit PoR verification result
     pub async fn submit_por_verification(

@@ -98,10 +98,12 @@ impl XNetworkSwarmHandler {
                                 NodeEvent::PeerAuthenticated { peer_id: *peer_id }
                             }
                             PorAuthEvent::OutboundAuthFailure { peer_id, .. } => {
-                                NodeEvent::AuthenticationFailed { peer_id: *peer_id }
+                                // Authentication failures are not exposed as NodeEvents
+                                return None;
                             }
                             PorAuthEvent::InboundAuthFailure { peer_id, .. } => {
-                                NodeEvent::AuthenticationFailed { peer_id: *peer_id }
+                                // Authentication failures are not exposed as NodeEvents
+                                return None;
                             }
                             _ => return None, // Skip other XAuth events
                         }

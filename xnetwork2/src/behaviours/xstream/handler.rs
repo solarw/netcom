@@ -17,31 +17,16 @@ impl BehaviourHandler for XStreamHandler {
     type Event = xstream::events::XStreamEvent;
     type Command = XStreamCommand;
 
-    async fn handle_cmd(&mut self, behaviour: &mut Self::Behaviour, cmd: Self::Command) {
-        match cmd {
-            XStreamCommand::OpenStream { peer_id } => {
-                debug!("🔄 [XStreamHandler] Processing OpenStream command for peer: {:?}", peer_id);
-                // Note: XStream automatically handles stream opening on authenticated connections
-                info!("📡 [XStreamHandler] Stream will be opened automatically for authenticated peer: {:?}", peer_id);
-            }
-            XStreamCommand::SendData { peer_id, data } => {
-                debug!("🔄 [XStreamHandler] Processing SendData command for peer: {:?}, data size: {}", peer_id, data.len());
-                // Note: XStream handles data sending through established streams
-                info!("📤 [XStreamHandler] Data will be sent through established stream to peer: {:?}", peer_id);
-            }
-            XStreamCommand::CloseStream { peer_id } => {
-                debug!("🔄 [XStreamHandler] Processing CloseStream command for peer: {:?}", peer_id);
-                // Note: XStream automatically manages stream lifecycle
-                info!("📤 [XStreamHandler] Stream will be closed for peer: {:?}", peer_id);
-            }
-        }
+    async fn handle_cmd(&mut self, _behaviour: &mut Self::Behaviour, _cmd: Self::Command) {
+        // Note: XStream automatically handles stream lifecycle
+        // No manual commands needed for now
     }
 
     async fn handle_event(&mut self, _behaviour: &mut Self::Behaviour, event: &Self::Event) {
         match event {
             xstream::events::XStreamEvent::StreamEstablished { peer_id, stream_id } => {
                 info!(
-                    "📡 [XStreamHandler] Stream established - Peer: {:?}, Stream ID: {:?}",
+                    "� [XStreamHandler] Stream established - Peer: {:?}, Stream ID: {:?}",
                     peer_id, stream_id
                 );
             }
@@ -59,7 +44,7 @@ impl BehaviourHandler for XStreamHandler {
             }
             xstream::events::XStreamEvent::IncomingStream { stream } => {
                 debug!(
-                    "📨 [XStreamHandler] Incoming stream - Peer: {:?}, Stream ID: {:?}",
+                    "� [XStreamHandler] Incoming stream - Peer: {:?}, Stream ID: {:?}",
                     stream.peer_id, stream.id
                 );
             }
