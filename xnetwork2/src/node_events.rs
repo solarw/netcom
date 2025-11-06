@@ -28,6 +28,8 @@ pub enum NodeEvent {
     PeerAuthenticated { peer_id: PeerId },
     /// Peer authentication failed
     AuthenticationFailed { peer_id: PeerId },
+    /// PoR verification requested
+    VerifyPorRequest { peer_id: PeerId, connection_id: String, por: Vec<u8>, metadata: std::collections::HashMap<String, String> },
     
     // XStream события
     /// New stream opened with peer
@@ -65,6 +67,7 @@ impl NodeEvent {
             NodeEvent::ExpiredListenAddr { .. } => "ExpiredListenAddr",
             NodeEvent::PeerAuthenticated { .. } => "PeerAuthenticated",
             NodeEvent::AuthenticationFailed { .. } => "AuthenticationFailed",
+            NodeEvent::VerifyPorRequest { .. } => "VerifyPorRequest",
             NodeEvent::StreamOpened { .. } => "StreamOpened",
             NodeEvent::StreamClosed { .. } => "StreamClosed",
             NodeEvent::DataReceived { .. } => "DataReceived",

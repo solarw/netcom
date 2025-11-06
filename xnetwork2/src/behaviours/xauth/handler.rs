@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use command_swarm::BehaviourHandler;
 use xauth::behaviours::PorAuthBehaviour;
 use tracing::{debug, info};
+use std::collections::HashMap;
 
 use super::command::XAuthCommand;
 
@@ -33,6 +34,31 @@ impl BehaviourHandler for XAuthHandler {
                 debug!("🔄 [XAuthHandler] Processing RejectAuth command for peer: {:?}", peer_id);
                 // Note: XAuth automatically approves/rejects based on PoR
                 info!("❌ [XAuthHandler] Authentication rejected for peer: {:?}", peer_id);
+            }
+            XAuthCommand::SubmitPorVerification { peer_id, approved } => {
+                debug!("🔄 [XAuthHandler] Processing SubmitPorVerification command for peer: {:?}, approved: {}", peer_id, approved);
+                
+                // Find the pending verification for this peer
+                if let Some((connection_id, _verification)) = behaviour.get_pending_verification(&peer_id) {
+                    info!("✅ [XAuthHandler] Found pending verification for peer {:?} on connection {:?}", peer_id, connection_id);
+                    
+                    let result = if approved {
+                        xauth::definitions::AuthResult::Ok(HashMap::new())
+                    } else {
+                        xauth::definitions::AuthResult::Error("PoR verification rejected".to_string())
+                    };
+                    
+                    match behaviour.submit_por_verification_result(connection_id, result) {
+                        Ok(_) => {
+                            info!("✅ [XAuthHandler] PoR verification submitted successfully for peer: {:?}, approved: {}", peer_id, approved);
+                        }
+                        Err(e) => {
+                            debug!("❌ [XAuthHandler] Failed to submit PoR verification for peer {:?}: {}", peer_id, e);
+                        }
+                    }
+                } else {
+                    debug!("❌ [XAuthHandler] No pending PoR verification found for peer: {:?}", peer_id);
+                }
             }
         }
     }

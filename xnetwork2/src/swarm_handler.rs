@@ -9,6 +9,7 @@ use tracing::{debug, info};
 use crate::swarm_commands::{SwarmLevelCommand, NetworkState};
 use crate::main_behaviour::{XNetworkBehaviour, XNetworkBehaviourEvent};
 use crate::node_events::NodeEvent;
+use xauth::events::PorAuthEvent;
 
 /// Swarm handler for XNetwork2
 pub struct XNetworkSwarmHandler {
@@ -74,10 +75,39 @@ impl XNetworkSwarmHandler {
                 return None;
             }
             
-            // Behaviour events - we'll handle these separately
-            libp2p::swarm::SwarmEvent::Behaviour(_) => {
-                // Behaviour events are handled in the main handle_event method
-                return None;
+            // Behaviour events - we'll handle XAuth events specifically
+            libp2p::swarm::SwarmEvent::Behaviour(behaviour_event) => {
+                match behaviour_event {
+                    XNetworkBehaviourEvent::Xauth(por_auth_event) => {
+                        match por_auth_event {
+                            PorAuthEvent::VerifyPorRequest { peer_id, connection_id, por, metadata, address } => {
+                                NodeEvent::VerifyPorRequest {
+                                    peer_id: *peer_id,
+                                    connection_id: format!("{:?}", connection_id),
+                                    por: por.peer_id.to_bytes(),
+                                    metadata: metadata.clone(),
+                                }
+                            }
+                            PorAuthEvent::MutualAuthSuccess { peer_id, .. } => {
+                                NodeEvent::PeerAuthenticated { peer_id: *peer_id }
+                            }
+                            PorAuthEvent::OutboundAuthSuccess { peer_id, .. } => {
+                                NodeEvent::PeerAuthenticated { peer_id: *peer_id }
+                            }
+                            PorAuthEvent::InboundAuthSuccess { peer_id, .. } => {
+                                NodeEvent::PeerAuthenticated { peer_id: *peer_id }
+                            }
+                            PorAuthEvent::OutboundAuthFailure { peer_id, .. } => {
+                                NodeEvent::AuthenticationFailed { peer_id: *peer_id }
+                            }
+                            PorAuthEvent::InboundAuthFailure { peer_id, .. } => {
+                                NodeEvent::AuthenticationFailed { peer_id: *peer_id }
+                            }
+                            _ => return None, // Skip other XAuth events
+                        }
+                    }
+                    _ => return None, // Skip other behaviour events
+                }
             }
             
             // Other events we don't currently transform
@@ -182,6 +212,27 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                     }
                     XNetworkBehaviourEvent::Xauth(event) => {
                         debug!("📡 [SwarmHandler] XAuth event: {:?}", event);
+                        println!("📡 [SwarmHandler] XAuth event: {:?}", event);
+                        
+                        // Добавляем специальную отладочную информацию для событий аутентификации
+                        match event {
+                            PorAuthEvent::MutualAuthSuccess { peer_id, .. } => {
+                                println!("🎉 [SwarmHandler] MUTUAL AUTH SUCCESS for peer: {}", peer_id);
+                            }
+                            PorAuthEvent::OutboundAuthSuccess { peer_id, .. } => {
+                                println!("✅ [SwarmHandler] OUTBOUND AUTH SUCCESS for peer: {}", peer_id);
+                            }
+                            PorAuthEvent::InboundAuthSuccess { peer_id, .. } => {
+                                println!("✅ [SwarmHandler] INBOUND AUTH SUCCESS for peer: {}", peer_id);
+                            }
+                            PorAuthEvent::OutboundAuthFailure { peer_id, .. } => {
+                                println!("❌ [SwarmHandler] OUTBOUND AUTH FAILURE for peer: {}", peer_id);
+                            }
+                            PorAuthEvent::InboundAuthFailure { peer_id, .. } => {
+                                println!("❌ [SwarmHandler] INBOUND AUTH FAILURE for peer: {}", peer_id);
+                            }
+                            _ => {}
+                        }
                     }
                     XNetworkBehaviourEvent::Xstream(event) => {
                         debug!("📡 [SwarmHandler] XStream event: {:?}", event);

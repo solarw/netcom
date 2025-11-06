@@ -5,6 +5,7 @@ use libp2p::{Multiaddr, PeerId};
 
 use crate::main_behaviour::XNetworkCommands;
 use crate::swarm_commands::{SwarmLevelCommand, NetworkState};
+use crate::behaviours::XAuthCommand;
 
 /// Commander for XNetwork2 node
 #[derive(Clone)]
@@ -89,5 +90,36 @@ impl Commander {
         });
         self.send(command).await?;
         response_rx.await?
+    }
+
+    /// Start authentication with a peer
+    pub async fn start_auth(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let command = XNetworkCommands::xauth(XAuthCommand::StartAuth { peer_id });
+        self.send(command).await
+    }
+
+    /// Approve authentication request
+    pub async fn approve_auth(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let command = XNetworkCommands::xauth(XAuthCommand::ApproveAuth { peer_id });
+        self.send(command).await
+    }
+
+    /// Reject authentication request
+    pub async fn reject_auth(&self, peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let command = XNetworkCommands::xauth(XAuthCommand::RejectAuth { peer_id });
+        self.send(command).await
+    }
+
+    /// Submit PoR verification result
+    pub async fn submit_por_verification(
+        &self, 
+        peer_id: PeerId, 
+        approved: bool
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let command = XNetworkCommands::xauth(XAuthCommand::SubmitPorVerification {
+            peer_id,
+            approved,
+        });
+        self.send(command).await
     }
 }

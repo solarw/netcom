@@ -17,4 +17,9 @@ pub enum XAuthCommand {
     RejectAuth {
         peer_id: PeerId,
     },
+    /// Submit PoR verification result
+    SubmitPorVerification {
+        peer_id: PeerId,
+        approved: bool,
+    },
 }
