@@ -19,14 +19,15 @@ impl BehaviourHandler for EchoBehaviourHandler {
 
     async fn handle_cmd(&mut self, behaviour: &mut Self::Behaviour, cmd: Self::Command) {
         match cmd {
-            EchoCommand::SendMessage { peer_id, text } => {
+            EchoCommand::SendMessage { peer_id, text, response } => {
                 println!(
                     "🔄 [EchoHandler] Processing SendMessage command - Peer: {:?}, Text: {}",
                     peer_id, text
                 );
-                // Call behaviour method via command
+                // Call behaviour method via command and send result through oneshot channel
                 behaviour.send_message(peer_id, text);
-                println!("📤 [EchoHandler] Command executed, event added to Swarm queue");
+                let _ = response.send(Ok(()));
+                println!("📤 [EchoHandler] Command executed, result sent through channel");
             }
         }
     }

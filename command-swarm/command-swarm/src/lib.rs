@@ -3,10 +3,12 @@
 //! This library provides traits and utilities for managing libp2p swarms through
 //! command-based interfaces, making it easier to build complex p2p applications.
 
+pub mod command;
 pub mod handlers;
 pub mod macros;
 pub mod swarm_loop;
 
+pub use command::SwarmCommand;
 pub use handlers::{BehaviourHandler, SwarmHandler};
 pub use swarm_loop::{BehaviourHandlerDispatcherTrait, SwarmLoop, SwarmLoopBuilder, SwarmLoopStopper};
 

@@ -23,12 +23,17 @@ macro_rules! make_command_swarm {
         }
 
         // Generate combined command enum
-        #[derive(Debug, Clone)]
+        #[derive(Debug)]
         pub enum $commands_name {
             $(
                 $field(<$handler_type as $crate::handlers::BehaviourHandler>::Command),
             )*
             SwarmLevel($swarm_level_command),
+        }
+
+        // Automatically implement SwarmCommand for the generated command enum
+        impl $crate::SwarmCommand for $commands_name {
+            type Output = ();
         }
 
         // Generate TryFrom implementations for each behaviour command
