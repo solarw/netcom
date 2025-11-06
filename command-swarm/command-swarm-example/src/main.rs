@@ -176,11 +176,21 @@ async fn main() {
         Err(_) => println!("❌ [Main] Echo response channel closed"),
     }
 
-    println!("📤 [Main] Sending Ping command...");
+    println!("📤 [Main] Sending Ping command with response...");
+    let (ping_response_tx, ping_response_rx) = tokio::sync::oneshot::channel();
     command_tx
-        .send(MyCommands::ping(PingCommand::DummyTest))
+        .send(MyCommands::ping(PingCommand::DummyTest {
+            response: ping_response_tx,
+        }))
         .await
         .unwrap();
+
+    // Wait for ping command result
+    match ping_response_rx.await {
+        Ok(Ok(())) => println!("✅ [Main] Ping command completed successfully"),
+        Ok(Err(e)) => println!("❌ [Main] Ping command failed: {}", e),
+        Err(_) => println!("❌ [Main] Ping response channel closed"),
+    }
 
     // Stop the SwarmLoop after 5 seconds using the stopper
     let stopper_clone = stopper.clone();

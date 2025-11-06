@@ -18,8 +18,9 @@ impl BehaviourHandler for PingBehaviourHandler {
 
     async fn handle_cmd(&mut self, _behaviour: &mut Self::Behaviour, cmd: Self::Command) {
         match cmd {
-            PingCommand::DummyTest => {
+            PingCommand::DummyTest { response } => {
                 println!("🔄 [PingHandler] Processing DummyTest command");
+                let _ = response.send(Ok(()));
             }
         }
     }
@@ -32,7 +33,10 @@ impl BehaviourHandler for PingBehaviourHandler {
                 result,
                 connection: _,
             } => {
-                println!("📡 [PingHandler] Ping event - Peer: {:?}, Result: {:?}", peer, result);
+                println!(
+                    "📡 [PingHandler] Ping event - Peer: {:?}, Result: {:?}",
+                    peer, result
+                );
             }
         }
     }

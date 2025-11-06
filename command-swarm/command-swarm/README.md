@@ -8,11 +8,13 @@ Command-Swarm provides a framework for managing libp2p swarms through a command-
 
 ## Features
 
-- **Command-based interface**: Send commands to control swarm behaviour
+- **Command-based interface**: Send commands to control swarm behaviour with response channels
 - **Unified macro system**: Generate complete swarm infrastructure with `make_command_swarm!`
+- **Command generation macros**: Create command enums with `swarm_commands!` macro
 - **Multiple behaviours**: Combine multiple libp2p behaviours in a single swarm
 - **Event handling**: Handle swarm events and behaviour events through unified interface
 - **Async support**: Full async/await support for all operations
+- **Response channels**: Built-in oneshot channels for command results
 
 ## Installation
 
@@ -208,6 +210,50 @@ make_command_swarm! {
 }
 ```
 
+### swarm_commands! Macro
+
+Create command enums with built-in response channels:
+
+```rust
+use libp2p::PeerId;
+
+command_swarm::swarm_commands! {
+    EchoCommand {
+        SendMessage(peer_id: PeerId, text: String) -> (),
+    }
+}
+```
+
+This generates an enum with struct-like variants that include response channels:
+
+```rust
+pub enum EchoCommand {
+    SendMessage {
+        peer_id: PeerId,
+        text: String,
+        response: oneshot::Sender<Result<(), Box<dyn Error + Send + Sync>>>,
+    },
+}
+```
+
+Usage with response channels:
+
+```rust
+let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+let cmd = EchoCommand::SendMessage {
+    peer_id: local_peer_id.clone(),
+    text: "Hello".to_string(),
+    response: response_tx,
+};
+
+// Send command and wait for result
+match response_rx.await {
+    Ok(Ok(())) => println!("Command completed successfully"),
+    Ok(Err(e)) => println!("Command failed: {}", e),
+    Err(_) => println!("Response channel closed"),
+}
+```
+
 ## Generated Types
 
 The macro generates:
@@ -241,4 +287,3 @@ See the `command-swarm-example` package for a complete working example with Echo
 ## License
 
 [Add your license here]
-

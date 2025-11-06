@@ -1,7 +1,7 @@
 //! Commands for PingBehaviour
+command_swarm::swarm_commands! {
+    PingCommand {
+        DummyTest() -> (),
+    }
 
-#[derive(Debug, Clone)]
-pub enum PingCommand {
-    /// Test command for demonstration
-    DummyTest,
 }

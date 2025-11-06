@@ -1,5 +1,56 @@
 //! Macros for simplifying Swarm creation with handlers
 
+/// Macro for creating complete enum of swarm commands with automatic generation
+/// 
+/// This macro generates an enum with struct-like variants that include response channels
+/// for command results. Each variant automatically includes a `response` field with
+/// a oneshot channel for receiving command execution results.
+/// 
+/// # Example
+/// ```
+/// use libp2p::PeerId;
+/// 
+/// command_swarm::swarm_commands! {
+///     EchoCommand {
+///         SendMessage(peer_id: PeerId, text: String) -> (),
+///     }
+/// }
+/// ```
+/// 
+/// This generates:
+/// ```rust
+/// pub enum EchoCommand {
+///     SendMessage {
+///         peer_id: PeerId,
+///         text: String,
+///         response: tokio::sync::oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+///     },
+/// }
+/// ```
+#[macro_export]
+macro_rules! swarm_commands {
+    (
+        $enum_name:ident {
+            $(
+                $variant:ident($($field:ident : $ftype:ty),*) -> $output:ty
+            ),* $(,)?
+        }
+    ) => {
+        // Generate enum that combines all commands
+         #[derive(Debug)]
+        pub enum $enum_name {
+            $(
+                $variant {
+                    $( $field : $ftype, )*
+                    response: tokio::sync::oneshot::Sender<
+                        Result<$output, Box<dyn std::error::Error + Send + Sync>>
+                    >,
+                },
+            )*
+        }
+    };
+}
+
 /// Macro for creating complete Command-Swarm infrastructure
 #[macro_export]
 macro_rules! make_command_swarm {
