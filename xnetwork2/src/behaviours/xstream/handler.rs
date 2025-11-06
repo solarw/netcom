@@ -17,9 +17,15 @@ impl BehaviourHandler for XStreamHandler {
     type Event = xstream::events::XStreamEvent;
     type Command = XStreamCommand;
 
-    async fn handle_cmd(&mut self, _behaviour: &mut Self::Behaviour, _cmd: Self::Command) {
-        // Note: XStream automatically handles stream lifecycle
-        // No manual commands needed for now
+    async fn handle_cmd(&mut self, behaviour: &mut Self::Behaviour, cmd: Self::Command) {
+        match cmd {
+            XStreamCommand::OpenStream { peer_id, response } => {
+                debug!("🔄 [XStreamHandler] Processing OpenStream command - Peer: {:?}", peer_id);
+                
+                // Открываем XStream к указанному пиру
+                behaviour.open_stream(peer_id, response).await;
+            }
+        }
     }
 
     async fn handle_event(&mut self, _behaviour: &mut Self::Behaviour, event: &Self::Event) {

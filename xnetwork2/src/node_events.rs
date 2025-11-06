@@ -3,6 +3,8 @@
 //! Cloneable events that are sent to developers through event channels
 
 use libp2p::{Multiaddr, PeerId};
+use xstream::xstream::XStream;
+use xstream::types::XStreamID;
 
 /// Node events that are sent to developers
 #[derive(Clone, Debug)]
@@ -22,6 +24,16 @@ pub enum NodeEvent {
     PeerAuthenticated { peer_id: PeerId },
     /// PoR verification requested
     VerifyPorRequest { peer_id: PeerId, connection_id: String, por: Vec<u8>, metadata: std::collections::HashMap<String, String> },
+    
+    // XStream события
+    /// Входящий XStream поток
+    XStreamIncoming { stream: XStream },
+    /// Исходящий XStream поток установлен
+    XStreamEstablished { peer_id: PeerId, stream_id: XStreamID },
+    /// Ошибка при работе с XStream
+    XStreamError { peer_id: PeerId, stream_id: Option<XStreamID>, error: String },
+    /// XStream поток закрыт
+    XStreamClosed { peer_id: PeerId, stream_id: XStreamID },
 }
 
 impl NodeEvent {
@@ -34,6 +46,10 @@ impl NodeEvent {
             NodeEvent::ExpiredListenAddr { .. } => "ExpiredListenAddr",
             NodeEvent::PeerAuthenticated { .. } => "PeerAuthenticated",
             NodeEvent::VerifyPorRequest { .. } => "VerifyPorRequest",
+            NodeEvent::XStreamIncoming { .. } => "XStreamIncoming",
+            NodeEvent::XStreamEstablished { .. } => "XStreamEstablished",
+            NodeEvent::XStreamError { .. } => "XStreamError",
+            NodeEvent::XStreamClosed { .. } => "XStreamClosed",
         }
     }
     
@@ -58,6 +74,12 @@ impl NodeEvent {
     
     /// Check if this is a stream-related event
     pub fn is_stream_event(&self) -> bool {
-        false // XStream не интегрирован в xnetwork2
+        matches!(
+            self,
+            NodeEvent::XStreamIncoming { .. }
+                | NodeEvent::XStreamEstablished { .. }
+                | NodeEvent::XStreamError { .. }
+                | NodeEvent::XStreamClosed { .. }
+        )
     }
 }

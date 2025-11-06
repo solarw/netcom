@@ -5,7 +5,8 @@ use libp2p::{Multiaddr, PeerId};
 
 use crate::main_behaviour::XNetworkCommands;
 use crate::swarm_commands::{SwarmLevelCommand, NetworkState};
-use crate::behaviours::XAuthCommand;
+use crate::behaviours::{XAuthCommand, XStreamCommand};
+use xstream::xstream::XStream;
 
 /// Commander for XNetwork2 node
 #[derive(Clone)]
@@ -94,5 +95,17 @@ impl Commander {
             approved,
         });
         self.send(command).await
+    }
+
+    /// Open XStream to a peer
+    pub async fn open_xstream(&self, peer_id: PeerId) -> Result<XStream, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xstream(XStreamCommand::OpenStream {
+            peer_id,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + Send + Sync>)
     }
 }

@@ -10,6 +10,7 @@ use crate::swarm_commands::{SwarmLevelCommand, NetworkState};
 use crate::main_behaviour::{XNetworkBehaviour, XNetworkBehaviourEvent};
 use crate::node_events::NodeEvent;
 use xauth::events::PorAuthEvent;
+use xstream::events::XStreamEvent;
 
 /// Swarm handler for XNetwork2
 pub struct XNetworkSwarmHandler {
@@ -75,7 +76,7 @@ impl XNetworkSwarmHandler {
                 return None;
             }
             
-            // Behaviour events - we'll handle XAuth events specifically
+            // Behaviour events - we'll handle XAuth and XStream events specifically
             libp2p::swarm::SwarmEvent::Behaviour(behaviour_event) => {
                 match behaviour_event {
                     XNetworkBehaviourEvent::Xauth(por_auth_event) => {
@@ -106,6 +107,32 @@ impl XNetworkSwarmHandler {
                                 return None;
                             }
                             _ => return None, // Skip other XAuth events
+                        }
+                    }
+                    XNetworkBehaviourEvent::Xstream(xstream_event) => {
+                        match xstream_event {
+                            XStreamEvent::IncomingStream { stream } => {
+                                NodeEvent::XStreamIncoming { stream: stream.clone() }
+                            }
+                            XStreamEvent::StreamEstablished { peer_id, stream_id } => {
+                                NodeEvent::XStreamEstablished { 
+                                    peer_id: *peer_id, 
+                                    stream_id: *stream_id 
+                                }
+                            }
+                            XStreamEvent::StreamError { peer_id, stream_id, error } => {
+                                NodeEvent::XStreamError { 
+                                    peer_id: *peer_id, 
+                                    stream_id: *stream_id, 
+                                    error: error.clone() 
+                                }
+                            }
+                            XStreamEvent::StreamClosed { peer_id, stream_id } => {
+                                NodeEvent::XStreamClosed { 
+                                    peer_id: *peer_id, 
+                                    stream_id: *stream_id 
+                                }
+                            }
                         }
                     }
                     _ => return None, // Skip other behaviour events
