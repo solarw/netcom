@@ -1,7 +1,7 @@
 //! Полноценный тест двух нод с XStream: реальный обмен данными и проверка целостности
 
 use std::time::Duration;
-use tokio::time::timeout;
+use tokio::time::{timeout, sleep};
 use xnetwork2::Node;
 use xnetwork2::node_events::NodeEvent;
 use xstream::xstream::XStream;
@@ -74,7 +74,7 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                         
                         // Читаем данные из входящего XStream
                         println!("📥 Нода1 читает данные из XStream...");
-                        match stream.read().await {
+                        match stream.read_to_end().await {
                             Ok(data) => {
                                 println!("✅ Нода1 успешно прочитала данные:");
                                 println!("   Размер данных: {} байт", data.len());
@@ -101,7 +101,10 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                                         panic!("❌ Нода1 не смогла отправить первую часть данных: {:?}", e);
                                     }
                                 }
-                                
+
+                                // delay to check that .read_to_end() only works not .read()
+                                sleep(Duration::from_millis(100)).await;
+
                                 // Отправляем вторую часть
                                 match stream.write_all(part2.as_bytes().to_vec()).await {
                                     Ok(_) => {
@@ -111,6 +114,7 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                                         panic!("❌ Нода1 не смогла отправить вторую часть данных: {:?}", e);
                                     }
                                 }
+                                stream.write_eof().await;
                                 
                                 // Закрываем XStream после отправки
                                 println!("🛑 Нода1 закрывает XStream...");
@@ -221,10 +225,12 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
             .expect("❌ Не удалось записать данные в XStream - критическая ошибка");
         
         println!("✅ Данные успешно записаны в XStream");
+
+        outbound_xstream.write_eof().await;
         
         // 10. ЧТЕНИЕ ОТВЕТА ОТ НОДЫ1
         println!("📥 Нода2 читает ответ от ноды1...");
-        let response_data = match outbound_xstream.read().await {
+        let response_data = match outbound_xstream.read_to_end().await {
             Ok(data) => {
                 println!("✅ Нода2 успешно прочитала ответ:");
                 println!("   Размер ответа: {} байт", data.len());
