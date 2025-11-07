@@ -114,7 +114,7 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                                         panic!("❌ Нода1 не смогла отправить вторую часть данных: {:?}", e);
                                     }
                                 }
-                                stream.write_eof().await;
+                                //stream.write_eof().await;
                                 
                                 // Закрываем XStream после отправки
                                 println!("🛑 Нода1 закрывает XStream...");

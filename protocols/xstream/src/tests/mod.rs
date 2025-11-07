@@ -63,3 +63,8 @@ pub mod xstream_error_coverage_tests;
 
 #[cfg(test)]
 pub mod pending_streams_coverage_tests;
+
+
+#[cfg(test)]
+pub mod read_to_end_close_quic_test;
+
