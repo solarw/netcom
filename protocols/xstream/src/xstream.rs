@@ -768,6 +768,12 @@ impl XStream {
             self.id, self.peer_id
         );
 
+        // Если запись еще не закрыта, отправляем EOF для совместимости с QUIC
+        if !self.state_manager.is_write_local_closed() {
+            debug!("Stream {:?} write not closed, sending EOF before close", self.id);
+            let _ = self.write_eof().await; // Игнорируем ошибки при закрытии
+        }
+
         // Always mark as locally closed first
         self.state_manager.mark_local_closed();
         debug!("Stream {:?} marked as locally closed", self.id);
