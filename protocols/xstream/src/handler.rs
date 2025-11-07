@@ -1,17 +1,20 @@
+use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
-use super::header::{read_header_from_stream, write_header_to_stream, XStreamHeader};
+use super::header::{XStreamHeader, read_header_from_stream, write_header_to_stream};
 use super::types::{SubstreamRole, XStreamDirection, XStreamID, XStreamIDIterator};
 use super::xstream::XStream;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use libp2p::{
-    swarm::{
-        handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound},
-        ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
-    },
     PeerId, Stream, StreamProtocol,
+    swarm::{
+        ConnectionHandler, ConnectionHandlerEvent, SubstreamProtocol,
+        handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound},
+    },
 };
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 use tracing::{debug, error, info, trace};
 
 use super::consts::XSTREAM_PROTOCOL;
@@ -209,10 +212,15 @@ impl XStreamHandler {
 impl libp2p::core::upgrade::InboundUpgrade<Stream> for XStreamProtocol {
     type Output = (Stream, StreamProtocol);
     type Error = std::io::Error;
-    type Future = futures::future::Ready<Result<Self::Output, Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Output, Self::Error>> + Send>>;
 
     fn upgrade_inbound(self, stream: Stream, _info: StreamProtocol) -> Self::Future {
-        futures::future::ready(Ok((stream, self.protocol.clone())))
+        Box::pin(async move {
+            println!("Inbound upgrade started, suspending for 300ms...");
+            sleep(Duration::from_millis(300)).await; // реальная пауза
+            println!("Inbound upgrade finished!");
+            Ok((stream, self.protocol.clone()))
+        })
     }
 }
 
