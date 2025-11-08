@@ -1,0 +1,299 @@
+//! Базовый пример использования XStream для простого RPC взаимодействия
+//!
+//! Этот пример демонстрирует:
+//! - Создание двух узлов XStream с QUIC транспортом
+//! - Открытие потока между узлами
+//! - Обмен данными в стиле запрос-ответ
+//! - Обработку ошибок
+
+use libp2p::{
+    identity, 
+    swarm::{Swarm, SwarmEvent, dial_opts::DialOpts},
+    quic, Multiaddr, PeerId,
+};
+use libp2p::futures::StreamExt;
+use tokio::sync::{oneshot, mpsc};
+use std::error::Error;
+use std::time::Duration;
+use tokio::time::{sleep, timeout};
+
+// Импортируем XStream компоненты
+use xstream::behaviour::XStreamNetworkBehaviour;
+use xstream::events::XStreamEvent;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    println!("🚀 Запуск примера базового использования XStream с QUIC...");
+
+    // Создаем два узла с QUIC транспортом
+    let (mut client_swarm, client_peer_id) = create_quic_swarm().await?;
+    let (mut server_swarm, server_peer_id) = create_quic_swarm().await?;
+
+    println!("✅ Созданы два узла:");
+    println!("   Клиент: {}", client_peer_id);
+    println!("   Сервер: {}", server_peer_id);
+
+    // Запускаем сервер прослушивание
+    let server_addr: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse()?;
+    server_swarm.listen_on(server_addr.clone()).expect("Failed to listen");
+    println!("✅ Сервер слушает на: {}", server_addr);
+
+    // Получаем реальный адрес сервера
+    let listen_addr = wait_for_listen_addr(&mut server_swarm).await;
+    println!("✅ Сервер реально слушает на: {}", listen_addr);
+
+    // Создаем каналы для передачи потоков
+    let (server_stream_tx, server_stream_rx) = oneshot::channel();
+    let (client_stream_tx, client_stream_rx) = oneshot::channel();
+
+    // Создаем каналы для завершения работы
+    let (server_shutdown_tx, mut server_shutdown_rx) = mpsc::channel(1);
+    let (client_shutdown_tx, mut client_shutdown_rx) = mpsc::channel(1);
+
+    // Запускаем серверную задачу - бесконечный swarm loop
+    let server_task = tokio::spawn({
+        let server_peer_id = server_peer_id.clone();
+        let client_peer_id = client_peer_id.clone();
+        let mut server_stream_tx = Some(server_stream_tx);
+        async move {
+            println!("🎯 Серверная задача запущена, ожидание входящих соединений...");
+            
+            loop {
+                tokio::select! {
+                    event = server_swarm.select_next_some() => {
+                        match event {
+                            SwarmEvent::NewListenAddr { address, .. } => {
+                                println!("📡 Сервер слушает на: {}", address);
+                            }
+                            SwarmEvent::IncomingConnection { connection_id, .. } => {
+                                println!("🔗 Сервер: Входящее соединение: {:?}", connection_id);
+                            }
+                            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                                println!("✅ Сервер: Соединение установлено с: {}", peer_id);
+                                if peer_id == client_peer_id {
+                                    println!("✅ Сервер: Подключился ожидаемый клиент");
+                                }
+                            }
+                            SwarmEvent::Behaviour(event) => {
+                                match event {
+                                    XStreamEvent::IncomingStream { stream } => {
+                                        println!("📥 Сервер: Получен входящий XStream");
+                                        // Передаем поток через oneshot канал
+                                        if let Some(tx) = server_stream_tx.take() {
+                                            let _ = tx.send(stream);
+                                        }
+                                    }
+                                    XStreamEvent::StreamEstablished { peer_id, stream_id } => {
+                                        println!("✅ Сервер: XStream установлен с {} (ID: {:?})", peer_id, stream_id);
+                                    }
+                                    XStreamEvent::StreamError { peer_id, error, .. } => {
+                                        println!("❌ Сервер: Ошибка потока с {}: {}", peer_id, error);
+                                    }
+                                    XStreamEvent::StreamClosed { peer_id, .. } => {
+                                        println!("🔒 Сервер: Поток закрыт с {}", peer_id);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ = server_shutdown_rx.recv() => {
+                        println!("🛑 Серверная задача получила сигнал завершения");
+                        break;
+                    }
+                }
+            }
+            println!("🛑 Серверная задача завершена");
+        }
+    });
+
+    // Запускаем клиентскую задачу - бесконечный swarm loop
+    let client_task = tokio::spawn({
+        let client_peer_id = client_peer_id.clone();
+        let server_peer_id = server_peer_id.clone();
+        let mut client_stream_tx = Some(client_stream_tx);
+        async move {
+            println!("🎯 Клиентская задача запущена, подключение к серверу...");
+            
+            // Даем серверу время запуститься
+            sleep(Duration::from_millis(100)).await;
+
+            // Подключаемся к серверу
+            client_swarm.dial(DialOpts::peer_id(server_peer_id).addresses(vec![listen_addr.clone()]).build()).unwrap();
+            println!("🔗 Клиент: Подключение к серверу по адресу {}", listen_addr);
+            
+            loop {
+                tokio::select! {
+                    event = client_swarm.select_next_some() => {
+                        match event {
+                            SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                                println!("✅ Клиент: Соединение установлено с: {}", peer_id);
+                                if peer_id == server_peer_id {
+                                    println!("✅ Клиент: Подключился к ожидаемому серверу");
+                                    
+                                    // Открываем XStream к серверу
+                                    println!("🔄 Клиент: Открытие XStream к серверу...");
+                                    let (tx, rx) = oneshot::channel();
+                                    client_swarm.behaviour_mut().open_stream(server_peer_id, tx).await;
+                                    if let Some(tx) = client_stream_tx.take() {
+                                        let _ = tx.send(rx);
+                                    }
+                                }
+                            }
+                            SwarmEvent::Behaviour(event) => {
+                                match event {
+                                    XStreamEvent::StreamEstablished { peer_id, stream_id } => {
+                                        println!("✅ Клиент: XStream установлен к {} (ID: {:?})", peer_id, stream_id);
+                                    }
+                                    XStreamEvent::StreamError { peer_id, error, .. } => {
+                                        println!("❌ Клиент: Ошибка потока с {}: {}", peer_id, error);
+                                    }
+                                    XStreamEvent::StreamClosed { peer_id, .. } => {
+                                        println!("🔒 Клиент: Поток закрыт с {}", peer_id);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ = client_shutdown_rx.recv() => {
+                        println!("🛑 Клиентская задача получила сигнал завершения");
+                        break;
+                    }
+                }
+            }
+            println!("🛑 Клиентская задача завершена");
+        }
+    });
+
+    // Получаем клиентский поток
+    let recv_result = timeout(Duration::from_secs(10), client_stream_rx).await;
+    let client_stream_rx = match recv_result {
+        Ok(Ok(rx)) => rx,
+        Ok(Err(_)) => {
+            panic!("client_stream_rx: Sender закрыт до отправки клиентского потока");
+        }
+        Err(_) => {
+            panic!("client_stream_rx: Таймаут ожидания клиентского потока");
+        }
+    };
+
+    let maybe_client_stream = timeout(Duration::from_secs(10), client_stream_rx).await;
+    let client_stream = match maybe_client_stream {
+        Ok(Ok(rx)) => {
+            match rx {
+                Ok(stream) => stream,
+                Err(e) => panic!("client_stream: Ошибка при получении клиентского потока: {:?}", e),
+            }
+        }
+        Ok(Err(_)) => {
+            panic!("client_stream: Sender закрыт до отправки клиентского потока");
+        }
+        Err(_) => {
+            panic!("client_stream: Таймаут ожидания клиентского потока");
+        }
+    };
+
+    // Получаем серверный поток
+    let server_stream = timeout(Duration::from_secs(5), server_stream_rx)
+        .await
+        .expect("Таймаут ожидания серверного потока")
+        .expect("Не удалось получить серверный поток");
+
+    println!("✅ Оба XStream установлены, начинаем тест передачи данных...");
+
+    // Теперь у нас есть оба потока, выполняем параллельные операции
+    let mut client_stream = client_stream;
+    let mut server_stream = server_stream;
+
+    // Запускаем клиентские операции - запись данных и закрытие
+    let client_handle = tokio::spawn(async move {
+        println!("📤 Клиент отправляет запрос серверу...");
+        
+        let request = b"Hello from client!".to_vec();
+        println!("📤 Клиент отправляет запрос: {}", String::from_utf8_lossy(&request));
+        
+        client_stream.write_all(request).await.expect("Не удалось записать данные от клиента");
+        client_stream.flush().await.expect("Не удалось сбросить поток клиента");
+        println!("✅ Данные записаны и сброшены");
+
+        // Закрываем поток
+        println!("🔒 Клиент закрывает поток...");
+        client_stream.close().await.expect("Не удалось закрыть клиентский поток");
+        println!("✅ Клиентский поток закрыт");
+    });
+
+    // Сервер читает запрос и отправляет ответ
+    let server_handle = tokio::spawn(async move {
+        println!("🔄 Сервер обрабатывает входящий поток...");
+        
+        // Читаем запрос
+        let request = server_stream.read_to_end().await.expect("Не удалось прочитать запрос");
+        println!("📥 Сервер получил запрос: {}", String::from_utf8_lossy(&request));
+        
+        // Обрабатываем запрос
+        let response = format!("Server response to: {}", String::from_utf8_lossy(&request));
+        println!("📤 Сервер отправляет ответ: {}", response);
+        
+        // Отправляем ответ
+        server_stream.write_all(response.as_bytes().to_vec()).await.expect("Не удалось записать ответ");
+        server_stream.flush().await.expect("Не удалось сбросить поток сервера");
+        
+        // Закрываем поток
+        println!("🔒 Сервер закрывает поток...");
+        server_stream.close().await.expect("Не удалось закрыть серверный поток");
+        println!("✅ Серверный поток закрыт");
+    });
+
+    // Ждем завершения операций
+    let _ = tokio::join!(client_handle, server_handle);
+
+    // Даем время для завершения всех операций
+    sleep(Duration::from_millis(500)).await;
+
+    // Отправляем сигналы завершения
+    let _ = server_shutdown_tx.send(()).await;
+    let _ = client_shutdown_tx.send(()).await;
+
+    // Ждем завершения задач
+    let _ = tokio::join!(server_task, client_task);
+
+    println!("✅ Пример завершен успешно!");
+    Ok(())
+}
+
+/// Создает узел с QUIC транспортом
+async fn create_quic_swarm() -> Result<(Swarm<XStreamNetworkBehaviour>, PeerId), Box<dyn Error>> {
+    let keypair = identity::Keypair::generate_ed25519();
+    let peer_id = keypair.public().to_peer_id();
+    
+    // Создаем QUIC транспорт
+    let quic_config = quic::Config::new(&keypair);
+    let quic_transport = quic::tokio::Transport::new(quic_config);
+    
+    // Создаем swarm с XStream поведением
+    let swarm = libp2p::SwarmBuilder::with_existing_identity(keypair)
+        .with_tokio()
+        .with_other_transport(|_key| quic_transport)
+        .expect("Не удалось создать QUIC транспорт")
+        .with_behaviour(|_key| XStreamNetworkBehaviour::new())
+        .expect("Не удалось создать XStream поведение")
+        .build();
+    
+    Ok((swarm, peer_id))
+}
+
+/// Ожидает адрес прослушивания от swarm
+async fn wait_for_listen_addr(swarm: &mut Swarm<XStreamNetworkBehaviour>) -> Multiaddr {
+    timeout(Duration::from_secs(2), async {
+        loop {
+            if let SwarmEvent::NewListenAddr { address, .. } = swarm.select_next_some().await {
+                return address;
+            }
+        }
+    })
+    .await
+    .expect("Таймаут ожидания адреса прослушивания")
+}
