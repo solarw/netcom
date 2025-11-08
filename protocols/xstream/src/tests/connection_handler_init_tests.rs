@@ -2,7 +2,8 @@
 // Test 1: Initialization and creation of XStreamHandler
 
 use crate::handler::XStreamHandler;
-use libp2p::{PeerId, swarm::ConnectionHandler};
+use crate::events::EstablishedConnection;
+use libp2p::{Multiaddr, PeerId, swarm::ConnectionHandler, core::transport::PortUse};
 
 #[tokio::test]
 async fn test_handler_initialization() {
@@ -10,7 +11,12 @@ async fn test_handler_initialization() {
     println!("🚀 Testing XStreamHandler initialization...");
     
     // Test 1: Create handler without peer_id
-    let handler = XStreamHandler::new();
+    let connection_id = libp2p::swarm::ConnectionId::new_unchecked(1);
+    let peer_id = PeerId::random();
+    let established_connection = EstablishedConnection::Outbound {
+        addr: "/memory/0".parse().unwrap(),
+    };
+    let handler = XStreamHandler::new(connection_id, peer_id, established_connection);
     println!("✅ Handler created successfully without peer_id");
     
     // Test 2: Verify handler implements ConnectionHandler trait
@@ -22,7 +28,11 @@ async fn test_handler_initialization() {
     
     // Test 3: Create handler with peer_id
     let test_peer_id = PeerId::random();
-    let mut handler_with_peer = XStreamHandler::new();
+    let connection_id = libp2p::swarm::ConnectionId::new_unchecked(2);
+    let established_connection = EstablishedConnection::Outbound {
+        addr: "/memory/0".parse().unwrap(),
+    };
+    let mut handler_with_peer = XStreamHandler::new(connection_id, test_peer_id, established_connection);
     handler_with_peer.set_peer_id(test_peer_id);
     println!("✅ Handler created successfully with peer_id: {}", test_peer_id);
     
@@ -44,7 +54,12 @@ async fn test_handler_protocol_methods() {
     // Test protocol-specific methods of XStreamHandler
     println!("🚀 Testing XStreamHandler protocol methods...");
     
-    let handler = XStreamHandler::new();
+    let connection_id = libp2p::swarm::ConnectionId::new_unchecked(3);
+    let peer_id = PeerId::random();
+    let established_connection = EstablishedConnection::Outbound {
+        addr: "/memory/0".parse().unwrap(),
+    };
+    let handler = XStreamHandler::new(connection_id, peer_id, established_connection);
     
     // Test listen_protocol returns valid protocol
     let protocol = handler.listen_protocol();
@@ -66,7 +81,12 @@ async fn test_handler_peer_id_management() {
     // Test peer_id management in XStreamHandler
     println!("🚀 Testing XStreamHandler peer_id management...");
     
-    let mut handler = XStreamHandler::new();
+    let connection_id = libp2p::swarm::ConnectionId::new_unchecked(4);
+    let peer_id = PeerId::random();
+    let established_connection = EstablishedConnection::Outbound {
+        addr: "/memory/0".parse().unwrap(),
+    };
+    let mut handler = XStreamHandler::new(connection_id, peer_id, established_connection);
     
     // Test setting peer_id
     let peer_id_1 = PeerId::random();

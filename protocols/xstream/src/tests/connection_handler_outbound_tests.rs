@@ -2,6 +2,7 @@
 // Test 4: Outbound command handling in XStreamHandler
 
 use crate::handler::{XStreamHandler, XStreamHandlerIn, XStreamHandlerEvent};
+use crate::events::EstablishedConnection;
 use crate::types::{SubstreamRole, XStreamID};
 use libp2p::{PeerId, swarm::ConnectionHandler};
 
@@ -10,7 +11,7 @@ async fn test_handler_outbound_stream_commands() {
     // Test outbound stream command handling in XStreamHandler
     println!("🚀 Testing XStreamHandler outbound stream commands...");
     
-    let mut handler = XStreamHandler::new();
+    let mut handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     let test_peer_id = PeerId::random();
     handler.set_peer_id(test_peer_id);
     
@@ -44,7 +45,7 @@ async fn test_handler_concurrent_commands() {
     // Test handling concurrent outbound commands
     println!("🚀 Testing XStreamHandler concurrent commands...");
     
-    let mut handler = XStreamHandler::new();
+    let mut handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     let test_peer_id = PeerId::random();
     handler.set_peer_id(test_peer_id);
     
@@ -83,7 +84,7 @@ async fn test_handler_command_validation() {
     // Test command validation and edge cases
     println!("🚀 Testing XStreamHandler command validation...");
     
-    let mut handler = XStreamHandler::new();
+    let mut handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     let test_peer_id = PeerId::random();
     handler.set_peer_id(test_peer_id);
     

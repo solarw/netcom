@@ -14,7 +14,7 @@ use std::task::{Context, Poll};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, trace, warn};
 
-use super::events::XStreamEvent;
+use super::events::{XStreamEvent, IncomingConnectionApprovePolicy, InboundUpgradeDecision, EstablishedConnection};
 use super::handler::{XStreamHandler, XStreamHandlerEvent, XStreamHandlerIn};
 use super::pending_streams::{
     PendingStreamsEvent, PendingStreamsManager, PendingStreamsMessage, SubstreamError,
@@ -45,12 +45,20 @@ pub struct XStreamNetworkBehaviour {
     /// Task for running PendingStreamsManager
     pending_streams_manager_task: Option<tokio::task::JoinHandle<()>>,
 
+    /// Политика принятия решений о входящих апгрейдах
+    pub incoming_approve_policy: IncomingConnectionApprovePolicy,
+
     id_iter: XStreamIDIterator,
 }
 
 impl XStreamNetworkBehaviour {
-    /// Creates a new XStreamNetworkBehaviour
+    /// Creates a new XStreamNetworkBehaviour с политикой AutoApprove по умолчанию
     pub fn new() -> Self {
+        Self::new_with_policy(IncomingConnectionApprovePolicy::AutoApprove)
+    }
+    
+    /// Creates a new XStreamNetworkBehaviour с указанной политикой
+    pub fn new_with_policy(policy: IncomingConnectionApprovePolicy) -> Self {
         // Channel for closure notifications
         let (closure_sender, mut closure_receiver) = mpsc::unbounded_channel();
 
@@ -97,6 +105,7 @@ impl XStreamNetworkBehaviour {
             pending_streams_event_sender,
             pending_streams_message_receiver,
             pending_streams_manager_task: None,
+            incoming_approve_policy: policy,
             id_iter: XStreamIDIterator::new(),
         };
 
@@ -302,14 +311,19 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
 
     fn handle_established_inbound_connection(
         &mut self,
-        _connection_id: ConnectionId,
+        connection_id: ConnectionId,
         peer: PeerId,
-        _local_addr: &Multiaddr,
-        _remote_addr: &Multiaddr,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
-        let mut handler = XStreamHandler::new();
+        let established_connection = EstablishedConnection::Inbound {
+            remote_addr: remote_addr.clone(),
+            local_addr: local_addr.clone(),
+        };
+        
+        let mut handler = XStreamHandler::new(connection_id, peer, established_connection);
         // Set peer ID in handler immediately
-        handler.set_peer_id(peer);
+        //handler.set_peer_id(peer);
         // Provide closure sender to the handler
         handler.set_closure_sender(self.closure_sender.clone());
         Ok(handler)
@@ -317,13 +331,17 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
 
     fn handle_established_outbound_connection(
         &mut self,
-        _connection_id: ConnectionId,
+        connection_id: ConnectionId,
         peer: PeerId,
-        _addr: &Multiaddr,
+        addr: &Multiaddr,
         _role_override: libp2p::core::Endpoint,
-        _port_use: PortUse,
+        port_use: PortUse,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
-        let mut handler = XStreamHandler::new();
+        let established_connection = EstablishedConnection::Outbound {
+            addr: addr.clone(),
+        };
+        
+        let mut handler = XStreamHandler::new(connection_id, peer, established_connection);
         // Set peer ID in handler immediately
         handler.set_peer_id(peer);
         // Provide closure sender to the handler
@@ -406,6 +424,24 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                         peer_id,
                         stream_id,
                     }));
+            }
+            XStreamHandlerEvent::InboundUpgradeRequest { peer_id, connection_id, response_sender } => {
+                match self.incoming_approve_policy {
+                    IncomingConnectionApprovePolicy::AutoApprove => {
+                        // Автоматически одобряем без генерации события
+                        let _ = response_sender.send(InboundUpgradeDecision::Approved);
+                    }
+                    IncomingConnectionApprovePolicy::ApproveViaEvent => {
+                        // Генерируем событие для пользовательской обработки
+                        self.events.push(ToSwarm::GenerateEvent(
+                            XStreamEvent::InboundUpgradeRequest {
+                                peer_id,
+                                connection_id,
+                                response_sender,
+                            }
+                        ));
+                    }
+                }
             } // In a real implementation, you'd have the following additional cases:
               // XStreamHandlerEvent::IncomingStreamRaw { stream, protocol } => {
               //     // Pass raw stream to PendingStreamsManager

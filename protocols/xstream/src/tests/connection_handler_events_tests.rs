@@ -2,6 +2,7 @@
 // Test 2: Event handling in XStreamHandler
 
 use crate::handler::{XStreamHandler, XStreamHandlerIn, XStreamHandlerEvent};
+use crate::events::EstablishedConnection;
 use crate::types::{SubstreamRole, XStreamID};
 use libp2p::{PeerId, swarm::ConnectionHandler};
 
@@ -10,7 +11,7 @@ async fn test_handler_event_processing() {
     // Test processing of behavior events in XStreamHandler
     println!("🚀 Testing XStreamHandler event processing...");
     
-    let mut handler = XStreamHandler::new();
+    let mut handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     let test_peer_id = PeerId::random();
     handler.set_peer_id(test_peer_id);
     
@@ -43,7 +44,7 @@ async fn test_handler_multiple_events() {
     // Test handling multiple consecutive events
     println!("🚀 Testing XStreamHandler multiple events handling...");
     
-    let mut handler = XStreamHandler::new();
+    let mut handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     let test_peer_id = PeerId::random();
     handler.set_peer_id(test_peer_id);
     
@@ -77,7 +78,7 @@ async fn test_handler_event_validation() {
     // Test event validation and error handling
     println!("🚀 Testing XStreamHandler event validation...");
     
-    let mut handler = XStreamHandler::new();
+    let mut handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     let test_peer_id = PeerId::random();
     handler.set_peer_id(test_peer_id);
     

@@ -1,11 +1,13 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use std::future::Future;
 
 use super::header::{XStreamHeader, read_header_from_stream, write_header_to_stream};
 use super::types::{SubstreamRole, XStreamDirection, XStreamID, XStreamIDIterator};
 use super::xstream::XStream;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use libp2p::swarm::ConnectionId;
 use libp2p::{
     PeerId, Stream, StreamProtocol,
     swarm::{
@@ -13,11 +15,12 @@ use libp2p::{
         handler::{ConnectionEvent, FullyNegotiatedInbound, FullyNegotiatedOutbound},
     },
 };
-use tokio::sync::mpsc;
-use tokio::time::sleep;
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, trace};
 
 use super::consts::XSTREAM_PROTOCOL;
+use super::events::{InboundUpgradeDecision, IncomingConnectionApprovePolicy, EstablishedConnection};
 
 /// Возможные события, которые handler может отправить в behaviour
 #[derive(Debug)]
@@ -48,6 +51,15 @@ pub enum XStreamHandlerEvent {
         /// Идентификатор потока
         stream_id: XStreamID,
     },
+    /// Запрос на принятие решения о входящем апгрейде
+    InboundUpgradeRequest {
+        /// Идентификатор пира
+        peer_id: PeerId,
+        /// Идентификатор соединения
+        connection_id: ConnectionId,
+        /// Канал для отправки решения
+        response_sender: oneshot::Sender<InboundUpgradeDecision>,
+    },
 }
 
 /// Команды, которые behaviour может отправить в handler
@@ -73,12 +85,46 @@ pub struct XStreamOpenInfo {
 #[derive(Debug, Clone)]
 pub struct XStreamProtocol {
     protocol: StreamProtocol,
+    peer_id: PeerId,
+    connection_id: ConnectionId,
+    upgrade_event_sender: mpsc::UnboundedSender<XStreamHandlerEvent>,
 }
 
 impl XStreamProtocol {
     /// Создает новый протокол XStream
-    pub fn new(protocol: StreamProtocol) -> Self {
-        Self { protocol }
+    pub fn new(
+        protocol: StreamProtocol,
+        peer_id: PeerId,
+        connection_id: ConnectionId,
+        upgrade_event_sender: mpsc::UnboundedSender<XStreamHandlerEvent>,
+    ) -> Self {
+        Self { 
+            protocol, 
+            peer_id, 
+            connection_id, 
+            upgrade_event_sender 
+        }
+    }
+}
+
+
+// Реализация upgrade для нашего протокола
+impl libp2p::core::upgrade::OutboundUpgrade<Stream> for XStreamProtocol {
+    type Output = (Stream, StreamProtocol);
+    type Error = std::io::Error;
+    type Future = futures::future::Ready<Result<Self::Output, Self::Error>>;
+
+    fn upgrade_outbound(self, stream: Stream, _info: StreamProtocol) -> Self::Future {
+        futures::future::ready(Ok((stream, self.protocol.clone())))
+    }
+}
+
+impl libp2p::core::upgrade::UpgradeInfo for XStreamProtocol {
+    type Info = StreamProtocol;
+    type InfoIter = std::iter::Once<Self::Info>;
+
+    fn protocol_info(&self) -> Self::InfoIter {
+        std::iter::once(self.protocol.clone())
     }
 }
 
@@ -98,11 +144,20 @@ pub struct XStreamHandler {
     outgoing_event_sender: mpsc::UnboundedSender<XStreamHandlerEvent>,
     /// Receiver for messages from PendingStreamsManager
     outgoing_event_receiver: mpsc::UnboundedReceiver<XStreamHandlerEvent>,
+
+    connection_id: ConnectionId,
+    remote_peer_id: PeerId,
+    /// Информация об установленном соединении
+    established_connection: EstablishedConnection,
 }
 
 impl XStreamHandler {
     /// Создает новый XStreamHandler
-    pub fn new() -> Self {
+    pub fn new(
+        connection_id: ConnectionId,
+        peer_id: PeerId,
+        established_connection: EstablishedConnection,
+    ) -> Self {
         // Используем дефолтный PeerId, который будет заменен позже
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
@@ -113,6 +168,9 @@ impl XStreamHandler {
             closure_sender: None,
             outgoing_event_sender: tx,
             outgoing_event_receiver: rx,
+            connection_id: connection_id,
+            remote_peer_id: peer_id,
+            established_connection: established_connection,
         }
     }
 
@@ -194,7 +252,12 @@ impl XStreamHandler {
         role: SubstreamRole,
     ) -> SubstreamProtocol<XStreamProtocol, XStreamOpenInfo> {
         // Создаем протокол с нашим StreamProtocol
-        let proto = XStreamProtocol::new(XSTREAM_PROTOCOL.clone());
+        let proto = XStreamProtocol::new(
+            XSTREAM_PROTOCOL.clone(),
+            self.remote_peer_id,
+            self.connection_id,
+            self.outgoing_event_sender.clone(),
+        );
 
         // Создаем информацию об открытии
         let info = XStreamOpenInfo { stream_id, role };
@@ -216,33 +279,52 @@ impl libp2p::core::upgrade::InboundUpgrade<Stream> for XStreamProtocol {
 
     fn upgrade_inbound(self, stream: Stream, _info: StreamProtocol) -> Self::Future {
         Box::pin(async move {
-            println!("Inbound upgrade started, suspending for 300ms...");
-            sleep(Duration::from_millis(300)).await; // реальная пауза
-            println!("Inbound upgrade finished!");
-            Ok((stream, self.protocol.clone()))
+            // Создаем канал для принятия решения
+            let (response_sender, response_receiver) = oneshot::channel();
+            
+            // Отправляем запрос в Behaviour
+            let request = XStreamHandlerEvent::InboundUpgradeRequest {
+                peer_id: self.peer_id,
+                connection_id: self.connection_id,
+                response_sender,
+            };
+            
+            // Отправляем событие через канал
+            if let Err(e) = self.upgrade_event_sender.send(request) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    format!("Failed to send upgrade request: {}", e)
+                ));
+            }
+            
+            // Ждем решение с таймаутом
+            match timeout(Duration::from_secs(10), response_receiver).await {
+                Ok(Ok(decision)) => {
+                    match decision {
+                        InboundUpgradeDecision::Approved => {
+                            sleep(Duration::from_millis(300)).await;
+                            Ok((stream, self.protocol.clone()))
+                        }
+                        InboundUpgradeDecision::Rejected(reason) => {
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::ConnectionRefused,
+                                reason
+                            ))
+                        }
+                    }
+                }
+                _ => {
+                    // Таймаут или ошибка канала - отклоняем по умолчанию
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionRefused,
+                        "Decision timeout"
+                    ))
+                }
+            }
         })
     }
 }
 
-// Реализация upgrade для нашего протокола
-impl libp2p::core::upgrade::OutboundUpgrade<Stream> for XStreamProtocol {
-    type Output = (Stream, StreamProtocol);
-    type Error = std::io::Error;
-    type Future = futures::future::Ready<Result<Self::Output, Self::Error>>;
-
-    fn upgrade_outbound(self, stream: Stream, _info: StreamProtocol) -> Self::Future {
-        futures::future::ready(Ok((stream, self.protocol.clone())))
-    }
-}
-
-impl libp2p::core::upgrade::UpgradeInfo for XStreamProtocol {
-    type Info = StreamProtocol;
-    type InfoIter = std::iter::Once<Self::Info>;
-
-    fn protocol_info(&self) -> Self::InfoIter {
-        std::iter::once(self.protocol.clone())
-    }
-}
 
 impl ConnectionHandler for XStreamHandler {
     type FromBehaviour = XStreamHandlerIn;
@@ -254,7 +336,12 @@ impl ConnectionHandler for XStreamHandler {
 
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, Self::InboundOpenInfo> {
         // Создаем протокол с нашим StreamProtocol
-        let proto = XStreamProtocol::new(XSTREAM_PROTOCOL.clone());
+        let proto = XStreamProtocol::new(
+            XSTREAM_PROTOCOL.clone(),
+            self.remote_peer_id,
+            self.connection_id,
+            self.outgoing_event_sender.clone(),
+        );
         SubstreamProtocol::new(proto, ())
     }
 

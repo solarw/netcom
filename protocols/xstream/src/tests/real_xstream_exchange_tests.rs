@@ -71,6 +71,9 @@ async fn test_real_xstream_data_exchange() {
                             println!("🔒 Node A: Stream closed - peer: {}, stream_id: {}", peer_id, stream_id);
                             let _ = event_sender_a_clone.send(XStreamEvent::StreamClosed { peer_id, stream_id });
                         }
+                        XStreamEvent::InboundUpgradeRequest { .. } => {
+                            // Игнорируем событие запроса на апгрейд в тестах
+                        }
                     }
                 }
                 Some(_) => {
@@ -102,6 +105,9 @@ async fn test_real_xstream_data_exchange() {
                         XStreamEvent::StreamClosed { peer_id, stream_id } => {
                             println!("🔒 Node B: Stream closed - peer: {}, stream_id: {}", peer_id, stream_id);
                             let _ = event_sender_b_clone.send(XStreamEvent::StreamClosed { peer_id, stream_id });
+                        }
+                        XStreamEvent::InboundUpgradeRequest { .. } => {
+                            // Игнорируем событие запроса на апгрейд в тестах
                         }
                     }
                 }

@@ -68,3 +68,11 @@ pub mod pending_streams_coverage_tests;
 #[cfg(test)]
 pub mod read_to_end_close_quic_test;
 
+#[cfg(test)]
+pub mod inbound_upgrade_test;
+
+#[cfg(test)]
+pub mod inbound_upgrade_simple_test;
+
+#[cfg(test)]
+pub mod inbound_upgrade_comprehensive_tests;

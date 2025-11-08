@@ -3,8 +3,9 @@
 
 use crate::behaviour::XStreamNetworkBehaviour;
 use crate::handler::{XStreamHandler, XStreamHandlerEvent, XStreamHandlerIn};
+use crate::events::EstablishedConnection;
 use crate::types::{SubstreamRole, XStreamDirection, XStreamID};
-use libp2p::{PeerId, swarm::{Swarm, SwarmEvent, ConnectionHandler}};
+use libp2p::{Multiaddr, PeerId, swarm::{Swarm, SwarmEvent, ConnectionHandler, ConnectionId}, core::transport::PortUse};
 use libp2p_swarm_test::SwarmExt;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -169,7 +170,11 @@ async fn test_handler_outbound_stream_creation() {
     println!("✅ request_open_stream works - generated stream_id: {}", stream_id);
     
     // Test that handler can process open stream commands
-    let mut handler = XStreamHandler::new();
+    let connection_id = ConnectionId::new_unchecked(1);
+    let established_connection = EstablishedConnection::Outbound {
+        addr: "/memory/0".parse().unwrap(),
+    };
+    let mut handler = XStreamHandler::new(connection_id, test_peer_id, established_connection);
     handler.set_peer_id(test_peer_id);
     
     // Send open stream command to handler
@@ -195,7 +200,12 @@ async fn test_handler_protocol_negotiation() {
     println!("🚀 Testing XStreamHandler protocol negotiation...");
     
     // Create handler and test protocol methods
-    let handler = XStreamHandler::new();
+    let connection_id = ConnectionId::new_unchecked(2);
+    let peer_id = PeerId::random();
+    let established_connection = EstablishedConnection::Outbound {
+        addr: "/memory/0".parse().unwrap(),
+    };
+    let handler = XStreamHandler::new(connection_id, peer_id, established_connection);
     
     // Test listen_protocol method
     let listen_protocol = handler.listen_protocol();
@@ -207,7 +217,11 @@ async fn test_handler_protocol_negotiation() {
     
     // Test handler creation with peer_id
     let test_peer_id = PeerId::random();
-    let mut handler_with_peer = XStreamHandler::new();
+    let connection_id = ConnectionId::new_unchecked(3);
+    let established_connection = EstablishedConnection::Outbound {
+        addr: "/memory/0".parse().unwrap(),
+    };
+    let mut handler_with_peer = XStreamHandler::new(connection_id, test_peer_id, established_connection);
     handler_with_peer.set_peer_id(test_peer_id);
     
     println!("✅ Handler creation and configuration works");

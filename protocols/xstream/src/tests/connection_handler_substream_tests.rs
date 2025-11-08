@@ -2,6 +2,7 @@
 // Test 3: Inbound substream handling in XStreamHandler
 
 use crate::handler::{XStreamHandler, XStreamHandlerIn, XStreamHandlerEvent};
+use crate::events::EstablishedConnection;
 use crate::types::{SubstreamRole, XStreamID};
 use libp2p::{PeerId, swarm::{ConnectionHandler, SubstreamProtocol}};
 use libp2p::core::upgrade;
@@ -12,7 +13,7 @@ async fn test_handler_inbound_protocol() {
     // Test inbound protocol handling in XStreamHandler
     println!("🚀 Testing XStreamHandler inbound protocol handling...");
     
-    let handler = XStreamHandler::new();
+    let handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     
     // Test listen_protocol configuration
     let listen_protocol = handler.listen_protocol();
@@ -35,7 +36,7 @@ async fn test_handler_substream_management() {
     // Test substream management in XStreamHandler
     println!("🚀 Testing XStreamHandler substream management...");
     
-    let mut handler = XStreamHandler::new();
+    let mut handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     let test_peer_id = PeerId::random();
     handler.set_peer_id(test_peer_id);
     
@@ -69,7 +70,7 @@ async fn test_handler_protocol_consistency() {
     // Test protocol consistency across handler operations
     println!("🚀 Testing XStreamHandler protocol consistency...");
     
-    let mut handler = XStreamHandler::new();
+    let mut handler = XStreamHandler::new(libp2p::swarm::ConnectionId::new_unchecked(1), PeerId::random(), EstablishedConnection::Outbound { addr: "/memory/0".parse().unwrap() });
     let test_peer_id = PeerId::random();
     handler.set_peer_id(test_peer_id);
     
