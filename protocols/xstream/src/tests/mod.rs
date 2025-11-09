@@ -94,3 +94,12 @@ pub mod strict_data_integrity_tests;
 
 #[cfg(test)]
 pub mod strict_isolation_tests;
+
+#[cfg(test)]
+pub mod close_read_test;
+
+#[cfg(test)]
+pub mod close_write_test;
+
+#[cfg(test)]
+pub mod close_read_quic_test;

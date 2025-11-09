@@ -18,8 +18,14 @@ use super::xstream_error::{ErrorOnRead, ReadError, XStreamError, XStreamReadResu
 /// XStream struct - represents a pair of streams for data transfer
 #[derive(Debug)]
 pub struct XStream {
-    pub stream_main_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
-    pub stream_main_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
+    /// Main stream read half wrapped in Option for safe closure
+    /// Option позволяет безопасно закрыть чтение через присвоение None,
+    /// что вызывает drop внутреннего ReadHalf и уведомляет транспорт о закрытии
+    pub stream_main_read: Arc<tokio::sync::Mutex<Option<futures::io::ReadHalf<Stream>>>>,
+    /// Main stream write half wrapped in Option for safe closure
+    /// Option позволяет безопасно закрыть запись через присвоение None,
+    /// что вызывает drop внутреннего WriteHalf и уведомляет транспорт о закрытии
+    pub stream_main_write: Arc<tokio::sync::Mutex<Option<futures::io::WriteHalf<Stream>>>>,
     pub stream_error_read: Arc<tokio::sync::Mutex<futures::io::ReadHalf<Stream>>>,
     pub stream_error_write: Arc<tokio::sync::Mutex<futures::io::WriteHalf<Stream>>>,
     pub id: XStreamID,
@@ -75,8 +81,10 @@ impl XStream {
         };
 
         Self {
-            stream_main_read: Arc::new(Mutex::new(stream_main_read)),
-            stream_main_write: Arc::new(Mutex::new(stream_main_write)),
+            // Обернуть ReadHalf в Some для безопасного закрытия через присвоение None
+            stream_main_read: Arc::new(Mutex::new(Some(stream_main_read))),
+            // Обернуть WriteHalf в Some для безопасного закрытия через присвоение None
+            stream_main_write: Arc::new(Mutex::new(Some(stream_main_write))),
             stream_error_read: stream_error_read_arc,
             stream_error_write: stream_error_write_arc,
             id,
@@ -91,6 +99,7 @@ impl XStream {
     // ===== UTILITY METHODS TO REDUCE CODE DUPLICATION =====
 
     /// Executes a read operation on the main stream with proper error handling
+    /// Теперь работает с Option<ReadHalf> для безопасного закрытия чтения
     async fn execute_main_read_op<F, R>(&self, operation: F) -> Result<R, std::io::Error>
     where
         F: FnOnce(
@@ -102,10 +111,19 @@ impl XStream {
 
         let stream_main_read = self.stream_main_read.clone();
 
-        // Acquire the lock and perform the read operation
+        // Acquire the lock and check if ReadHalf is available
         let read_result = {
             let mut guard = stream_main_read.lock().await;
-            operation(&mut *guard).await
+            if let Some(ref mut read_half) = *guard {
+                // ReadHalf доступен - выполняем операцию
+                operation(read_half).await
+            } else {
+                // ReadHalf закрыт через close_read() - возвращаем ошибку BrokenPipe
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    format!("Cannot read from stream {:?}: ReadHalf has been closed", self.id),
+                ));
+            }
         };
 
         match read_result {
@@ -125,6 +143,7 @@ impl XStream {
     }
 
     /// Executes a write operation on the main stream with proper error handling
+    /// Теперь работает с Option<WriteHalf> для безопасного закрытия записи
     async fn execute_main_write_op<F, R>(&self, operation: F) -> Result<R, std::io::Error>
     where
         F: FnOnce(
@@ -136,10 +155,19 @@ impl XStream {
 
         let stream_main_write = self.stream_main_write.clone();
 
-        // Acquire the lock and perform the write operation
+        // Acquire the lock and check if WriteHalf is available
         let write_result = {
             let mut guard = stream_main_write.lock().await;
-            operation(&mut *guard).await
+            if let Some(ref mut write_half) = *guard {
+                // WriteHalf доступен - выполняем операцию
+                operation(write_half).await
+            } else {
+                // WriteHalf закрыт через close_write() - возвращаем ошибку BrokenPipe
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    format!("Cannot write to stream {:?}: WriteHalf has been closed", self.id),
+                ));
+            }
         };
 
         match write_result {
@@ -321,7 +349,12 @@ impl XStream {
                 // Try to read more data
                 read_result = async {
                     let mut guard = stream_main_read.lock().await;
-                    guard.read(&mut buf[bytes_read..]).await
+                    if let Some(ref mut read_half) = *guard {
+                        read_half.read(&mut buf[bytes_read..]).await
+                    } else {
+                        // ReadHalf закрыт через close_read()
+                        Ok(0) // Возвращаем EOF для остановки чтения
+                    }
                 } => {
                     match read_result {
                         Ok(0) => {
@@ -417,7 +450,12 @@ impl XStream {
                 // Try to read more data
                 read_result = async {
                     let mut guard = stream_main_read.lock().await;
-                    guard.read(&mut temp_buf).await
+                    if let Some(ref mut read_half) = *guard {
+                        read_half.read(&mut temp_buf).await
+                    } else {
+                        // ReadHalf закрыт через close_read()
+                        Ok(0) // Возвращаем EOF для остановки чтения
+                    }
                 } => {
                     match read_result {
                         Ok(0) => {
@@ -505,7 +543,12 @@ impl XStream {
             // Try to read data
             read_result = async {
                 let mut guard = stream_main_read.lock().await;
-                guard.read(&mut buf).await
+                if let Some(ref mut read_half) = *guard {
+                    read_half.read(&mut buf).await
+                } else {
+                    // ReadHalf закрыт через close_read()
+                    Ok(0) // Возвращаем EOF для остановки чтения
+                }
             } => {
                 match read_result {
                     Ok(0) => {
@@ -762,17 +805,21 @@ impl XStream {
     }
 
     /// Closes the streams and shuts down background tasks
+    /// Использует close_read() и close_write() для полного закрытия потока
+    /// Явное закрытие обеих половин гарантирует корректное завершение потока
+    /// drop половин обязательно для транспортного уровня
     pub async fn close(&mut self) -> Result<(), std::io::Error> {
         info!(
             "Closing XStream with id: {:?} for peer: {}",
             self.id, self.peer_id
         );
 
-        // Если запись еще не закрыта, отправляем EOF для совместимости с QUIC
-        if !self.state_manager.is_write_local_closed() {
-            debug!("Stream {:?} write not closed, sending EOF before close", self.id);
-            let _ = self.write_eof().await; // Игнорируем ошибки при закрытии
-        }
+        // Закрываем запись с корректным завершением
+        self.close_write().await?;
+
+        // Закрываем чтение для полного закрытия потока
+        // Это гарантирует, что удаленная сторона получит ошибки при попытке записи
+        self.close_read().await;
 
         // Always mark as locally closed first
         self.state_manager.mark_local_closed();
@@ -803,32 +850,43 @@ impl XStream {
                 .await;
         }
 
-        // Close main write stream
-        let result = self
-            .execute_main_write_op(|writer| {
-                Box::pin(async move {
-                    let _ = writer.flush().await;
-                    writer.close().await
-                })
-            })
-            .await;
-
-        debug!("Network stream close result: {:?}", result);
-
         // Notify about the state change
         self.state_manager
             .notify_state_change("Stream explicitly closed");
 
-        match result {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                if self.state_manager.is_connection_closed_error(&e) {
-                    Ok(())
-                } else {
-                    Err(e)
-                }
-            }
+        Ok(())
+    }
+
+    /// Безопасно закрывает чтение из основного потока
+    /// Явно вызывает drop внутреннего ReadHalf через присвоение None
+    /// Drop ReadHalf уведомляет транспорт (TCP/QUIC), что мы больше не читаем данные
+    /// Удаленная сторона получит ошибку записи (BrokenPipe или RST), если продолжит писать
+    /// XStream остается клонируемым - все клоны разделяют один и тот же ReadHalf
+    pub async fn close_read(&self) {
+        let mut guard = self.stream_main_read.lock().await;
+        // Явно вызываем drop через присвоение None
+        let old_read_half = std::mem::replace(&mut *guard, None);
+        drop(old_read_half); // Явный drop для ясности
+        debug!("Stream {:?} read half closed via close_read()", self.id);
+    }
+
+    /// Безопасно закрывает запись в основной поток
+    /// Явно вызывает drop внутреннего WriteHalf через присвоение None
+    /// Drop WriteHalf сигнализирует удалённой стороне, что поток больше не будет отправлять данные (EOF/FIN/STOP_SENDING)
+    /// Без этого transport может держать соединение открытым, и удалённая сторона будет писать в никуда
+    /// XStream остается клонируемым - все клоны разделяют один и тот же WriteHalf
+    pub async fn close_write(&self) -> Result<(), std::io::Error> {
+        let mut guard = self.stream_main_write.lock().await;
+        if let Some(mut write_half) = guard.take() {
+            // Сначала flush и close для корректного завершения
+            write_half.flush().await?;
+            write_half.close().await?;
+            // Явный drop для уведомления транспорта
+            drop(write_half);
+            debug!("Stream {:?} write half closed via close_write()", self.id);
+            self.state_manager.mark_write_local_closed();
         }
+        Ok(())
     }
 }
 
