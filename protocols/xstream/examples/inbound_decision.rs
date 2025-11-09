@@ -20,7 +20,7 @@ use std::collections::HashSet;
 
 // Импортируем XStream компоненты
 use xstream::behaviour::XStreamNetworkBehaviour;
-use xstream::events::{XStreamEvent, InboundUpgradeDecision, StreamOpenDecisionSender};
+use xstream::events::XStreamEvent;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -115,7 +115,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     XStreamEvent::StreamClosed { peer_id, .. } => {
                                         println!("🔒 Сервер: Поток закрыт с {}", peer_id);
                                     }
-                                    _ => {}
                                 }
                             }
                             _ => {}
@@ -174,7 +173,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     XStreamEvent::StreamClosed { peer_id, .. } => {
                                         println!("🔒 Клиент: Поток закрыт с {}", peer_id);
                                     }
-                                    _ => {}
+                                    XStreamEvent::IncomingStream { .. } | XStreamEvent::InboundUpgradeRequest { .. } => {
+                                        // Эти события не ожидаются на клиенте
+                                    }
                                 }
                             }
                             _ => {}

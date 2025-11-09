@@ -52,8 +52,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Запускаем серверную задачу - бесконечный swarm loop
     let server_task = tokio::spawn({
-        let server_peer_id = server_peer_id.clone();
-        let client_peer_id = client_peer_id.clone();
+        let _server_peer_id = server_peer_id.clone();
+        let _client_peer_id = client_peer_id.clone();
         let mut server_stream_tx = Some(server_stream_tx);
         async move {
             println!("🎯 Серверная задача запущена, ожидание входящих соединений...");
@@ -110,8 +110,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Запускаем клиентскую задачу - бесконечный swarm loop
     let client_task = tokio::spawn({
-        let client_peer_id = client_peer_id.clone();
-        let server_peer_id = server_peer_id.clone();
+        let _client_peer_id = client_peer_id.clone();
+        let _server_peer_id = server_peer_id.clone();
         let mut client_stream_tx = Some(client_stream_tx);
         async move {
             println!("🎯 Клиентская задача запущена, подключение к серверу...");
