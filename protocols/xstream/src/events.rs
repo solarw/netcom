@@ -23,7 +23,7 @@ pub enum InboundUpgradeDecision {
 
 /// Отправитель решения об открытии потока
 /// Упрощает API для принятия решений о входящих апгрейдах
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StreamOpenDecisionSender {
     /// Внутренний канал для отправки решения
     inner: Arc<Mutex<Option<oneshot::Sender<InboundUpgradeDecision>>>>,
