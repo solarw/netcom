@@ -76,3 +76,21 @@ pub mod inbound_upgrade_simple_test;
 
 #[cfg(test)]
 pub mod inbound_upgrade_comprehensive_tests;
+
+#[cfg(test)]
+pub mod xstream_simple_exchange_tests;
+
+#[cfg(test)]
+pub mod strict_test_utils;
+
+#[cfg(test)]
+pub mod strict_echo_test;
+
+#[cfg(test)]
+pub mod strict_boundary_tests;
+
+#[cfg(test)]
+pub mod strict_data_integrity_tests;
+
+#[cfg(test)]
+pub mod strict_isolation_tests;
