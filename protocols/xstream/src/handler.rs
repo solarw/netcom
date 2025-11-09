@@ -2,6 +2,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 
 use super::header::{XStreamHeader, read_header_from_stream, write_header_to_stream};
 use super::types::{SubstreamRole, XStreamDirection, XStreamID, XStreamIDIterator};
@@ -20,7 +21,7 @@ use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, trace};
 
 use super::consts::XSTREAM_PROTOCOL;
-use super::events::{InboundUpgradeDecision, IncomingConnectionApprovePolicy, EstablishedConnection};
+use super::events::{InboundUpgradeDecision, IncomingConnectionApprovePolicy, EstablishedConnection, StreamOpenDecisionSender};
 
 /// Возможные события, которые handler может отправить в behaviour
 #[derive(Debug)]
@@ -57,8 +58,8 @@ pub enum XStreamHandlerEvent {
         peer_id: PeerId,
         /// Идентификатор соединения
         connection_id: ConnectionId,
-        /// Канал для отправки решения
-        response_sender: oneshot::Sender<InboundUpgradeDecision>,
+        /// Отправитель решения об открытии потока
+        decision_sender: StreamOpenDecisionSender,
     },
 }
 
@@ -282,11 +283,14 @@ impl libp2p::core::upgrade::InboundUpgrade<Stream> for XStreamProtocol {
             // Создаем канал для принятия решения
             let (response_sender, response_receiver) = oneshot::channel();
             
+            // Создаем StreamOpenDecisionSender для удобного API
+            let decision_sender = StreamOpenDecisionSender::new(response_sender);
+            
             // Отправляем запрос в Behaviour
             let request = XStreamHandlerEvent::InboundUpgradeRequest {
                 peer_id: self.peer_id,
                 connection_id: self.connection_id,
-                response_sender,
+                decision_sender,
             };
             
             // Отправляем событие через канал

@@ -1,5 +1,5 @@
 use crate::behaviour::XStreamNetworkBehaviour;
-use crate::events::{IncomingConnectionApprovePolicy, InboundUpgradeDecision, XStreamEvent};
+use crate::events::{IncomingConnectionApprovePolicy, InboundUpgradeDecision, XStreamEvent, StreamOpenDecisionSender};
 use libp2p::{PeerId, swarm::{ConnectionId, SwarmEvent}};
 use tokio::sync::oneshot;
 
@@ -47,13 +47,14 @@ async fn test_inbound_upgrade_decision_types() {
 async fn test_inbound_upgrade_request_event() {
     // Test that the InboundUpgradeRequest event can be created
     let (response_sender, _response_receiver) = oneshot::channel();
+    let decision_sender = StreamOpenDecisionSender::new(response_sender);
     let peer_id = PeerId::random();
     let connection_id = ConnectionId::new_unchecked(1);
     
     let event = XStreamEvent::InboundUpgradeRequest {
         peer_id,
         connection_id,
-        response_sender,
+        decision_sender,
     };
     
     match event {
@@ -62,5 +63,49 @@ async fn test_inbound_upgrade_request_event() {
             assert_eq!(c, connection_id);
         }
         _ => panic!("Expected InboundUpgradeRequest event"),
+    }
+}
+
+#[tokio::test]
+async fn test_stream_open_decision_sender() {
+    // Test that StreamOpenDecisionSender works correctly
+    let (response_sender, response_receiver) = oneshot::channel();
+    let decision_sender = StreamOpenDecisionSender::new(response_sender);
+    
+    // Test approve
+    let result = decision_sender.approve();
+    assert!(result.is_ok());
+    
+    // Verify the decision was sent
+    match response_receiver.await {
+        Ok(decision) => {
+            match decision {
+                InboundUpgradeDecision::Approved => assert!(true),
+                _ => panic!("Expected Approved decision"),
+            }
+        }
+        Err(_) => panic!("Failed to receive decision"),
+    }
+}
+
+#[tokio::test]
+async fn test_stream_open_decision_sender_reject() {
+    // Test that StreamOpenDecisionSender reject works correctly
+    let (response_sender, response_receiver) = oneshot::channel();
+    let decision_sender = StreamOpenDecisionSender::new(response_sender);
+    
+    // Test reject
+    let result = decision_sender.reject("test reason".to_string());
+    assert!(result.is_ok());
+    
+    // Verify the decision was sent
+    match response_receiver.await {
+        Ok(decision) => {
+            match decision {
+                InboundUpgradeDecision::Rejected(reason) => assert_eq!(reason, "test reason"),
+                _ => panic!("Expected Rejected decision"),
+            }
+        }
+        Err(_) => panic!("Failed to receive decision"),
     }
 }

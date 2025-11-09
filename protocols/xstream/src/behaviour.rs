@@ -14,7 +14,7 @@ use std::task::{Context, Poll};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, trace, warn};
 
-use super::events::{XStreamEvent, IncomingConnectionApprovePolicy, InboundUpgradeDecision, EstablishedConnection};
+use super::events::{XStreamEvent, IncomingConnectionApprovePolicy, InboundUpgradeDecision, EstablishedConnection, StreamOpenDecisionSender};
 use super::handler::{XStreamHandler, XStreamHandlerEvent, XStreamHandlerIn};
 use super::pending_streams::{
     PendingStreamsEvent, PendingStreamsManager, PendingStreamsMessage, SubstreamError,
@@ -425,11 +425,11 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                         stream_id,
                     }));
             }
-            XStreamHandlerEvent::InboundUpgradeRequest { peer_id, connection_id, response_sender } => {
+            XStreamHandlerEvent::InboundUpgradeRequest { peer_id, connection_id, decision_sender } => {
                 match self.incoming_approve_policy {
                     IncomingConnectionApprovePolicy::AutoApprove => {
                         // Автоматически одобряем без генерации события
-                        let _ = response_sender.send(InboundUpgradeDecision::Approved);
+                        let _ = decision_sender.approve();
                     }
                     IncomingConnectionApprovePolicy::ApproveViaEvent => {
                         // Генерируем событие для пользовательской обработки
@@ -437,7 +437,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                             XStreamEvent::InboundUpgradeRequest {
                                 peer_id,
                                 connection_id,
-                                response_sender,
+                                decision_sender,
                             }
                         ));
                     }

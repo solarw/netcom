@@ -1,5 +1,6 @@
 use super::types::XStreamID;
 use libp2p::{Multiaddr, PeerId, swarm::ConnectionId};
+use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 /// Политика принятия решений о входящих апгрейдах
@@ -18,6 +19,43 @@ pub enum InboundUpgradeDecision {
     Approved,
     /// Апгрейд отклонен с причиной
     Rejected(String),
+}
+
+/// Отправитель решения об открытии потока
+/// Упрощает API для принятия решений о входящих апгрейдах
+#[derive(Debug)]
+pub struct StreamOpenDecisionSender {
+    /// Внутренний канал для отправки решения
+    inner: Arc<Mutex<Option<oneshot::Sender<InboundUpgradeDecision>>>>,
+}
+
+impl StreamOpenDecisionSender {
+    /// Создает новый отправитель решений
+    pub fn new(sender: oneshot::Sender<InboundUpgradeDecision>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Some(sender))),
+        }
+    }
+
+    /// Разрешает открытие потока
+    pub fn approve(&self) -> Result<(), String> {
+        self.send(InboundUpgradeDecision::Approved)
+    }
+
+    /// Запрещает открытие потока с указанием причины
+    pub fn reject(&self, reason: String) -> Result<(), String> {
+        self.send(InboundUpgradeDecision::Rejected(reason))
+    }
+
+    /// Отправляет решение через внутренний канал
+    fn send(&self, decision: InboundUpgradeDecision) -> Result<(), String> {
+        if let Some(sender) = self.inner.lock().unwrap().take() {
+            sender.send(decision)
+                .map_err(|_| "Failed to send decision - channel closed".to_string())
+        } else {
+            Err("Decision already sent".to_string())
+        }
+    }
 }
 
 /// Установленное соединение с информацией о направлении и адресах
@@ -74,7 +112,7 @@ pub enum XStreamEvent {
         peer_id: PeerId,
         /// Идентификатор соединения
         connection_id: ConnectionId,
-        /// Канал для отправки решения
-        response_sender: oneshot::Sender<InboundUpgradeDecision>,
+        /// Отправитель решения об открытии потока
+        decision_sender: StreamOpenDecisionSender,
     },
 }

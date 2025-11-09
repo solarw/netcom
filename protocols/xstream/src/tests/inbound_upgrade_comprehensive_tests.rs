@@ -1,5 +1,5 @@
 use crate::behaviour::XStreamNetworkBehaviour;
-use crate::events::{IncomingConnectionApprovePolicy, InboundUpgradeDecision, XStreamEvent};
+use crate::events::{IncomingConnectionApprovePolicy, InboundUpgradeDecision, XStreamEvent, StreamOpenDecisionSender};
 use crate::handler::{XStreamHandler, XStreamHandlerEvent};
 use libp2p::{PeerId, swarm::ConnectionId, Multiaddr};
 use tokio::sync::oneshot;
@@ -23,15 +23,16 @@ async fn test_inbound_upgrade_auto_approve_integration() {
     // Test AutoApprove policy integration with handler
     let behaviour = XStreamNetworkBehaviour::new();
     
-    // Create a mock handler event
+    // Create a mock handler event with new API
     let (response_sender, response_receiver) = oneshot::channel();
+    let decision_sender = StreamOpenDecisionSender::new(response_sender);
     let peer_id = PeerId::random();
     let connection_id = ConnectionId::new_unchecked(1);
     
     let handler_event = XStreamHandlerEvent::InboundUpgradeRequest {
         peer_id,
         connection_id,
-        response_sender,
+        decision_sender,
     };
     
     // Simulate the behaviour handling this event
@@ -58,15 +59,16 @@ async fn test_inbound_upgrade_event_via_event_policy() {
         IncomingConnectionApprovePolicy::ApproveViaEvent
     ));
     
-    // Create a mock InboundUpgradeRequest event
+    // Create a mock InboundUpgradeRequest event with new API
     let (response_sender, _response_receiver) = oneshot::channel();
+    let decision_sender = StreamOpenDecisionSender::new(response_sender);
     let peer_id = PeerId::random();
     let connection_id = ConnectionId::new_unchecked(1);
     
     let event = XStreamEvent::InboundUpgradeRequest {
         peer_id,
         connection_id,
-        response_sender,
+        decision_sender,
     };
     
     // Verify the event structure
