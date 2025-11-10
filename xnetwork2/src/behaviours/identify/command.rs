@@ -6,11 +6,7 @@ use libp2p::PeerId;
 #[derive(Debug, Clone)]
 pub enum IdentifyCommand {
     /// Request identify information from a peer
-    RequestIdentify {
-        peer_id: PeerId,
-    },
+    RequestIdentify { peer_id: PeerId },
     /// Send identify information to a peer
-    SendIdentify {
-        peer_id: PeerId,
-    },
+    SendIdentify { peer_id: PeerId },
 }

@@ -1,7 +1,7 @@
 //! Identify behaviour handler for XNetwork2
 
-mod handler;
 mod command;
+mod handler;
 
-pub use handler::IdentifyHandler;
 pub use command::IdentifyCommand;
+pub use handler::IdentifyHandler;

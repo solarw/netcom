@@ -45,24 +45,24 @@ async fn test_inbound_upgrade_decision_types() {
 
 #[tokio::test]
 async fn test_inbound_upgrade_request_event() {
-    // Test that the InboundUpgradeRequest event can be created
+    // Test that the IncomingStreamRequest event can be created
     let (response_sender, _response_receiver) = oneshot::channel();
     let decision_sender = StreamOpenDecisionSender::new(response_sender);
     let peer_id = PeerId::random();
     let connection_id = ConnectionId::new_unchecked(1);
     
-    let event = XStreamEvent::InboundUpgradeRequest {
+    let event = XStreamEvent::IncomingStreamRequest {
         peer_id,
         connection_id,
         decision_sender,
     };
     
     match event {
-        XStreamEvent::InboundUpgradeRequest { peer_id: p, connection_id: c, .. } => {
+        XStreamEvent::IncomingStreamRequest { peer_id: p, connection_id: c, .. } => {
             assert_eq!(p, peer_id);
             assert_eq!(c, connection_id);
         }
-        _ => panic!("Expected InboundUpgradeRequest event"),
+        _ => panic!("Expected IncomingStreamRequest event"),
     }
 }
 

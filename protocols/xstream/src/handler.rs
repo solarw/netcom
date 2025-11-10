@@ -3,7 +3,9 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
+use super::handshake::{read_handshake, write_handshake_error, write_handshake_ok};
 use super::header::{XStreamHeader, read_header_from_stream, write_header_to_stream};
 use super::types::{SubstreamRole, XStreamDirection, XStreamID, XStreamIDIterator};
 use super::xstream::XStream;
@@ -18,7 +20,7 @@ use libp2p::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{sleep, timeout};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 use super::consts::XSTREAM_PROTOCOL;
 use super::events::{InboundUpgradeDecision, IncomingConnectionApprovePolicy, EstablishedConnection, StreamOpenDecisionSender};
@@ -52,8 +54,8 @@ pub enum XStreamHandlerEvent {
         /// Идентификатор потока
         stream_id: XStreamID,
     },
-    /// Запрос на принятие решения о входящем апгрейде
-    InboundUpgradeRequest {
+    /// Запрос на принятие решения о входящем потоке
+    IncomingStreamRequest {
         /// Идентификатор пира
         peer_id: PeerId,
         /// Идентификатор соединения
@@ -113,10 +115,23 @@ impl XStreamProtocol {
 impl libp2p::core::upgrade::OutboundUpgrade<Stream> for XStreamProtocol {
     type Output = (Stream, StreamProtocol);
     type Error = std::io::Error;
-    type Future = futures::future::Ready<Result<Self::Output, Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Output, Self::Error>> + Send>>;
 
-    fn upgrade_outbound(self, stream: Stream, _info: StreamProtocol) -> Self::Future {
-        futures::future::ready(Ok((stream, self.protocol.clone())))
+    fn upgrade_outbound(self, mut stream: Stream, _info: StreamProtocol) -> Self::Future {
+        Box::pin(async move {
+            info!("🤝 Waiting for handshake from peer {}", self.peer_id);
+            
+            let handshake = read_handshake(&mut stream).await?;
+
+            if handshake.ok {
+                info!("✅ Handshake successful with peer {}", self.peer_id);
+                Ok((stream, self.protocol.clone()))
+            } else {
+                let msg = handshake.message.unwrap_or_else(|| "unknown".to_string());
+                error!("❌ Handshake failed with peer {}: {}", self.peer_id, msg);
+                Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, msg))
+            }
+        })
     }
 }
 
@@ -150,6 +165,8 @@ pub struct XStreamHandler {
     remote_peer_id: PeerId,
     /// Информация об установленном соединении
     established_connection: EstablishedConnection,
+    /// Отслеживание активных исходящих запросов (stream_id -> XStreamOpenInfo)
+    active_outbound_requests: HashMap<XStreamID, XStreamOpenInfo>,
 }
 
 impl XStreamHandler {
@@ -172,6 +189,7 @@ impl XStreamHandler {
             connection_id: connection_id,
             remote_peer_id: peer_id,
             established_connection: established_connection,
+            active_outbound_requests: HashMap::new(),
         }
     }
 
@@ -195,9 +213,9 @@ impl XStreamHandler {
         // Отправляем поток как есть в behaviour
         let sender = self.outgoing_event_sender.clone();
         tokio::spawn(async move {
-            sender
-                .send(XStreamHandlerEvent::IncomingStreamEstablished { stream })
-                .unwrap();
+            if let Err(e) = sender.send(XStreamHandlerEvent::IncomingStreamEstablished { stream }) {
+                error!("Failed to send IncomingStreamEstablished event: {}", e);
+            }
         });
         //self.outgoing_events
         //    .push(XStreamHandlerEvent::IncomingStreamEstablished { stream });
@@ -235,13 +253,13 @@ impl XStreamHandler {
                 let reunion_stream = read.reunite(write).unwrap();
 
                 // Отправляем поток в behaviour с информацией о роли и ID
-                sender
-                    .send(XStreamHandlerEvent::OutboundStreamEstablished {
-                        stream: reunion_stream,
-                        role: info.role,
-                        stream_id: info.stream_id,
-                    })
-                    .unwrap();
+                if let Err(e) = sender.send(XStreamHandlerEvent::OutboundStreamEstablished {
+                    stream: reunion_stream,
+                    role: info.role,
+                    stream_id: info.stream_id,
+                }) {
+                    error!("Failed to send OutboundStreamEstablished event: {}", e);
+                }
             }
         });
     }
@@ -278,8 +296,10 @@ impl libp2p::core::upgrade::InboundUpgrade<Stream> for XStreamProtocol {
     type Error = std::io::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Output, Self::Error>> + Send>>;
 
-    fn upgrade_inbound(self, stream: Stream, _info: StreamProtocol) -> Self::Future {
+    fn upgrade_inbound(self, mut stream: Stream, _info: StreamProtocol) -> Self::Future {
         Box::pin(async move {
+            info!("🤝 Handshake started with peer {}", self.peer_id);
+            
             // Создаем канал для принятия решения
             let (response_sender, response_receiver) = oneshot::channel();
             
@@ -287,41 +307,44 @@ impl libp2p::core::upgrade::InboundUpgrade<Stream> for XStreamProtocol {
             let decision_sender = StreamOpenDecisionSender::new(response_sender);
             
             // Отправляем запрос в Behaviour
-            let request = XStreamHandlerEvent::InboundUpgradeRequest {
+            let request = XStreamHandlerEvent::IncomingStreamRequest {
                 peer_id: self.peer_id,
                 connection_id: self.connection_id,
                 decision_sender,
             };
             
-            // Отправляем событие через канал
-            if let Err(e) = self.upgrade_event_sender.send(request) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionRefused,
-                    format!("Failed to send upgrade request: {}", e)
-                ));
-            }
+                // Отправляем событие через канал
+                if let Err(e) = self.upgrade_event_sender.send(request) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionRefused,
+                        format!("Failed to send upgrade request: {}", e)
+                    ));
+                }
             
             // Ждем решение с таймаутом
             match timeout(Duration::from_secs(10), response_receiver).await {
                 Ok(Ok(decision)) => {
                     match decision {
                         InboundUpgradeDecision::Approved => {
-                            sleep(Duration::from_millis(300)).await;
+                            info!("✅ Handshake approved for peer {}", self.peer_id);
+                            write_handshake_ok(&mut stream).await?;
                             Ok((stream, self.protocol.clone()))
                         }
                         InboundUpgradeDecision::Rejected(reason) => {
-                            Err(std::io::Error::new(
-                                std::io::ErrorKind::ConnectionRefused,
-                                reason
-                            ))
+                            warn!("❌ Handshake rejected for peer {}: {}", self.peer_id, reason);
+                            write_handshake_error(&mut stream, &reason).await?;
+                            stream.close().await?;
+                            Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, reason))
                         }
                     }
                 }
+                // Таймаут принятия решения
                 _ => {
-                    // Таймаут или ошибка канала - отклоняем по умолчанию
+                    warn!("⚠️ Handshake timeout with peer {}", self.peer_id);
+                    write_handshake_error(&mut stream, "decision timeout").await?;
                     Err(std::io::Error::new(
                         std::io::ErrorKind::ConnectionRefused,
-                        "Decision timeout"
+                        "decision timeout",
                     ))
                 }
             }
@@ -352,6 +375,9 @@ impl ConnectionHandler for XStreamHandler {
     fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
         match event {
             XStreamHandlerIn::OpenStreamWithRole { stream_id, role } => {
+                // Сохраняем информацию о запросе для отслеживания
+                let info = XStreamOpenInfo { stream_id, role };
+                self.active_outbound_requests.insert(stream_id, info);
                 self.pending_commands
                     .push(XStreamHandlerIn::OpenStreamWithRole { stream_id, role });
             }
@@ -408,6 +434,7 @@ impl ConnectionHandler for XStreamHandler {
         &mut self,
         event: ConnectionEvent<'_, XStreamProtocol, XStreamProtocol, (), XStreamOpenInfo>,
     ) {
+        
         match event {
             ConnectionEvent::FullyNegotiatedInbound(FullyNegotiatedInbound {
                 protocol: (stream, protocol),
@@ -419,17 +446,18 @@ impl ConnectionHandler for XStreamHandler {
                 protocol: (stream, protocol),
                 info,
             }) => {
+                println!("FullyNegotiatedOutbound");
                 self.handle_outbound_stream(stream, protocol, info);
             }
             ConnectionEvent::ListenUpgradeError(error) => {
                 let sender = self.outgoing_event_sender.clone();
                 tokio::spawn(async move {
-                    sender
-                        .send(XStreamHandlerEvent::StreamError {
-                            stream_id: None,
-                            error: format!("Listen upgrade error: {:?}", error.error),
-                        })
-                        .unwrap();
+                    if let Err(e) = sender.send(XStreamHandlerEvent::StreamError {
+                        stream_id: None,
+                        error: format!("Listen upgrade error: {:?}", error.error),
+                    }) {
+                        error!("Failed to send StreamError event: {}", e);
+                    }
                 });
                 //self.outgoing_events.push(XStreamHandlerEvent::StreamError {
                 //    stream_id: None,
@@ -437,21 +465,27 @@ impl ConnectionHandler for XStreamHandler {
                 //});
             }
             ConnectionEvent::DialUpgradeError(error) => {
+                // Получаем информацию о запросе из active_outbound_requests
+                // Поскольку DialUpgradeError не содержит XStreamOpenInfo, мы не можем определить конкретный stream_id
+                // Поэтому отправляем общую ошибку для всех активных запросов
                 let sender = self.outgoing_event_sender.clone();
+                let active_requests: Vec<XStreamID> = self.active_outbound_requests.keys().cloned().collect();
+                
                 tokio::spawn(async move {
-                    sender
-                        .send(XStreamHandlerEvent::StreamError {
-                            stream_id: None,
+                    for stream_id in active_requests {
+                        if let Err(e) = sender.send(XStreamHandlerEvent::StreamError {
+                            stream_id: Some(stream_id),
                             error: format!("Dial upgrade error: {:?}", error.error),
-                        })
-                        .unwrap();
+                        }) {
+                            error!("Failed to send StreamError event: {}", e);
+                        }
+                    }
                 });
-                //self.outgoing_events.push(XStreamHandlerEvent::StreamError {
-                //    stream_id: None,
-                //    error: format!("Dial upgrade error: {:?}", error.error),
-                //});
+                
+                // Очищаем активные запросы после ошибки
+                self.active_outbound_requests.clear();
             }
-            _ => {
+            e => {
                 // Остальные события не представляют интереса для XStream
             }
         }
@@ -469,7 +503,6 @@ impl ConnectionHandler for XStreamHandler {
             self.streams.clear();
 
             for stream_id in stream_ids {
-                println!("1111111111111111111111, poll close");
                 return Poll::Ready(Some(XStreamHandlerEvent::StreamClosed { stream_id }));
             }
         }

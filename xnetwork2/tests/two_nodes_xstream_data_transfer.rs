@@ -1,10 +1,9 @@
 //! Полноценный тест двух нод с XStream: реальный обмен данными и проверка целостности
 
 use std::time::Duration;
-use tokio::time::{timeout, sleep};
+use tokio::time::{sleep, timeout};
 use xnetwork2::Node;
 use xnetwork2::node_events::NodeEvent;
-use xstream::xstream::XStream;
 
 /// Утилита для ожидания конкретного события с таймаутом
 async fn wait_for_event<F>(
@@ -28,7 +27,8 @@ where
                 }
             }
         }
-    }).await?
+    })
+    .await?
 }
 
 /// Тестирует полную передачу данных через XStream между двумя нодами с проверкой целостности
@@ -36,7 +36,7 @@ where
 #[tokio::test]
 async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
     println!("🧪 Запуск полноценного теста XStream с реальным обменом данных (5 секунд)...");
-    
+
     // Таймаут на весь тест - 5 секунд
     let result = timeout(Duration::from_secs(5), async {
         // 1. СОЗДАНИЕ ДВУХ НОД
@@ -45,33 +45,33 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
             .expect("❌ Не удалось создать первую ноду - критическая ошибка");
         let mut node2 = Node::new().await
             .expect("❌ Не удалось создать вторую ноду - критическая ошибка");
-        
+
         println!("✅ Ноды созданы:");
         println!("   Node1 PeerId: {}", node1.peer_id());
         println!("   Node2 PeerId: {}", node2.peer_id());
-        
+
         // 2. ПОДПИСКА НА СОБЫТИЯ ДО ЗАПУСКА
         println!("📡 Подписываемся на события обеих нод...");
         let mut node1_events = node1.subscribe();
         let mut node2_events = node2.subscribe();
-        
+
         // Создаем oneshot канал для передачи данных
         let (data_sender, data_receiver) = tokio::sync::oneshot::channel();
-        
+
         // Создаем отдельный receiver для задачи ноды1
         let mut node1_events_task = node1.subscribe();
-        
+
         // Запускаем задачу для обработки входящих XStream на ноде1
         let node1_task = tokio::spawn(async move {
             println!("🎯 Нода1 ожидает входящий XStream...");
-            
+
             while let Ok(event) = node1_events_task.recv().await {
                 match event {
                     NodeEvent::XStreamIncoming { mut stream } => {
                         println!("✅ Нода1 получила входящий XStream:");
                         println!("   Stream ID: {:?}", stream.id);
                         println!("   Peer ID: {}", stream.peer_id);
-                        
+
                         // Читаем данные из входящего XStream
                         println!("📥 Нода1 читает данные из XStream...");
                         match stream.read_to_end().await {
@@ -79,19 +79,19 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                                 println!("✅ Нода1 успешно прочитала данные:");
                                 println!("   Размер данных: {} байт", data.len());
                                 println!("   Данные: {}", String::from_utf8_lossy(&data));
-                                
+
                                 // Модифицируем данные - добавляем "Real Response" по частям
                                 let original_data = String::from_utf8_lossy(&data);
                                 let part1 = format!("{} Real", original_data);
                                 let part2 = " Response".to_string();
-                                
+
                                 println!("🔄 Нода1 модифицирует данные по частям:");
                                 println!("   Часть 1: {}", part1);
                                 println!("   Часть 2: {}", part2);
-                                
+
                                 // Отправляем модифицированные данные по частям
                                 println!("📤 Нода1 отправляет модифицированные данные по частям...");
-                                
+
                                 // Отправляем первую часть
                                 match stream.write_all(part1.as_bytes().to_vec()).await {
                                     Ok(_) => {
@@ -115,14 +115,14 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                                     }
                                 }
                                 //stream.write_eof().await;
-                                
+
                                 // Закрываем XStream после отправки
                                 println!("🛑 Нода1 закрывает XStream...");
                                 match stream.close().await {
                                     Ok(_) => println!("✅ Нода1 успешно закрыла XStream"),
                                     Err(e) => println!("⚠️  Нода1: ошибка при закрытии XStream: {:?}", e),
                                 }
-                                
+
                                 // Пересылаем оригинальные данные через oneshot канал для проверки
                                 let _ = data_sender.send(data);
                             }
@@ -136,25 +136,25 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                 }
             }
         });
-        
+
         // 3. ЗАПУСК ОБЕИХ НОД
         println!("🚀 Запускаем обе ноды...");
         node1.start().await
             .expect("❌ Не удалось запустить первую ноду - критическая ошибка");
         node2.start().await
             .expect("❌ Не удалось запустить вторую ноду - критическая ошибка");
-        
+
         println!("✅ Обе ноды запущены:");
         println!("   Node1 состояние: {}", node1.get_task_status());
         println!("   Node2 состояние: {}", node2.get_task_status());
-        
+
         // 4. НОДА1 НАЧИНАЕТ СЛУШАТЬ
         println!("🎯 Нода1 начинает прослушивание...");
         node1.commander.listen_on("/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap()).await
             .expect("❌ Не удалось выполнить listen_on - критическая ошибка");
-        
+
         println!("✅ Команда listen_on выполнена, ожидаем событие...");
-        
+
         // 5. ОЖИДАНИЕ СОБЫТИЯ NewListenAddr НА НОДЕ1
         println!("⏳ Ожидаем событие NewListenAddr на ноде1 (таймаут 1 секунда)...");
         let listen_event = wait_for_event(
@@ -162,72 +162,72 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
             |e| matches!(e, NodeEvent::NewListenAddr { .. }),
             Duration::from_secs(1)
         ).await.expect("❌ Таймаут ожидания события NewListenAddr - событие не пришло за 1 секунду");
-        
+
         let listen_addr = match listen_event {
             NodeEvent::NewListenAddr { address } => address,
             _ => panic!("❌ Получено неожиданное событие: {:?}", listen_event),
         };
-        
+
         println!("✅ Нода1 слушает на адресе: {}", listen_addr);
-        
+
         // 6. НОДА2 ПОДКЛЮЧАЕТСЯ К НОДЕ1
         println!("🔗 Нода2 подключается к ноде1...");
         node2.commander.dial(node1.peer_id().clone(), listen_addr.clone()).await
             .expect("❌ Не удалось выполнить dial - критическая ошибка");
-        
+
         println!("✅ Команда dial выполнена, ожидаем события подключения...");
-        
+
         // 7. ОЖИДАНИЕ СОБЫТИЙ ConnectionEstablished НА ОБЕИХ НОДАХ
         println!("⏳ Ожидаем события ConnectionEstablished на обеих нодах (таймаут 2 секунды)...");
-        
+
         // Ожидаем ConnectionEstablished на ноде2
         let node2_connected = wait_for_event(
             &mut node2_events,
             |e| matches!(e, NodeEvent::ConnectionEstablished { .. }),
             Duration::from_secs(2)
         ).await.expect("❌ Таймаут ожидания события ConnectionEstablished - соединение не установлено за 2 секунды");
-        
+
         let node2_peer_id = match node2_connected {
             NodeEvent::ConnectionEstablished { peer_id } => peer_id,
             _ => panic!("❌ Нода2 получила неожиданное событие: {:?}", node2_connected),
         };
-        
+
         // Проверяем, что ноды видят друг друга
-        assert_eq!(node2_peer_id, *node1.peer_id(), 
-            "❌ Нода2 видит подключение от неверного пира: {} вместо {}", 
+        assert_eq!(node2_peer_id, *node1.peer_id(),
+            "❌ Нода2 видит подключение от неверного пира: {} вместо {}",
             node2_peer_id, node1.peer_id());
-        
+
         println!("✅ Соединение установлено корректно:");
         println!("   Node2 → Node1: {}", node2_peer_id);
-        
+
         // 8. XSTREAM ВЗАИМОДЕЙСТВИЕ
         println!("📡 Начинаем XStream взаимодействие...");
-        
+
         // Нода2 открывает XStream к ноде1
         println!("🔄 Нода2 открывает XStream к ноде1...");
         let mut outbound_xstream = node2.commander.open_xstream(node1.peer_id().clone()).await
             .expect("❌ Не удалось открыть XStream - критическая ошибка");
-        
+
         println!("✅ XStream открыт успешно:");
         println!("   Stream ID: {:?}", outbound_xstream.id);
         println!("   Peer ID: {}", outbound_xstream.peer_id);
-        
+
         // 9. ПЕРЕДАЧА ДАННЫХ ЧЕРЕЗ XSTREAM
         println!("📤 Передаем данные через XStream...");
-        
+
         // Тестовые данные для передачи
         let test_data = b"Hello from Node2 via XStream! This is a real data transfer test.";
-        let test_data_wrong = b"Hello from Node2 via XStream! This is a real data transfer tesdsffdt.";
+        let _test_data_wrong = b"Hello from Node2 via XStream! This is a real data transfer tesdsffdt.";
         println!("📝 Отправляемые данные: {}", String::from_utf8_lossy(test_data));
-        
+
         // Записываем данные в XStream
         outbound_xstream.write_all(test_data.to_vec()).await
             .expect("❌ Не удалось записать данные в XStream - критическая ошибка");
-        
+
         println!("✅ Данные успешно записаны в XStream");
 
-        outbound_xstream.write_eof().await;
-        
+        let _ = outbound_xstream.write_eof().await;
+
         // 10. ЧТЕНИЕ ОТВЕТА ОТ НОДЫ1
         println!("📥 Нода2 читает ответ от ноды1...");
         let response_data = match outbound_xstream.read_to_end().await {
@@ -241,41 +241,41 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                 panic!("❌ Нода2 не смогла прочитать ответ: {:?}", e);
             }
         };
-        
+
         // Закрываем XStream после получения ответа
         println!("🛑 Нода2 закрывает XStream...");
         match outbound_xstream.close().await {
             Ok(_) => println!("✅ Нода2 успешно закрыла XStream"),
             Err(e) => println!("⚠️  Нода2: ошибка при закрытии XStream: {:?}", e),
         }
-        
+
         // 11. ПРОВЕРКА МОДИФИЦИРОВАННЫХ ДАННЫХ
         println!("🔍 Проверяем модифицированные данные...");
-        
+
         // Ожидаемые модифицированные данные
         let mut expected_response = test_data.to_vec();
         expected_response.extend_from_slice(b" Real Response");
-        
+
         println!("📊 Сравниваем данные:");
         println!("   Ожидаемый ответ: {} байт", expected_response.len());
         println!("   Полученный ответ: {} байт", response_data.len());
         println!("   Ожидаемые данные: {}", String::from_utf8_lossy(&expected_response));
         println!("   Полученные данные: {}", String::from_utf8_lossy(&response_data));
-        
+
         // Проверяем, что модифицированные данные совпадают
-        assert_eq!(expected_response.len(), response_data.len(), 
-            "❌ Размеры ответа не совпадают: ожидалось {} байт, получено {} байт", 
+        assert_eq!(expected_response.len(), response_data.len(),
+            "❌ Размеры ответа не совпадают: ожидалось {} байт, получено {} байт",
             expected_response.len(), response_data.len());
-        
-        assert_eq!(expected_response, response_data.as_slice(), 
-            "❌ Ответ не совпадает с ожидаемым!\nОжидалось: {}\nПолучено: {}", 
+
+        assert_eq!(expected_response, response_data.as_slice(),
+            "❌ Ответ не совпадает с ожидаемым!\nОжидалось: {}\nПолучено: {}",
             String::from_utf8_lossy(&expected_response), String::from_utf8_lossy(&response_data));
-        
+
         println!("✅ Ответ совпадает! Модифицированные данные корректны.");
-        
+
         // 12. ОЖИДАНИЕ ЗАВЕРШЕНИЯ ЧТЕНИЯ ДАННЫХ НА НОДЕ1
         println!("⏳ Ожидаем завершение чтения данных на ноде1 (таймаут 1 секунда)...");
-        
+
         // Получаем оригинальные данные через oneshot канал для дополнительной проверки
         let received_bytes = match timeout(Duration::from_secs(1), data_receiver).await {
             Ok(Ok(data)) => {
@@ -289,53 +289,53 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
                 panic!("❌ Таймаут ожидания оригинальных данных через oneshot канал");
             }
         };
-        
+
         // 13. ПРОВЕРКА ЦЕЛОСТНОСТИ ОРИГИНАЛЬНЫХ ДАННЫХ
         println!("🔍 Проверяем целостность оригинальных данных...");
-        
+
         println!("📊 Сравниваем оригинальные данные:");
         println!("   Отправлено: {} байт", test_data.len());
         println!("   Получено: {} байт", received_bytes.len());
         println!("   Отправленные данные: {}", String::from_utf8_lossy(test_data));
         println!("   Полученные данные: {}", String::from_utf8_lossy(&received_bytes));
-        
+
         // Проверяем, что оригинальные данные совпадают
-        assert_eq!(test_data.len(), received_bytes.len(), 
-            "❌ Размеры оригинальных данных не совпадают: отправлено {} байт, получено {} байт", 
+        assert_eq!(test_data.len(), received_bytes.len(),
+            "❌ Размеры оригинальных данных не совпадают: отправлено {} байт, получено {} байт",
             test_data.len(), received_bytes.len());
-        
-        assert_eq!(test_data, received_bytes.as_slice(), 
-            "❌ Оригинальные данные не совпадают!\nОтправлено: {}\nПолучено: {}", 
+
+        assert_eq!(test_data, received_bytes.as_slice(),
+            "❌ Оригинальные данные не совпадают!\nОтправлено: {}\nПолучено: {}",
             String::from_utf8_lossy(test_data), String::from_utf8_lossy(&received_bytes));
-        
+
         println!("✅ Оригинальные данные совпадают! Отправленные данные равны принятым.");
-        
+
         // 12. GRACEFUL SHUTDOWN ОБЕИХ НОД
         println!("🛑 Выполняем graceful shutdown обеих нод...");
         node1.commander.shutdown().await
             .expect("❌ Не удалось выполнить graceful shutdown ноды1 - критическая ошибка");
         node2.commander.shutdown().await
             .expect("❌ Не удалось выполнить graceful shutdown ноды2 - критическая ошибка");
-        
+
         println!("⏳ Ожидаем завершение фоновых задач...");
         node1.wait_for_shutdown().await
             .expect("❌ Не удалось дождаться завершения ноды1 - критическая ошибка");
         node2.wait_for_shutdown().await
             .expect("❌ Не удалось дождаться завершения ноды2 - критическая ошибка");
-        
+
         // Отменяем задачу ноды1
         node1_task.abort();
-        
+
         println!("✅ Обе ноды корректно завершили работу");
-        
+
         // 13. ФИНАЛЬНАЯ ПРОВЕРКА
-        assert_eq!(node1.get_task_status(), "not_started", 
+        assert_eq!(node1.get_task_status(), "not_started",
             "❌ Нода1 не перешла в состояние 'not_started' после завершения");
-        assert_eq!(node2.get_task_status(), "not_started", 
+        assert_eq!(node2.get_task_status(), "not_started",
             "❌ Нода2 не перешла в состояние 'not_started' после завершения");
         assert!(!node1.is_running(), "❌ Нода1 все еще работает после graceful shutdown");
         assert!(!node2.is_running(), "❌ Нода2 все еще работает после graceful shutdown");
-        
+
         println!("🎉 Полноценный тест XStream с реальным обменом данных успешно завершен!");
         println!("✅ Все условия теста выполнены:");
         println!("   - Две ноды созданы и соединены");
@@ -344,7 +344,7 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
         println!("   - Отправленные данные равны принятым");
         println!("   - Таймаут 5 секунд соблюден");
     }).await;
-    
+
     // Проверяем, что тест уложился в 5 секунд
     match result {
         Ok(_) => println!("✅ Тест выполнен за {} секунд - ВСЕГО 5 СЕКУНД!", 5),

@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                             SwarmEvent::Behaviour(event) => {
                                 match event {
-                                    XStreamEvent::InboundUpgradeRequest { peer_id, connection_id, decision_sender } => {
+                                    XStreamEvent::IncomingStreamRequest { peer_id, connection_id, decision_sender } => {
                                         println!("📥 Сервер: Запрос на входящий апгрейд от {} (connection: {:?})", peer_id, connection_id);
                                         
                                         // Механизм принятия решения
@@ -173,7 +173,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     XStreamEvent::StreamClosed { peer_id, .. } => {
                                         println!("🔒 Клиент: Поток закрыт с {}", peer_id);
                                     }
-                                    XStreamEvent::IncomingStream { .. } | XStreamEvent::InboundUpgradeRequest { .. } => {
+                                    XStreamEvent::IncomingStream { .. } | XStreamEvent::IncomingStreamRequest { .. } => {
                                         // Эти события не ожидаются на клиенте
                                     }
                                 }

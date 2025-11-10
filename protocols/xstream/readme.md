@@ -155,7 +155,7 @@ let behaviour = XStreamNetworkBehaviour::new_with_policy(
 
 // Обработка событий запросов
 match swarm.next().await {
-    Some(SwarmEvent::Behaviour(XStreamEvent::InboundUpgradeRequest {
+    Some(SwarmEvent::Behaviour(XStreamEvent::IncomingStreamRequest {
         peer_id,
         connection_id,
         response_sender,
@@ -258,7 +258,7 @@ async fn handle_inbound_upgrade(
 ) {
     while let Some(event) = swarm.next().await {
         match event {
-            SwarmEvent::Behaviour(XStreamEvent::InboundUpgradeRequest {
+            SwarmEvent::Behaviour(XStreamEvent::IncomingStreamRequest {
                 peer_id,
                 connection_id,
                 response_sender,

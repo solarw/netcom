@@ -266,12 +266,18 @@ impl XStreamNetworkBehaviour {
         self.pending_outgoing_streams.insert(stream_id, response);
     }
 
+    /// Handles stream opening errors for specific stream_id
+    pub fn handle_stream_open_error(&mut self, stream_id: XStreamID, error: String) {
+        if let Some(sender) = self.pending_outgoing_streams.remove(&stream_id) {
+            let _ = sender.send(Err(error));
+        }
+    }
+
     /// Notifies that a stream is closed
     pub fn notify_stream_closed(&mut self, peer_id: PeerId, stream_id: XStreamID) {
         debug!("Manual notification of stream closure: {:?}", stream_id);
         // Remove the stream from the active streams map
         self.streams.remove(&(peer_id, stream_id));
-        println!("11111111111111 notify_stream_closed");
         // Generate the appropriate event
         self.events
             .push(ToSwarm::GenerateEvent(XStreamEvent::StreamClosed {
@@ -362,6 +368,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
         // modify the XStreamHandlerEvent to include the new variants
         match event {
             XStreamHandlerEvent::IncomingStreamEstablished { stream } => {
+                println!("INCOMING");
                 let direction = XStreamDirection::Inbound;
                 if let Err(e) =
                     self.pending_streams_event_sender
@@ -383,7 +390,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                 stream,
             } => {
                 let direction = XStreamDirection::Outbound;
-
+                println!("OUTBOUND");
                 if let Err(e) =
                     self.pending_streams_event_sender
                         .send(PendingStreamsEvent::NewStream {
@@ -402,6 +409,21 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                 // If stream_id is known, remove the stream from HashMap
                 if let Some(stream_id) = stream_id {
                     self.streams.remove(&(peer_id, stream_id));
+                    // Also handle stream opening errors for pending requests
+                    self.handle_stream_open_error(stream_id, error.clone());
+                } else {
+                    // If stream_id is None, this might be an error from swarm_handler rejecting an incoming stream
+                    // We need to find and fail any pending outgoing streams to this peer
+                    let pending_stream_ids: Vec<XStreamID> = self.pending_outgoing_streams
+                        .keys()
+                        .cloned()
+                        .collect();
+                    
+                    for stream_id in pending_stream_ids {
+                        // For now, we'll fail all pending streams to this peer
+                        // In a more sophisticated implementation, we might want to track which stream_id corresponds to which peer
+                        self.handle_stream_open_error(stream_id, error.clone());
+                    }
                 }
 
                 // Send error event
@@ -415,7 +437,6 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
             XStreamHandlerEvent::StreamClosed { stream_id } => {
                 debug!("Handler reported stream closed: {:?}", stream_id);
                 // Remove the stream from HashMap
-                println!("11111111111111111Handler reported stram closed StreamClosed");
                 self.streams.remove(&(peer_id, stream_id));
 
                 // Send stream closed event
@@ -425,7 +446,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                         stream_id,
                     }));
             }
-            XStreamHandlerEvent::InboundUpgradeRequest { peer_id, connection_id, decision_sender } => {
+            XStreamHandlerEvent::IncomingStreamRequest { peer_id, connection_id, decision_sender } => {
                 match self.incoming_approve_policy {
                     IncomingConnectionApprovePolicy::AutoApprove => {
                         // Автоматически одобряем без генерации события
@@ -434,7 +455,7 @@ impl NetworkBehaviour for XStreamNetworkBehaviour {
                     IncomingConnectionApprovePolicy::ApproveViaEvent => {
                         // Генерируем событие для пользовательской обработки
                         self.events.push(ToSwarm::GenerateEvent(
-                            XStreamEvent::InboundUpgradeRequest {
+                            XStreamEvent::IncomingStreamRequest {
                                 peer_id,
                                 connection_id,
                                 decision_sender,

@@ -1,7 +1,7 @@
 //! Ping behaviour handler for XNetwork2
 
-mod handler;
 mod command;
+mod handler;
 
-pub use handler::PingHandler;
 pub use command::PingCommand;
+pub use handler::PingHandler;

@@ -56,19 +56,19 @@ async fn test_inbound_upgrade_event_creation() {
     let peer_id = PeerId::random();
     let connection_id = ConnectionId::new_unchecked(1);
     
-    let event = XStreamEvent::InboundUpgradeRequest {
+    let event = XStreamEvent::IncomingStreamRequest {
         peer_id,
         connection_id,
         decision_sender,
     };
     
     match event {
-        XStreamEvent::InboundUpgradeRequest { peer_id: p, connection_id: c, .. } => {
+        XStreamEvent::IncomingStreamRequest { peer_id: p, connection_id: c, .. } => {
             assert_eq!(p, peer_id);
             assert_eq!(c, connection_id);
-            println!("✅ InboundUpgradeRequest event creation works");
+            println!("✅ IncomingStreamRequest event creation works");
         }
-        _ => panic!("Expected InboundUpgradeRequest event"),
+        _ => panic!("Expected IncomingStreamRequest event"),
     }
 }
 

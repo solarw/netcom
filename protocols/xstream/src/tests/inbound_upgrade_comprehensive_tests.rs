@@ -29,7 +29,7 @@ async fn test_inbound_upgrade_auto_approve_integration() {
     let peer_id = PeerId::random();
     let connection_id = ConnectionId::new_unchecked(1);
     
-    let handler_event = XStreamHandlerEvent::InboundUpgradeRequest {
+    let handler_event = XStreamHandlerEvent::IncomingStreamRequest {
         peer_id,
         connection_id,
         decision_sender,
@@ -59,13 +59,13 @@ async fn test_inbound_upgrade_event_via_event_policy() {
         IncomingConnectionApprovePolicy::ApproveViaEvent
     ));
     
-    // Create a mock InboundUpgradeRequest event with new API
+    // Create a mock IncomingStreamRequest event with new API
     let (response_sender, _response_receiver) = oneshot::channel();
     let decision_sender = StreamOpenDecisionSender::new(response_sender);
     let peer_id = PeerId::random();
     let connection_id = ConnectionId::new_unchecked(1);
     
-    let event = XStreamEvent::InboundUpgradeRequest {
+    let event = XStreamEvent::IncomingStreamRequest {
         peer_id,
         connection_id,
         decision_sender,
@@ -73,12 +73,12 @@ async fn test_inbound_upgrade_event_via_event_policy() {
     
     // Verify the event structure
     match event {
-        XStreamEvent::InboundUpgradeRequest { peer_id: p, connection_id: c, .. } => {
+        XStreamEvent::IncomingStreamRequest { peer_id: p, connection_id: c, .. } => {
             assert_eq!(p, peer_id);
             assert_eq!(c, connection_id);
             println!("✅ ApproveViaEvent event structure test passed");
         }
-        _ => panic!("Expected InboundUpgradeRequest event"),
+        _ => panic!("Expected IncomingStreamRequest event"),
     }
 }
 

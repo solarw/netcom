@@ -103,3 +103,9 @@ pub mod close_write_test;
 
 #[cfg(test)]
 pub mod close_read_quic_test;
+
+#[cfg(test)]
+pub mod decision_flow_test;
+
+#[cfg(test)]
+pub mod connection_reject_test;

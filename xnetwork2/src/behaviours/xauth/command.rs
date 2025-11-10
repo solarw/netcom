@@ -6,20 +6,11 @@ use libp2p::PeerId;
 #[derive(Debug, Clone)]
 pub enum XAuthCommand {
     /// Start authentication with a peer
-    StartAuth {
-        peer_id: PeerId,
-    },
+    StartAuth { peer_id: PeerId },
     /// Approve authentication request
-    ApproveAuth {
-        peer_id: PeerId,
-    },
+    ApproveAuth { peer_id: PeerId },
     /// Reject authentication request
-    RejectAuth {
-        peer_id: PeerId,
-    },
+    RejectAuth { peer_id: PeerId },
     /// Submit PoR verification result
-    SubmitPorVerification {
-        peer_id: PeerId,
-        approved: bool,
-    },
+    SubmitPorVerification { peer_id: PeerId, approved: bool },
 }

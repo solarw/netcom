@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 /// Политика принятия решений о входящих апгрейдах
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum IncomingConnectionApprovePolicy {
     /// Автоматически одобрять все входящие апгрейды
     AutoApprove,
@@ -13,7 +13,7 @@ pub enum IncomingConnectionApprovePolicy {
 }
 
 /// Решение о входящем апгрейде
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum InboundUpgradeDecision {
     /// Апгрейд разрешен
     Approved,
@@ -106,8 +106,8 @@ pub enum XStreamEvent {
         /// Поток XStream
         stream: super::xstream::XStream,
     },
-    /// Запрос на принятие решения о входящем апгрейде
-    InboundUpgradeRequest {
+    /// Запрос на принятие решения о входящем потоке
+    IncomingStreamRequest {
         /// Идентификатор пира
         peer_id: PeerId,
         /// Идентификатор соединения

@@ -6,7 +6,5 @@ use libp2p::PeerId;
 #[derive(Debug, Clone)]
 pub enum PingCommand {
     /// Send ping to a peer
-    SendPing {
-        peer_id: PeerId,
-    },
+    SendPing { peer_id: PeerId },
 }

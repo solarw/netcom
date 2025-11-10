@@ -1,7 +1,7 @@
 //! XAuth behaviour handler for XNetwork2
 
-mod handler;
 mod command;
+mod handler;
 
-pub use handler::XAuthHandler;
 pub use command::XAuthCommand;
+pub use handler::XAuthHandler;
