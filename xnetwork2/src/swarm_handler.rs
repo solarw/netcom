@@ -165,6 +165,14 @@ impl XNetworkSwarmHandler {
                             }
                         }
                     }
+                    XNetworkBehaviourEvent::Xroutes(xroutes_event) => {
+                        // Forward XRoutes events to application
+                        match xroutes_event {
+                            _ => {
+                                debug!("📡 [SwarmHandler] XRoutes event: {:?}", xroutes_event);
+                            }
+                        }
+                    }
                     // Skip other behaviour events
                     _ => {}
                 }
@@ -334,6 +342,9 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                     }
                     XNetworkBehaviourEvent::Xstream(event) => {
                         debug!("📡 [SwarmHandler] XStream event: {:?}", event);
+                    }
+                    XNetworkBehaviourEvent::Xroutes(event) => {
+                        debug!("📡 [SwarmHandler] XRoutes event: {:?}", event);
                     }
                 }
             }

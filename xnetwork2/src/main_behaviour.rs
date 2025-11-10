@@ -1,6 +1,6 @@
 //! Main behaviour for XNetwork2 using command-swarm macro
 
-use crate::behaviours::{IdentifyHandler, PingHandler, XAuthHandler, XStreamHandler};
+use crate::behaviours::{IdentifyHandler, PingHandler, XAuthHandler, XStreamHandler, XRoutesHandler};
 use crate::swarm_commands::SwarmLevelCommand;
 use crate::swarm_handler::XNetworkSwarmHandler;
 use command_swarm::{
@@ -14,7 +14,8 @@ make_command_swarm! {
         identify: IdentifyHandler,
         ping: PingHandler,
         xauth: XAuthHandler,
-        xstream: XStreamHandler
+        xstream: XStreamHandler,
+        xroutes: XRoutesHandler
     },
     commands: {
         name: XNetworkCommands,
