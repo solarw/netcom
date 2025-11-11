@@ -385,7 +385,9 @@ impl ConnectionHandler for XStreamHandler {
     }
 
     fn connection_keep_alive(&self) -> bool {
-        !self.streams.is_empty() || !self.pending_commands.is_empty()
+        let result =  !self.streams.is_empty() || !self.pending_commands.is_empty();
+        result
+        
     }
 
     fn poll(

@@ -117,7 +117,6 @@ class TestSimpleNode:
                 # Отправляем подтверждение
                 response = f"ACK: {decoded_message}"
                 await stream.write(response.encode())
-                print("SEND MESSAGE1111111111111")
             
             # Закрываем поток после обработки
             await stream.close()
