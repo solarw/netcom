@@ -152,7 +152,7 @@ impl XNetworkSwarmHandler {
                                 decision_sender,
                             } => {
                                 // Always forward incoming stream requests to application for decision making
-                                println!(
+                                debug!(
                                     "🔍 [SwarmHandler] Forwarding111111111111111 IncomingStreamRequest from peer: {}, connection: {:?}",
                                     peer_id, connection_id
                                 );
@@ -166,8 +166,35 @@ impl XNetworkSwarmHandler {
                         }
                     }
                     XNetworkBehaviourEvent::Xroutes(xroutes_event) => {
-                        // Forward XRoutes events to application
+                        // Transform XRoutes events to NodeEvents
                         match xroutes_event {
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::Kad(kad_event) => {
+                                match kad_event {
+                                    libp2p::kad::Event::RoutingUpdated { peer, .. } => {
+                                        let _ = event_sender.send(NodeEvent::KademliaRoutingUpdated {
+                                            peer_id: *peer,
+                                        });
+                                    }
+                                    libp2p::kad::Event::OutboundQueryProgressed { result, .. } => {
+                                        match result {
+                                            libp2p::kad::QueryResult::Bootstrap(Ok(_)) => {
+                                                let _ = event_sender.send(NodeEvent::KademliaBootstrapCompleted);
+                                            }
+                                            libp2p::kad::QueryResult::GetClosestPeers(Ok(peers)) => {
+                                                // Emit discovery events for found peers
+                                                for peer_info in &peers.peers {
+                                                    let _ = event_sender.send(NodeEvent::KademliaPeerDiscovered {
+                                                        peer_id: peer_info.peer_id,
+                                                        addresses: peer_info.addrs.clone(),
+                                                    });
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
                             _ => {
                                 debug!("📡 [SwarmHandler] XRoutes event: {:?}", xroutes_event);
                             }
@@ -283,7 +310,7 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
 
     async fn handle_event(
         &mut self,
-        _swarm: &mut Swarm<XNetworkBehaviour>,
+        swarm: &mut Swarm<XNetworkBehaviour>,
         event: &libp2p::swarm::SwarmEvent<
             <XNetworkBehaviour as libp2p::swarm::NetworkBehaviour>::ToSwarm,
         >,
@@ -303,36 +330,35 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                     }
                     XNetworkBehaviourEvent::Xauth(event) => {
                         debug!("📡 [SwarmHandler] XAuth event: {:?}", event);
-                        println!("📡 [SwarmHandler] XAuth event: {:?}", event);
 
                         // Добавляем специальную отладочную информацию для событий аутентификации
                         match event {
                             PorAuthEvent::MutualAuthSuccess { peer_id, .. } => {
-                                println!(
+                                debug!(
                                     "🎉 [SwarmHandler] MUTUAL AUTH SUCCESS for peer: {}",
                                     peer_id
                                 );
                             }
                             PorAuthEvent::OutboundAuthSuccess { peer_id, .. } => {
-                                println!(
+                                debug!(
                                     "✅ [SwarmHandler] OUTBOUND AUTH SUCCESS for peer: {}",
                                     peer_id
                                 );
                             }
                             PorAuthEvent::InboundAuthSuccess { peer_id, .. } => {
-                                println!(
+                                debug!(
                                     "✅ [SwarmHandler] INBOUND AUTH SUCCESS for peer: {}",
                                     peer_id
                                 );
                             }
                             PorAuthEvent::OutboundAuthFailure { peer_id, .. } => {
-                                println!(
+                                debug!(
                                     "❌ [SwarmHandler] OUTBOUND AUTH FAILURE for peer: {}",
                                     peer_id
                                 );
                             }
                             PorAuthEvent::InboundAuthFailure { peer_id, .. } => {
-                                println!(
+                                debug!(
                                     "❌ [SwarmHandler] INBOUND AUTH FAILURE for peer: {}",
                                     peer_id
                                 );
@@ -345,12 +371,29 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                     }
                     XNetworkBehaviourEvent::Xroutes(event) => {
                         debug!("📡 [SwarmHandler] XRoutes event: {:?}", event);
+                        match event {
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::Identify(identify_event) => {
+                                match identify_event {
+                                    libp2p::identify::Event::Received {peer_id,  info, connection_id} => {
+                                        swarm.add_external_address(info.observed_addr.clone());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
+                        
+                        
+
+                        
+                    }
+                    XNetworkBehaviourEvent::KeepAlive(event) => {
+                        debug!("📡 [SwarmHandler] KeepAlive event: {:?}", event);
                     }
                 }
             }
             _ => {
                 debug!("🌐 [SwarmHandler] Swarm event: {:?}", event);
-                println!("🌐 [SwarmHandler] Swarm event: {:?}", event);
             }
         }
     }

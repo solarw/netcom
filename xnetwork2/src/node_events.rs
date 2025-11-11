@@ -57,6 +57,35 @@ pub enum NodeEvent {
         connection_id: ConnectionId,
         decision_sender: StreamOpenDecisionSender,
     },
+
+    // Identify события
+    /// Identify information received from peer
+    IdentifyReceived { 
+        peer_id: PeerId, 
+        addresses: Vec<Multiaddr> 
+    },
+    /// Identify information sent to peer
+    IdentifySent { 
+        peer_id: PeerId 
+    },
+    /// Identify error occurred
+    IdentifyError { 
+        peer_id: PeerId, 
+        error: String 
+    },
+
+    // Kademlia события
+    /// Kademlia discovered a new peer through DHT
+    KademliaPeerDiscovered { 
+        peer_id: PeerId, 
+        addresses: Vec<Multiaddr> 
+    },
+    /// Kademlia bootstrap completed
+    KademliaBootstrapCompleted,
+    /// Kademlia routing table updated
+    KademliaRoutingUpdated { 
+        peer_id: PeerId 
+    },
 }
 
 impl NodeEvent {
@@ -74,6 +103,12 @@ impl NodeEvent {
             NodeEvent::XStreamError { .. } => "XStreamError",
             NodeEvent::XStreamClosed { .. } => "XStreamClosed",
             NodeEvent::XStreamIncomingStreamRequest { .. } => "XStreamIncomingStreamRequest",
+            NodeEvent::IdentifyReceived { .. } => "IdentifyReceived",
+            NodeEvent::IdentifySent { .. } => "IdentifySent",
+            NodeEvent::IdentifyError { .. } => "IdentifyError",
+            NodeEvent::KademliaPeerDiscovered { .. } => "KademliaPeerDiscovered",
+            NodeEvent::KademliaBootstrapCompleted { .. } => "KademliaBootstrapCompleted",
+            NodeEvent::KademliaRoutingUpdated { .. } => "KademliaRoutingUpdated",
         }
     }
 

@@ -8,6 +8,7 @@ pub mod ping;
 pub mod xauth;
 pub mod xstream;
 pub mod xroutes;
+pub mod keep_alive;
 
 // Re-export handlers for convenience
 pub use identify::IdentifyHandler;
@@ -15,6 +16,7 @@ pub use ping::PingHandler;
 pub use xauth::XAuthHandler;
 pub use xstream::XStreamHandler;
 pub use xroutes::XRoutesHandler;
+pub use keep_alive::KeepAliveHandler;
 
 // Re-export command types
 pub use identify::IdentifyCommand;
@@ -22,3 +24,4 @@ pub use ping::PingCommand;
 pub use xauth::XAuthCommand;
 pub use xstream::XStreamCommand;
 pub use xroutes::XRoutesCommand;
+pub use keep_alive::KeepAliveCommand;

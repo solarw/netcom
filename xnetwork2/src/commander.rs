@@ -133,4 +133,120 @@ impl Commander {
                 as Box<dyn std::error::Error + Send + Sync>
         })
     }
+
+    // XRoutes commands
+
+    /// Enable identify behaviour
+    pub async fn enable_identify(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::EnableIdentify {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Disable identify behaviour
+    pub async fn disable_identify(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::DisableIdentify {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Enable mDNS discovery
+    pub async fn enable_mdns(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::EnableMdns {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Disable mDNS discovery
+    pub async fn disable_mdns(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::DisableMdns {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Enable Kademlia DHT discovery
+    pub async fn enable_kad(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::EnableKad {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Disable Kademlia DHT discovery
+    pub async fn disable_kad(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::DisableKad {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get current status of XRoutes behaviours
+    pub async fn get_xroutes_status(&self) -> Result<crate::behaviours::xroutes::XRoutesStatus, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetStatus {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        Ok(response_rx.await?)
+    }
+
+    /// Bootstrap to a peer for Kademlia DHT
+    pub async fn bootstrap_to_peer(
+        &self,
+        peer_id: PeerId,
+        addresses: Vec<Multiaddr>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::BootstrapToPeer {
+            peer_id,
+            addresses,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Find a peer through Kademlia DHT
+    pub async fn find_peer(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::FindPeer {
+            peer_id,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get closest peers through Kademlia DHT
+    pub async fn get_closest_peers(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Vec<PeerId>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetClosestPeers {
+            peer_id,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
 }
