@@ -29,11 +29,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     NodeEvent::NewListenAddr { address } => {
                         println!("📡 [СОБЫТИЕ-1] Нода начала прослушивать адрес: {}", address);
                     }
-                    NodeEvent::ConnectionEstablished { peer_id } => {
-                        println!("🔗 [СОБЫТИЕ-1] Установлено соединение с пиром: {}", peer_id);
+                    NodeEvent::ConnectionEstablished { peer_id, connection_id } => {
+                        println!("🔗 [СОБЫТИЕ-1] Установлено соединение с пиром: {}, connection: {:?}", peer_id, connection_id);
                     }
-                    NodeEvent::ConnectionClosed { peer_id } => {
-                        println!("🔌 [СОБЫТИЕ-1] Соединение закрыто с пиром: {}", peer_id);
+                    NodeEvent::ConnectionClosed { peer_id, connection_id } => {
+                        println!("🔌 [СОБЫТИЕ-1] Соединение закрыто с пиром: {}, connection: {:?}", peer_id, connection_id);
                     }
                     NodeEvent::ExpiredListenAddr { address } => {
                         println!("❌ [СОБЫТИЕ-1] Адрес прослушивания истек: {}", address);
@@ -64,11 +64,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     NodeEvent::NewListenAddr { address } => {
                         println!("📡 [СОБЫТИЕ-2] Нода начала прослушивать адрес: {}", address);
                     }
-                    NodeEvent::ConnectionEstablished { peer_id } => {
-                        println!("🔗 [СОБЫТИЕ-2] Установлено соединение с пиром: {}", peer_id);
+                    NodeEvent::ConnectionEstablished { peer_id, connection_id } => {
+                        println!("🔗 [СОБЫТИЕ-2] Установлено соединение с пиром: {}, connection: {:?}", peer_id, connection_id);
                     }
-                    NodeEvent::ConnectionClosed { peer_id } => {
-                        println!("🔌 [СОБЫТИЕ-2] Соединение закрыто с пиром: {}", peer_id);
+                    NodeEvent::ConnectionClosed { peer_id, connection_id } => {
+                        println!("🔌 [СОБЫТИЕ-2] Соединение закрыто с пиром: {}, connection: {:?}", peer_id, connection_id);
                     }
                     NodeEvent::ExpiredListenAddr { address } => {
                         println!("❌ [СОБЫТИЕ-2] Адрес прослушивания истек: {}", address);

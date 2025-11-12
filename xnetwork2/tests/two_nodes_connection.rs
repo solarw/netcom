@@ -146,12 +146,12 @@ async fn test_two_nodes_connection_in_5_seconds() {
 
         // Проверяем, что оба события ConnectionEstablished получены
         let node1_peer_id = match node1_connected {
-            NodeEvent::ConnectionEstablished { peer_id } => peer_id,
+            NodeEvent::ConnectionEstablished { peer_id, connection_id: _ } => peer_id,
             _ => panic!("❌ Нода1 получила неожиданное событие: {:?}", node1_connected),
         };
 
         let node2_peer_id = match node2_connected {
-            NodeEvent::ConnectionEstablished { peer_id } => peer_id,
+            NodeEvent::ConnectionEstablished { peer_id, connection_id: _ } => peer_id,
             _ => panic!("❌ Нода2 получила неожиданное событие: {:?}", node2_connected),
         };
 

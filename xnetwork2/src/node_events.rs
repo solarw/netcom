@@ -13,9 +13,15 @@ use xstream::xstream::XStream;
 pub enum NodeEvent {
     // Сетевые события
     /// Connection established with peer
-    ConnectionEstablished { peer_id: PeerId },
+    ConnectionEstablished { 
+        peer_id: PeerId,
+        connection_id: ConnectionId 
+    },
     /// Connection closed with peer
-    ConnectionClosed { peer_id: PeerId },
+    ConnectionClosed { 
+        peer_id: PeerId,
+        connection_id: ConnectionId 
+    },
     /// New listener address added
     NewListenAddr { address: Multiaddr },
     /// Listener address removed

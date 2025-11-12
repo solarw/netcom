@@ -188,7 +188,7 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_5_seconds() {
         ).await.expect("❌ Таймаут ожидания события ConnectionEstablished - соединение не установлено за 2 секунды");
 
         let node2_peer_id = match node2_connected {
-            NodeEvent::ConnectionEstablished { peer_id } => peer_id,
+            NodeEvent::ConnectionEstablished { peer_id, connection_id: _ } => peer_id,
             _ => panic!("❌ Нода2 получила неожиданное событие: {:?}", node2_connected),
         };
 

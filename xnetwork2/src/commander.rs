@@ -113,6 +113,34 @@ impl Commander {
         self.send(command).await
     }
 
+    /// Set authentication mode (automatic or manual)
+    pub async fn set_auto_auth_mode(
+        &self,
+        auto: bool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xauth(XAuthCommand::SetAutoAuthMode {
+            auto,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Start authentication for specific connection
+    pub async fn start_auth_for_connection(
+        &self,
+        connection_id: libp2p::swarm::ConnectionId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xauth(XAuthCommand::StartAuthForConnection {
+            connection_id,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
     /// Open XStream to a peer
     pub async fn open_xstream(
         &self,

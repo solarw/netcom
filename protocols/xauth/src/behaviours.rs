@@ -47,6 +47,9 @@ pub struct PorAuthBehaviour {
 
     // Storage for pending PoR verifications using ConnectionId
     pending_verifications: HashMap<ConnectionId, PendingVerification>,
+
+    // Authentication mode: true for automatic, false for manual
+    auto_auth_mode: bool,
 }
 
 impl PorAuthBehaviour {
@@ -70,6 +73,7 @@ impl PorAuthBehaviour {
             por,
             metadata,
             pending_verifications: HashMap::new(),
+            auto_auth_mode: true, // по умолчанию автоматический режим
         }
     }
 
@@ -361,6 +365,13 @@ impl PorAuthBehaviour {
             }
         };
 
+        // Check if authentication is already in progress
+        if let Some(conn) = self.connections.get(&connection_id) {
+            if conn.is_authentication_in_progress() {
+                return Err("Authentication already in progress".to_string());
+            }
+        }
+
         // Start outbound authentication
         self.start_outbound_auth(peer_id, connection_id);
 
@@ -506,6 +517,20 @@ impl PorAuthBehaviour {
         }
         None
     }
+
+    // Set authentication mode (true for automatic, false for manual)
+    pub fn set_auto_auth_mode(&mut self, auto: bool) {
+        self.auto_auth_mode = auto;
+        println!(
+            "🔄 [XAuth] Authentication mode set to: {}",
+            if auto { "automatic" } else { "manual" }
+        );
+    }
+
+    // Get current authentication mode
+    pub fn get_auto_auth_mode(&self) -> bool {
+        self.auto_auth_mode
+    }
 }
 
 // Implement NetworkBehaviour manually
@@ -611,9 +636,15 @@ impl NetworkBehaviour for PorAuthBehaviour {
                     connection_established.peer_id, connection_established.connection_id
                 );
 
-                // Begin authentication process immediately on connection establishment
-                // We don't need to check if the connection exists, we can just try to start auth
-                let _ = self.start_authentication(connection_established.connection_id);
+                // Begin authentication process only in auto mode
+                if self.auto_auth_mode {
+                    let _ = self.start_authentication(connection_established.connection_id);
+                } else {
+                    println!(
+                        "🔄 [XAuth] Manual mode: authentication not started automatically for connection {:?}",
+                        connection_established.connection_id
+                    );
+                }
             }
             FromSwarm::ConnectionClosed(connection_closed) => {
                 // Clean up when a connection is closed

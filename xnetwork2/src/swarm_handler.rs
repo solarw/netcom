@@ -74,11 +74,17 @@ impl XNetworkSwarmHandler {
                     address: address.clone(),
                 });
             }
-            libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, .. } => {
-                let _ = event_sender.send(NodeEvent::ConnectionEstablished { peer_id: *peer_id });
+            libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, connection_id, .. } => {
+                let _ = event_sender.send(NodeEvent::ConnectionEstablished { 
+                    peer_id: *peer_id,
+                    connection_id: *connection_id 
+                });
             }
-            libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                let _ = event_sender.send(NodeEvent::ConnectionClosed { peer_id: *peer_id });
+            libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, connection_id, .. } => {
+                let _ = event_sender.send(NodeEvent::ConnectionClosed { 
+                    peer_id: *peer_id,
+                    connection_id: *connection_id 
+                });
             }
 
             // Behaviour events - we'll handle XAuth and XStream events specifically

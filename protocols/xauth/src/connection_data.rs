@@ -173,4 +173,10 @@ impl ConnectionData {
     pub fn is_outbound_not_started(&self) -> bool {
         matches!(self.outbound_auth, DirectionalAuthState::NotStarted)
     }
+
+    // Check if authentication is in progress in any direction
+    pub fn is_authentication_in_progress(&self) -> bool {
+        matches!(self.inbound_auth, DirectionalAuthState::InProgress { .. }) ||
+        matches!(self.outbound_auth, DirectionalAuthState::InProgress { .. })
+    }
 }

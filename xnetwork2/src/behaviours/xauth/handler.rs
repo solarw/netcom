@@ -31,6 +31,45 @@ impl BehaviourHandler for XAuthHandler {
                     peer_id
                 );
             }
+            XAuthCommand::StartAuthForConnection { connection_id, response } => {
+                debug!(
+                    "🔄 [XAuthHandler] Processing StartAuthForConnection command for connection: {:?}",
+                    connection_id
+                );
+                
+                match behaviour.start_authentication(connection_id) {
+                    Ok(_) => {
+                        info!(
+                            "🔐 [XAuthHandler] Authentication started for connection: {:?}",
+                            connection_id
+                        );
+                        let _ = response.send(Ok(()));
+                    }
+                    Err(e) => {
+                        debug!(
+                            "❌ [XAuthHandler] Failed to start authentication for connection {:?}: {}",
+                            connection_id, e
+                        );
+                        let _ = response.send(Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            e
+                        ))));
+                    }
+                }
+            }
+            XAuthCommand::SetAutoAuthMode { auto, response } => {
+                debug!(
+                    "🔄 [XAuthHandler] Processing SetAutoAuthMode command: {}",
+                    if auto { "automatic" } else { "manual" }
+                );
+                
+                behaviour.set_auto_auth_mode(auto);
+                info!(
+                    "🔐 [XAuthHandler] Authentication mode set to: {}",
+                    if auto { "automatic" } else { "manual" }
+                );
+                let _ = response.send(Ok(()));
+            }
             XAuthCommand::ApproveAuth { peer_id } => {
                 debug!(
                     "🔄 [XAuthHandler] Processing ApproveAuth command for peer: {:?}",
