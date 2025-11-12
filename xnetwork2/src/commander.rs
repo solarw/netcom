@@ -249,4 +249,20 @@ impl Commander {
         self.send(command).await?;
         response_rx.await?
     }
+
+    /// Find peer addresses with automatic search and timeout
+    pub async fn find_peer_addresses(
+        &self,
+        peer_id: PeerId,
+        timeout: std::time::Duration,
+    ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::FindPeerAddresses {
+            peer_id,
+            timeout,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
 }

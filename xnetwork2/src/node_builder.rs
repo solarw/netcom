@@ -1,0 +1,219 @@
+//! NodeBuilder для конфигурируемого создания Node в XNetwork2
+//!
+//! Поддерживает fluent интерфейс для настройки поведения узла,
+//! включая политику принятия решений для входящих XStream потоков.
+use std::time::Duration;
+use libp2p::{identity, quic};
+use tokio::sync::broadcast;
+use xstream::events::IncomingConnectionApprovePolicy;
+
+/// Политика принятия решений для входящих потоков
+#[derive(Debug, Clone, Copy)]
+pub enum InboundDecisionPolicy {
+    /// Автоматически одобрять все входящие потоки (по умолчанию, обратная совместимость)
+    AutoApprove,
+    /// Передавать события для ручного принятия решений через NodeEvent
+    ManualApprove,
+}
+
+impl Default for InboundDecisionPolicy {
+    fn default() -> Self {
+        Self::AutoApprove
+    }
+}
+
+/// Конфигурация для создания Node
+#[derive(Debug, Clone)]
+pub struct NodeConfig {
+    /// Политика принятия решений для входящих потоков
+    pub inbound_decision_policy: InboundDecisionPolicy,
+    /// Размер буфера для каналов событий
+    pub event_buffer_size: usize,
+}
+
+impl Default for NodeConfig {
+    fn default() -> Self {
+        Self {
+            inbound_decision_policy: InboundDecisionPolicy::default(),
+            event_buffer_size: 32,
+        }
+    }
+}
+
+/// Fluent builder для создания конфигурируемого Node
+pub struct NodeBuilder {
+    config: NodeConfig,
+    keypair: Option<identity::Keypair>,
+}
+
+impl NodeBuilder {
+    /// Создает новый NodeBuilder с конфигурацией по умолчанию
+    pub fn new() -> Self {
+        Self {
+            config: NodeConfig::default(),
+            keypair: None,
+        }
+    }
+
+    /// Устанавливает политику принятия решений для входящих потоков
+    pub fn with_inbound_decision_policy(mut self, policy: InboundDecisionPolicy) -> Self {
+        self.config.inbound_decision_policy = policy;
+        self
+    }
+
+    /// Устанавливает размер буфера для каналов событий
+    pub fn with_event_buffer_size(mut self, size: usize) -> Self {
+        self.config.event_buffer_size = size;
+        self
+    }
+
+    /// Устанавливает пользовательский ключ для узла
+    pub fn with_keypair(mut self, keypair: identity::Keypair) -> Self {
+        self.keypair = Some(keypair);
+        self
+    }
+
+    /// Создает Node с текущей конфигурацией
+    pub async fn build(
+        self,
+    ) -> Result<crate::node::Node, Box<dyn std::error::Error + Send + Sync>> {
+        use crate::node::Node;
+
+        println!(
+            "🛠️ Building XNetwork2 node with configuration: {:?}",
+            self.config
+        );
+
+        // Создаем или используем существующий ключ
+        let keypair = self
+            .keypair
+            .unwrap_or_else(|| identity::Keypair::generate_ed25519());
+        let peer_id = keypair.public().to_peer_id();
+        println!("🔑 Generated/using keypair with PeerId: {}", peer_id);
+
+        // Создаем QUIC транспорт
+        let quic_config = quic::Config::new(&keypair);
+        let quic_transport = quic::tokio::Transport::new(quic_config);
+
+        // Определяем политику для XStream на основе конфигурации
+        let xstream_policy = match self.config.inbound_decision_policy {
+            InboundDecisionPolicy::AutoApprove => IncomingConnectionApprovePolicy::AutoApprove,
+            InboundDecisionPolicy::ManualApprove => {
+                IncomingConnectionApprovePolicy::ApproveViaEvent
+            }
+        };
+
+        // Создаем swarm с XStream поведением с выбранной политикой
+        let swarm = libp2p::SwarmBuilder::with_existing_identity(keypair.clone())
+            .with_tokio()
+            .with_other_transport(|_key| quic_transport)
+            .expect("Failed to create QUIC transport")
+            .with_behaviour(|key| {
+                let peer_id = key.public().to_peer_id();
+
+                // Create behaviours
+                let identify_behaviour = libp2p::identify::Behaviour::new(libp2p::identify::Config::new(
+                    "/xnetwork2/1.0.0".to_string(),
+                    key.public(),
+                ));
+                let ping_config = libp2p::ping::Config::new()
+                    .with_interval(Duration::from_secs(1))
+                    ; // держать соединение активным
+                let ping_behaviour = libp2p::ping::Behaviour::new(ping_config);
+
+                // Безопасное создание POR
+                let por = xauth::por::por::ProofOfRepresentation::create(
+                    &key,
+                    peer_id,
+                    std::time::Duration::from_secs(3600), // 1 hour validity
+                ).expect("❌ CRITICAL SECURITY ERROR: Failed to create Proof of Representation - system security compromised");
+
+                let xauth_behaviour = xauth::behaviours::PorAuthBehaviour::new(por);
+
+                let xstream_behaviour = xstream::behaviour::XStreamNetworkBehaviour::new_with_policy(xstream_policy);
+
+                // Create XRoutes behaviour with default configuration
+                // Note: XRoutes behaviour currently only uses peer ID for mDNS and Kademlia
+                // Identify behaviour is handled separately in the main behaviour
+                let xroutes_behaviour = crate::behaviours::xroutes::XRoutesBehaviour::new(
+                    peer_id,
+                    &crate::behaviours::xroutes::XRoutesConfig::disabled(), // Disable identify in XRoutes since it's already in main behaviour
+                ).expect("Failed to create XRoutes behaviour");
+
+                // Create KeepAlive behaviour
+                let keep_alive_behaviour = crate::behaviours::keep_alive::KeepAliveBehaviour::new();
+
+                // Create main behaviour
+                crate::main_behaviour::XNetworkBehaviour {
+                    identify: identify_behaviour,
+                    ping: ping_behaviour,
+                    xauth: xauth_behaviour,
+                    xstream: xstream_behaviour,
+                    xroutes: xroutes_behaviour,
+                    keep_alive: keep_alive_behaviour,
+                }
+            })
+            .unwrap()
+            .build();
+
+        let peer_id = swarm.local_peer_id().clone();
+        println!("🆕 XNetwork2 node created with PeerId: {}", peer_id);
+
+        // Create broadcast channel for NodeEvents
+        let (event_sender, _) = broadcast::channel(self.config.event_buffer_size);
+
+        // Create handler dispatcher with event channel
+        let behaviour_handler_dispatcher =
+            crate::main_behaviour::XNetworkBehaviourHandlerDispatcher {
+                swarm_handler: crate::swarm_handler::XNetworkSwarmHandler::with_event_sender(
+                    event_sender.clone(),
+                ),
+                identify: crate::behaviours::IdentifyHandler::default(),
+                ping: crate::behaviours::PingHandler::default(),
+                xauth: crate::behaviours::XAuthHandler::default(),
+                xstream: crate::behaviours::XStreamHandler::default(),
+                xroutes: crate::behaviours::XRoutesHandler::with_local_peer_id(
+                    crate::behaviours::xroutes::XRoutesConfig::default(),
+                    peer_id,
+                ),
+                keep_alive: crate::behaviours::KeepAliveHandler::default(),
+            };
+
+        // Create SwarmLoop using correct builder pattern
+        let sl2_builder: command_swarm::SwarmLoopBuilder<
+            crate::main_behaviour::XNetworkBehaviour,
+            crate::main_behaviour::XNetworkBehaviourHandlerDispatcher,
+            crate::main_behaviour::XNetworkCommands,
+        > = command_swarm::SwarmLoopBuilder::new()
+            .with_behaviour_handler(behaviour_handler_dispatcher)
+            .with_channel_size(self.config.event_buffer_size)
+            .with_swarm(swarm);
+
+        let (command_tx, stopper, swarm_loop) = sl2_builder.build().unwrap();
+
+        // Create commander wrapper
+        let commander = crate::commander::Commander::new(command_tx.clone(), stopper.clone());
+
+        Ok(Node {
+            command_tx,
+            commander,
+            stopper,
+            swarm_loop: Some(swarm_loop),
+            swarm_loop_handle: None,
+            event_sender,
+            peer_id,
+            keypair,
+        })
+    }
+}
+
+impl Default for NodeBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Упрощенный конструктор для обратной совместимости
+pub fn builder() -> NodeBuilder {
+    NodeBuilder::new()
+}

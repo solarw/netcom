@@ -1,0 +1,162 @@
+//! Простой тест для проверки NodeBuilder и механизма принятия решений
+
+use xnetwork2::{InboundDecisionPolicy, Node};
+
+/// Тестирует создание Node с разными политиками принятия решений
+#[tokio::test]
+async fn test_node_builder_with_different_policies() {
+    println!("🧪 Тестируем NodeBuilder с разными политиками принятия решений...");
+
+    // Тест 1: Node с AutoApprove политикой (по умолчанию)
+    println!("🆕 Тест 1: Создаем ноду с AutoApprove политикой...");
+    let mut node_auto = Node::builder()
+        .await
+        .with_inbound_decision_policy(InboundDecisionPolicy::AutoApprove)
+        .build()
+        .await
+        .expect("❌ Не удалось создать ноду с AutoApprove политикой");
+
+    println!("✅ Нода с AutoApprove политикой создана успешно");
+    println!("   PeerId: {}", node_auto.peer_id());
+
+    // Тест 2: Node с ManualApprove политикой
+    println!("🆕 Тест 2: Создаем ноду с ManualApprove политикой...");
+    let mut node_manual = Node::builder()
+        .await
+        .with_inbound_decision_policy(InboundDecisionPolicy::ManualApprove)
+        .build()
+        .await
+        .expect("❌ Не удалось создать ноду с ManualApprove политикой");
+
+    println!("✅ Нода с ManualApprove политикой создана успешно");
+    println!("   PeerId: {}", node_manual.peer_id());
+
+    // Тест 3: Node с настройкой размера буфера событий
+    println!("🆕 Тест 3: Создаем ноду с кастомным размером буфера событий...");
+    let mut node_custom = Node::builder()
+        .await
+        .with_inbound_decision_policy(InboundDecisionPolicy::ManualApprove)
+        .with_event_buffer_size(64)
+        .build()
+        .await
+        .expect("❌ Не удалось создать ноду с кастомным размером буфера");
+
+    println!("✅ Нода с кастомным размером буфера создана успешно");
+    println!("   PeerId: {}", node_custom.peer_id());
+
+    // Запускаем ноды
+    println!("🚀 Запускаем все ноды...");
+    node_auto
+        .start()
+        .await
+        .expect("❌ Не удалось запустить ноду с AutoApprove");
+    node_manual
+        .start()
+        .await
+        .expect("❌ Не удалось запустить ноду с ManualApprove");
+    node_custom
+        .start()
+        .await
+        .expect("❌ Не удалось запустить ноду с кастомным буфером");
+
+    println!("✅ Все ноды успешно запущены:");
+    println!("   AutoApprove: {}", node_auto.get_task_status());
+    println!("   ManualApprove: {}", node_manual.get_task_status());
+    println!("   CustomBuffer: {}", node_custom.get_task_status());
+
+    // Останавливаем ноды
+    println!("🛑 Останавливаем все ноды...");
+    node_auto
+        .commander
+        .shutdown()
+        .await
+        .expect("❌ Не удалось остановить ноду с AutoApprove");
+    node_manual
+        .commander
+        .shutdown()
+        .await
+        .expect("❌ Не удалось остановить ноду с ManualApprove");
+    node_custom
+        .commander
+        .shutdown()
+        .await
+        .expect("❌ Не удалось остановить ноду с кастомным буфером");
+
+    node_auto
+        .wait_for_shutdown()
+        .await
+        .expect("❌ Не удалось дождаться завершения ноды с AutoApprove");
+    node_manual
+        .wait_for_shutdown()
+        .await
+        .expect("❌ Не удалось дождаться завершения ноды с ManualApprove");
+    node_custom
+        .wait_for_shutdown()
+        .await
+        .expect("❌ Не удалось дождаться завершения ноды с кастомным буфером");
+
+    println!("✅ Все ноды успешно остановлены");
+    println!("🎉 Тест NodeBuilder пройден успешно!");
+}
+
+/// Тестирует обратную совместимость с Node::new()
+#[tokio::test]
+async fn test_backward_compatibility() {
+    println!("🧪 Тестируем обратную совместимость с Node::new()...");
+
+    // Создаем ноду через старый конструктор
+    let mut node_old = Node::new()
+        .await
+        .expect("❌ Не удалось создать ноду через Node::new()");
+
+    println!("✅ Нода через Node::new() создана успешно");
+    println!("   PeerId: {}", node_old.peer_id());
+
+    // Создаем ноду через NodeBuilder с настройками по умолчанию
+    let mut node_new = Node::builder()
+        .await
+        .build()
+        .await
+        .expect("❌ Не удалось создать ноду через NodeBuilder");
+
+    println!("✅ Нода через NodeBuilder создана успешно");
+    println!("   PeerId: {}", node_new.peer_id());
+
+    // Запускаем обе ноды
+    node_old
+        .start()
+        .await
+        .expect("❌ Не удалось запустить ноду через Node::new()");
+    node_new
+        .start()
+        .await
+        .expect("❌ Не удалось запустить ноду через NodeBuilder");
+
+    println!("✅ Обе ноды успешно запущены:");
+    println!("   Node::new(): {}", node_old.get_task_status());
+    println!("   NodeBuilder: {}", node_new.get_task_status());
+
+    // Останавливаем ноды
+    node_old
+        .commander
+        .shutdown()
+        .await
+        .expect("❌ Не удалось остановить ноду через Node::new()");
+    node_new
+        .commander
+        .shutdown()
+        .await
+        .expect("❌ Не удалось остановить ноду через NodeBuilder");
+
+    node_old
+        .wait_for_shutdown()
+        .await
+        .expect("❌ Не удалось дождаться завершения ноды через Node::new()");
+    node_new
+        .wait_for_shutdown()
+        .await
+        .expect("❌ Не удалось дождаться завершения ноды через NodeBuilder");
+
+    println!("✅ Обе ноды успешно остановлены");
+    println!("🎉 Тест обратной совместимости пройден успешно!");
+}
