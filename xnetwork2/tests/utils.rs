@@ -164,7 +164,7 @@ pub fn spawn_connection_established_task(
     node: &mut Node,
     expected_peer_id: libp2p::PeerId,
     timeout_duration: Duration,
-) -> tokio::task::JoinHandle<Result<NodeEvent, Box<dyn std::error::Error + Send + Sync>>> {
+) -> tokio::task::JoinHandle<Result<libp2p::swarm::ConnectionId, Box<dyn std::error::Error + Send + Sync>>> {
     let mut events = node.subscribe();
 
     tokio::spawn(async move {
@@ -176,8 +176,13 @@ pub fn spawn_connection_established_task(
             timeout_duration,
         ).await?;
 
-        println!("✅ Получен ConnectionEstablished для пира {}", expected_peer_id);
-        Ok(connection_event)
+        match connection_event {
+            NodeEvent::ConnectionEstablished { connection_id, .. } => {
+                println!("✅ Получен ConnectionEstablished для пира {}, connection_id: {:?}", expected_peer_id, connection_id);
+                Ok(connection_id)
+            }
+            _ => Err("❌ Не удалось получить connection_id - получено неожиданное событие".into()),
+        }
     })
 }
 
@@ -187,7 +192,7 @@ pub async fn dial_and_wait_connection(
     peer_id: libp2p::PeerId,
     addr: Multiaddr,
     timeout_duration: Duration,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<libp2p::swarm::ConnectionId, Box<dyn std::error::Error + Send + Sync>> {
     println!("🔗 Выполняем Dial к пиру {}...", peer_id);
 
     // Запускаем задачу ожидания соединения ДО Dial
@@ -214,13 +219,13 @@ pub async fn dial_and_wait_connection(
     assert!(dial_result.is_ok(), "❌ Должен подключиться к пиру {}", peer_id);
     println!("✅ Команда Dial выполнена успешно");
 
-    // Ожидаем установки соединения
-    connection_task.await
+    // Ожидаем установки соединения и получаем connection_id
+    let connection_id = connection_task.await
         .expect("❌ Задача ожидания соединения завершилась с ошибкой (join)")
         .expect("❌ Задача ожидания соединения завершилась с ошибкой (task)");
 
-    println!("✅ Соединение с пиром {} успешно установлено", peer_id);
-    Ok(())
+    println!("✅ Соединение с пиром {} успешно установлено, connection_id: {:?}", peer_id, connection_id);
+    Ok(connection_id)
 }
 
 /// Полный цикл установки соединения с автоматической аутентификацией
@@ -250,4 +255,217 @@ pub async fn setup_connection_with_auth(
 
     println!("✅ Аутентификация успешно завершена");
     Ok(())
+}
+
+/// Запускает задачу ожидания VerifyPorRequest в ручном режиме (без автоматического подтверждения)
+/// Возвращает JoinHandle и Receiver для получения события
+pub fn spawn_manual_por_task(
+    node: &mut Node,
+    expected_peer_id: libp2p::PeerId,
+    timeout_duration: Duration,
+) -> (
+    tokio::task::JoinHandle<Result<NodeEvent, Box<dyn std::error::Error + Send + Sync>>>,
+    tokio::sync::broadcast::Receiver<NodeEvent>,
+) {
+    let mut events = node.subscribe();
+    let events_clone = events.resubscribe();
+
+    let handle = tokio::spawn(async move {
+        println!("⏳ Ожидаем VerifyPorRequest для пира {} в ручном режиме (таймаут {} секунд)...", 
+                expected_peer_id, timeout_duration.as_secs());
+        
+        // Ждем VerifyPorRequest для ожидаемого пира
+        let por_event = wait_for_event(
+            &mut events,
+            |e| matches!(e, NodeEvent::VerifyPorRequest { peer_id, .. } if *peer_id == expected_peer_id),
+            timeout_duration,
+        ).await?;
+
+        println!("✅ Получен VerifyPorRequest для пира {} в ручном режиме", expected_peer_id);
+        Ok(por_event)
+    });
+
+    (handle, events_clone)
+}
+
+/// Ожидает события VerifyPorRequest на обеих нодах в ручном режиме
+pub async fn wait_for_manual_por_requests(
+    node1: &mut Node,
+    node2: &mut Node,
+    timeout_duration: Duration,
+) -> Result<(NodeEvent, NodeEvent), Box<dyn std::error::Error + Send + Sync>> {
+    println!("🔐 Ожидаем VerifyPorRequest на обеих нодах в ручном режиме...");
+
+    // Запускаем задачи ожидания на обеих нодах
+    let (task1, mut events1) = spawn_manual_por_task(node1, *node2.peer_id(), timeout_duration);
+    let (task2, mut events2) = spawn_manual_por_task(node2, *node1.peer_id(), timeout_duration);
+
+    // Используем wait_for_two_events для ожидания обоих событий
+    let (event1, event2) = wait_for_two_events(
+        &mut events1,
+        &mut events2,
+        |e| matches!(e, NodeEvent::VerifyPorRequest { .. }),
+        |e| matches!(e, NodeEvent::VerifyPorRequest { .. }),
+        timeout_duration,
+    ).await?;
+
+    // Ждем завершения задач
+    task1.await
+        .expect("❌ Задача ожидания PoR для ноды1 завершилась с ошибкой (join)")
+        .expect("❌ Задача ожидания PoR для ноды1 завершилась с ошибкой (task)");
+    task2.await
+        .expect("❌ Задача ожидания PoR для ноды2 завершилась с ошибкой (join)")
+        .expect("❌ Задача ожидания PoR для ноды2 завершилась с ошибкой (task)");
+
+    println!("✅ Оба VerifyPorRequest получены в ручном режиме");
+    Ok((event1, event2))
+}
+
+/// Утилита для проверки отсутствия автоматической аутентификации
+pub async fn assert_no_auth_events(
+    node1: &mut Node,
+    node2: &mut Node,
+    duration: Duration,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("🔍 Проверяем отсутствие автоматической аутентификации в течение {} секунд...", duration.as_secs());
+    
+    let mut events1 = node1.subscribe();
+    let mut events2 = node2.subscribe();
+    
+    let result = timeout(duration, async {
+        loop {
+            tokio::select! {
+                Ok(event) = events1.recv() => {
+                    if matches!(event, NodeEvent::PeerAuthenticated { .. }) {
+                        return Err::<(), _>("❌ Нода1 получила событие PeerAuthenticated в ручном режиме".into());
+                    }
+                }
+                Ok(event) = events2.recv() => {
+                    if matches!(event, NodeEvent::PeerAuthenticated { .. }) {
+                        return Err::<(), _>("❌ Нода2 получила событие PeerAuthenticated в ручном режиме".into());
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                    // Периодическая проверка завершения
+                }
+            }
+        }
+    }).await;
+
+    match result {
+        Ok(Err(e)) => Err(e),
+        Ok(Ok(_)) => panic!("❌ Неожиданное завершение цикла проверки аутентификации"),
+        Err(_) => {
+            println!("✅ Автоматическая аутентификация не произошла в течение {} секунд", duration.as_secs());
+            Ok(())
+        }
+    }
+}
+
+/// Получает connection_id для указанного пира из состояния сети
+pub async fn get_connection_id(
+    node: &mut Node,
+    peer_id: libp2p::PeerId,
+    timeout_duration: Duration,
+) -> Result<libp2p::swarm::ConnectionId, Box<dyn std::error::Error + Send + Sync>> {
+    println!("🔍 Получаем connection_id для пира {}...", peer_id);
+    
+    let mut events = node.subscribe();
+    let connection_event = wait_for_event(
+        &mut events,
+        |e| matches!(e, NodeEvent::ConnectionEstablished { peer_id: event_peer_id, .. } if *event_peer_id == peer_id),
+        timeout_duration,
+    ).await?;
+
+    match connection_event {
+        NodeEvent::ConnectionEstablished { connection_id, .. } => {
+            println!("✅ Получен connection_id: {:?} для пира {}", connection_id, peer_id);
+            Ok(connection_id)
+        }
+        _ => Err("❌ Не удалось получить connection_id - получено неожиданное событие".into()),
+    }
+}
+
+/// Запускает задачу ожидания ConnectionEstablished для получения connection_id
+/// Должна запускаться ДО dial_and_wait_connection
+pub fn spawn_connection_id_listener_task(
+    node: &mut Node,
+    expected_peer_id: libp2p::PeerId,
+    timeout_duration: Duration,
+) -> tokio::task::JoinHandle<Result<libp2p::swarm::ConnectionId, Box<dyn std::error::Error + Send + Sync>>> {
+    let mut events = node.subscribe();
+
+    tokio::spawn(async move {
+        println!("⏳ Ожидаем ConnectionEstablished для пира {} (таймаут {} секунд)...", 
+                expected_peer_id, timeout_duration.as_secs());
+        
+        let connection_event = wait_for_event(
+            &mut events,
+            |e| matches!(e, NodeEvent::ConnectionEstablished { peer_id, .. } if *peer_id == expected_peer_id),
+            timeout_duration,
+        ).await?;
+
+        match connection_event {
+            NodeEvent::ConnectionEstablished { connection_id, .. } => {
+                println!("✅ Получен ConnectionEstablished для пира {}, connection_id: {:?}", 
+                        expected_peer_id, connection_id);
+                Ok(connection_id)
+            }
+            _ => Err("❌ Не удалось получить connection_id - получено неожиданное событие".into()),
+        }
+    })
+}
+
+/// Создает асинхронную задачу, которая ждет завершения аутентификации для указанного пира
+pub fn spawn_auth_completion_task(
+    node: &mut Node,
+    expected_peer_id: libp2p::PeerId,
+    timeout_duration: Duration,
+) -> tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
+    let mut events = node.subscribe();
+
+    tokio::spawn(async move {
+        println!("⏳ Ожидаем PeerAuthenticated для пира {} (таймаут {} секунд)...", 
+                expected_peer_id, timeout_duration.as_secs());
+        
+        let auth_event = wait_for_event(
+            &mut events,
+            |e| matches!(e, NodeEvent::PeerAuthenticated { peer_id, .. } if *peer_id == expected_peer_id),
+            timeout_duration,
+        ).await?;
+
+        println!("✅ Аутентификация завершена для пира {}", expected_peer_id);
+        Ok(())
+    })
+}
+
+/// Создает асинхронную задачу, которая ждет VerifyPorRequest и сразу подтверждает его
+pub fn spawn_auto_respond_por_task(
+    node: &mut Node,
+    expected_peer_id: libp2p::PeerId,
+    timeout_duration: Duration,
+) -> tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>> {
+    let mut events = node.subscribe();
+    let commander = node.commander.clone();
+
+    tokio::spawn(async move {
+        println!("⏳ Ожидаем VerifyPorRequest от пира {} (таймаут {} секунд)...", 
+                expected_peer_id, timeout_duration.as_secs());
+        
+        let por_event = wait_for_event(
+            &mut events,
+            |e| matches!(e, NodeEvent::VerifyPorRequest { peer_id, .. } if *peer_id == expected_peer_id),
+            timeout_duration,
+        ).await?;
+
+        // Немедленно подтверждаем аутентификацию
+        if let NodeEvent::VerifyPorRequest { peer_id, .. } = por_event {
+            println!("✅ Получен VerifyPorRequest от пира {}, подтверждаем аутентификацию...", peer_id);
+            commander.submit_por_verification(peer_id, true).await
+                .expect(&format!("❌ Не удалось подтвердить аутентификацию для пира {} - критическая ошибка", peer_id));
+            println!("✅ Аутентификация для пира {} успешно подтверждена", peer_id);
+        }
+
+        Ok(())
+    })
 }
