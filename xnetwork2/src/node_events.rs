@@ -28,8 +28,21 @@ pub enum NodeEvent {
     ExpiredListenAddr { address: Multiaddr },
 
     // Аутентификация события
-    /// Peer successfully authenticated
-    PeerAuthenticated { peer_id: PeerId },
+    /// Mutual authentication successfully completed
+    PeerMutualAuthSuccess { 
+        peer_id: PeerId,
+        connection_id: ConnectionId 
+    },
+    /// Outbound authentication successfully completed
+    PeerOutboundAuthSuccess { 
+        peer_id: PeerId,
+        connection_id: ConnectionId 
+    },
+    /// Inbound authentication successfully completed
+    PeerInboundAuthSuccess { 
+        peer_id: PeerId,
+        connection_id: ConnectionId 
+    },
     /// PoR verification requested
     VerifyPorRequest {
         peer_id: PeerId,
@@ -102,7 +115,9 @@ impl NodeEvent {
             NodeEvent::ConnectionClosed { .. } => "ConnectionClosed",
             NodeEvent::NewListenAddr { .. } => "NewListenAddr",
             NodeEvent::ExpiredListenAddr { .. } => "ExpiredListenAddr",
-            NodeEvent::PeerAuthenticated { .. } => "PeerAuthenticated",
+            NodeEvent::PeerMutualAuthSuccess { .. } => "PeerMutualAuthSuccess",
+            NodeEvent::PeerOutboundAuthSuccess { .. } => "PeerOutboundAuthSuccess",
+            NodeEvent::PeerInboundAuthSuccess { .. } => "PeerInboundAuthSuccess",
             NodeEvent::VerifyPorRequest { .. } => "VerifyPorRequest",
             NodeEvent::XStreamIncoming { .. } => "XStreamIncoming",
             NodeEvent::XStreamEstablished { .. } => "XStreamEstablished",
@@ -133,7 +148,10 @@ impl NodeEvent {
     pub fn is_auth_event(&self) -> bool {
         matches!(
             self,
-            NodeEvent::PeerAuthenticated { .. } | NodeEvent::VerifyPorRequest { .. }
+            NodeEvent::PeerMutualAuthSuccess { .. }
+                | NodeEvent::PeerOutboundAuthSuccess { .. }
+                | NodeEvent::PeerInboundAuthSuccess { .. }
+                | NodeEvent::VerifyPorRequest { .. }
         )
     }
 

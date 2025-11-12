@@ -106,17 +106,23 @@ impl XNetworkSwarmHandler {
                                     metadata: metadata.clone(),
                                 });
                             }
-                            PorAuthEvent::MutualAuthSuccess { peer_id, .. } => {
-                                let _ = event_sender
-                                    .send(NodeEvent::PeerAuthenticated { peer_id: *peer_id });
+                            PorAuthEvent::MutualAuthSuccess { peer_id, connection_id, .. } => {
+                                let _ = event_sender.send(NodeEvent::PeerMutualAuthSuccess { 
+                                    peer_id: *peer_id,
+                                    connection_id: *connection_id 
+                                });
                             }
-                            PorAuthEvent::OutboundAuthSuccess { peer_id, .. } => {
-                                let _ = event_sender
-                                    .send(NodeEvent::PeerAuthenticated { peer_id: *peer_id });
+                            PorAuthEvent::OutboundAuthSuccess { peer_id, connection_id, .. } => {
+                                let _ = event_sender.send(NodeEvent::PeerOutboundAuthSuccess { 
+                                    peer_id: *peer_id,
+                                    connection_id: *connection_id 
+                                });
                             }
-                            PorAuthEvent::InboundAuthSuccess { peer_id, .. } => {
-                                let _ = event_sender
-                                    .send(NodeEvent::PeerAuthenticated { peer_id: *peer_id });
+                            PorAuthEvent::InboundAuthSuccess { peer_id, connection_id, .. } => {
+                                let _ = event_sender.send(NodeEvent::PeerInboundAuthSuccess { 
+                                    peer_id: *peer_id,
+                                    connection_id: *connection_id 
+                                });
                             }
                             // Skip authentication failures and other XAuth events
                             _ => {}
@@ -339,34 +345,34 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
 
                         // Добавляем специальную отладочную информацию для событий аутентификации
                         match event {
-                            PorAuthEvent::MutualAuthSuccess { peer_id, .. } => {
+                            PorAuthEvent::MutualAuthSuccess { peer_id, connection_id, .. } => {
                                 debug!(
-                                    "🎉 [SwarmHandler] MUTUAL AUTH SUCCESS for peer: {}",
-                                    peer_id
+                                    "🎉 [SwarmHandler] MUTUAL AUTH SUCCESS for peer: {}, connection: {:?}",
+                                    peer_id, connection_id
                                 );
                             }
-                            PorAuthEvent::OutboundAuthSuccess { peer_id, .. } => {
+                            PorAuthEvent::OutboundAuthSuccess { peer_id, connection_id, .. } => {
                                 debug!(
-                                    "✅ [SwarmHandler] OUTBOUND AUTH SUCCESS for peer: {}",
-                                    peer_id
+                                    "✅ [SwarmHandler] OUTBOUND AUTH SUCCESS for peer: {}, connection: {:?}",
+                                    peer_id, connection_id
                                 );
                             }
-                            PorAuthEvent::InboundAuthSuccess { peer_id, .. } => {
+                            PorAuthEvent::InboundAuthSuccess { peer_id, connection_id, .. } => {
                                 debug!(
-                                    "✅ [SwarmHandler] INBOUND AUTH SUCCESS for peer: {}",
-                                    peer_id
+                                    "✅ [SwarmHandler] INBOUND AUTH SUCCESS for peer: {}, connection: {:?}",
+                                    peer_id, connection_id
                                 );
                             }
-                            PorAuthEvent::OutboundAuthFailure { peer_id, .. } => {
+                            PorAuthEvent::OutboundAuthFailure { peer_id, connection_id, .. } => {
                                 debug!(
-                                    "❌ [SwarmHandler] OUTBOUND AUTH FAILURE for peer: {}",
-                                    peer_id
+                                    "❌ [SwarmHandler] OUTBOUND AUTH FAILURE for peer: {}, connection: {:?}",
+                                    peer_id, connection_id
                                 );
                             }
-                            PorAuthEvent::InboundAuthFailure { peer_id, .. } => {
+                            PorAuthEvent::InboundAuthFailure { peer_id, connection_id, .. } => {
                                 debug!(
-                                    "❌ [SwarmHandler] INBOUND AUTH FAILURE for peer: {}",
-                                    peer_id
+                                    "❌ [SwarmHandler] INBOUND AUTH FAILURE for peer: {}, connection: {:?}",
+                                    peer_id, connection_id
                                 );
                             }
                             _ => {}

@@ -336,13 +336,21 @@ pub async fn assert_no_auth_events(
         loop {
             tokio::select! {
                 Ok(event) = events1.recv() => {
-                    if matches!(event, NodeEvent::PeerAuthenticated { .. }) {
-                        return Err::<(), _>("❌ Нода1 получила событие PeerAuthenticated в ручном режиме".into());
+                    if matches!(event, 
+                        NodeEvent::PeerMutualAuthSuccess { .. } |
+                        NodeEvent::PeerOutboundAuthSuccess { .. } |
+                        NodeEvent::PeerInboundAuthSuccess { .. }
+                    ) {
+                        return Err::<(), _>("❌ Нода1 получила событие успешной аутентификации в ручном режиме".into());
                     }
                 }
                 Ok(event) = events2.recv() => {
-                    if matches!(event, NodeEvent::PeerAuthenticated { .. }) {
-                        return Err::<(), _>("❌ Нода2 получила событие PeerAuthenticated в ручном режиме".into());
+                    if matches!(event, 
+                        NodeEvent::PeerMutualAuthSuccess { .. } |
+                        NodeEvent::PeerOutboundAuthSuccess { .. } |
+                        NodeEvent::PeerInboundAuthSuccess { .. }
+                    ) {
+                        return Err::<(), _>("❌ Нода2 получила событие успешной аутентификации в ручном режиме".into());
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(100)) => {
@@ -417,6 +425,7 @@ pub fn spawn_connection_id_listener_task(
 }
 
 /// Создает асинхронную задачу, которая ждет завершения аутентификации для указанного пира
+/// Ожидает любое из трех событий успешной аутентификации: MutualAuthSuccess, OutboundAuthSuccess, InboundAuthSuccess
 pub fn spawn_auth_completion_task(
     node: &mut Node,
     expected_peer_id: libp2p::PeerId,
@@ -425,12 +434,20 @@ pub fn spawn_auth_completion_task(
     let mut events = node.subscribe();
 
     tokio::spawn(async move {
-        println!("⏳ Ожидаем PeerAuthenticated для пира {} (таймаут {} секунд)...", 
+        println!("⏳ Ожидаем завершение аутентификации для пира {} (таймаут {} секунд)...", 
                 expected_peer_id, timeout_duration.as_secs());
         
         let auth_event = wait_for_event(
             &mut events,
-            |e| matches!(e, NodeEvent::PeerAuthenticated { peer_id, .. } if *peer_id == expected_peer_id),
+            |e| {
+                matches!(e, 
+                    NodeEvent::PeerMutualAuthSuccess { peer_id, .. } if *peer_id == expected_peer_id
+                ) || matches!(e, 
+                    NodeEvent::PeerOutboundAuthSuccess { peer_id, .. } if *peer_id == expected_peer_id
+                ) || matches!(e, 
+                    NodeEvent::PeerInboundAuthSuccess { peer_id, .. } if *peer_id == expected_peer_id
+                )
+            },
             timeout_duration,
         ).await?;
 

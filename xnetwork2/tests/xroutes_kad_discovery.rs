@@ -234,7 +234,7 @@ async fn test_kademlia_discovery_with_bootstrap() -> Result<(), Box<dyn std::err
 
     // Тестируем гарантированный таймаут для существующего пира
     println!("🧪 Тестируем гарантированный таймаут для существующего пира...");
-    match node1.commander.find_peer_addresses(peer_to_find, Duration::from_millis(1)).await {
+    match node1.commander.find_peer_addresses(peer_to_find, Duration::from_micros(1)).await {
         Ok(addresses) => {
             // СТРОГАЯ ПРОВЕРКА: за 1мс невозможно найти пир, должен быть таймаут
             panic!("❌ КРИТИЧЕСКАЯ ОШИБКА: find_peer_addresses вернул Ok за 1мс для пира {} с адресами: {:?}", peer_to_find, addresses);
@@ -255,7 +255,7 @@ async fn test_kademlia_discovery_with_bootstrap() -> Result<(), Box<dyn std::err
 
     // Тестируем гарантированный таймаут для несуществующего пира
     println!("🧪 Тестируем гарантированный таймаут для несуществующего пира...");
-    match node1.commander.find_peer_addresses(fake_peer_id, Duration::from_millis(1)).await {
+    match node1.commander.find_peer_addresses(fake_peer_id, Duration::from_micros(1)).await {
         Ok(addresses) => {
             // СТРОГАЯ ПРОВЕРКА: за 1мс невозможно найти несуществующий пир
             panic!("❌ КРИТИЧЕСКАЯ ОШИБКА: find_peer_addresses вернул Ok за 1мс для несуществующего пира {} с адресами: {:?}", fake_peer_id, addresses);

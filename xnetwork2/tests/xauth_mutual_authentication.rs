@@ -207,26 +207,34 @@ async fn test_two_nodes_xauth_mutual_authentication_in_5_seconds() {
 
         println!("✅ PoR запросы подтверждены, ожидаем завершение аутентификации...");
 
-        // 11. ОЖИДАНИЕ СОБЫТИЙ PeerAuthenticated (6-6.5 секунды)
+        // 11. ОЖИДАНИЕ СОБЫТИЙ УСПЕШНОЙ АУТЕНТИФИКАЦИИ (6-6.5 секунды)
         println!("⏳ Ожидаем события взаимной XAuth аутентификации (таймаут 2 секунды)...");
         let (node1_auth, node2_auth) = wait_for_two_events(
             &mut node1_events,
             &mut node2_events,
-            |e| matches!(e, NodeEvent::PeerAuthenticated { .. }),
-            |e| matches!(e, NodeEvent::PeerAuthenticated { .. }),
+            |e| matches!(e, 
+                NodeEvent::PeerMutualAuthSuccess { .. }
+            ),
+            |e| matches!(e, 
+                NodeEvent::PeerMutualAuthSuccess { .. }
+            ),
             Duration::from_secs(2)
-        ).await.expect("❌ Таймаут ожидания событий PeerAuthenticated - аутентификация не завершена за 2 секунды");
+        ).await.expect("❌ Таймаут ожидания событий аутентификации - аутентификация не завершена за 2 секунды");
 
         // 12. ПРОВЕРКА ЦЕЛОСТНОСТИ АУТЕНТИФИКАЦИИ (6.5-6.8 секунды)
         println!("🔍 Проверяем целостность аутентификации...");
 
         let node1_auth_peer_id = match node1_auth {
-            NodeEvent::PeerAuthenticated { peer_id } => peer_id,
+            NodeEvent::PeerMutualAuthSuccess { peer_id, .. } => peer_id,
+            NodeEvent::PeerOutboundAuthSuccess { peer_id, .. } => peer_id,
+            NodeEvent::PeerInboundAuthSuccess { peer_id, .. } => peer_id,
             _ => panic!("❌ Нода1 получила неожиданное событие аутентификации: {:?}", node1_auth),
         };
 
         let node2_auth_peer_id = match node2_auth {
-            NodeEvent::PeerAuthenticated { peer_id } => peer_id,
+            NodeEvent::PeerMutualAuthSuccess { peer_id, .. } => peer_id,
+            NodeEvent::PeerOutboundAuthSuccess { peer_id, .. } => peer_id,
+            NodeEvent::PeerInboundAuthSuccess { peer_id, .. } => peer_id,
             _ => panic!("❌ Нода2 получила неожиданное событие аутентификации: {:?}", node2_auth),
         };
 
@@ -243,7 +251,7 @@ async fn test_two_nodes_xauth_mutual_authentication_in_5_seconds() {
         println!("   Node1 → Node2: {}", node1_auth_peer_id);
         println!("   Node2 → Node1: {}", node2_auth_peer_id);
 
-        // 11. GRACEFUL SHUTDOWN ОБЕИХ НОД (5.2-5.5 секунд)
+        // 13. GRACEFUL SHUTDOWN ОБЕИХ НОД (5.2-5.5 секунд)
         println!("🛑 Выполняем graceful shutdown обеих нод...");
         node1.commander.shutdown().await
             .expect("❌ Не удалось выполнить graceful shutdown ноды1 - критическая ошибка");
@@ -258,7 +266,7 @@ async fn test_two_nodes_xauth_mutual_authentication_in_5_seconds() {
 
         println!("✅ Обе ноды корректно завершили работу");
 
-        // 12. ФИНАЛЬНАЯ ПРОВЕРКА
+        // 14. ФИНАЛЬНАЯ ПРОВЕРКА
         assert_eq!(node1.get_task_status(), "not_started",
             "❌ Нода1 не перешла в состояние 'not_started' после завершения");
         assert_eq!(node2.get_task_status(), "not_started",
