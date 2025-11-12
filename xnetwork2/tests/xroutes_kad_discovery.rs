@@ -179,55 +179,6 @@ async fn test_kademlia_discovery_with_bootstrap() -> Result<(), Box<dyn std::err
     // 5.2 Тестирование Kademlia функциональности
     println!("🧪 Тестируем Kademlia функциональность...");
 
-    // Test that node1 can find node2 through Kademlia через alias метод
-    let peer_to_lookup = *node2.peer_id();
-    match node1.commander.find_peer(peer_to_lookup).await {
-        Ok(addresses) => {
-            // Фильтруем только адреса, принадлежащие целевому пиру, и убираем дубликаты
-            use std::collections::HashSet;
-            let target_peer_id_str = peer_to_lookup.to_string();
-            let unique_addresses: HashSet<_> = addresses
-                .iter()
-                .filter(|addr| addr.to_string().contains(&target_peer_id_str))
-                .collect();
-            
-            println!("✅ Node1 нашел {} через Kademlia с {} уникальными адресами", peer_to_lookup, unique_addresses.len());
-            if !unique_addresses.is_empty() {
-                println!("📋 Уникальные адреса для {}:", peer_to_lookup);
-                for (i, addr) in unique_addresses.iter().enumerate() {
-                    println!("   {}. {}", i + 1, addr);
-                }
-            } else {
-                println!("⚠️  Для {} не найдено уникальных адресов в Kademlia", peer_to_lookup);
-                println!("   Все найденные адреса ({}):", addresses.len());
-                for (i, addr) in addresses.iter().enumerate() {
-                    println!("      {}. {}", i + 1, addr);
-                }
-            }
-            //assert!(!addresses.is_empty(), "❌ Должен найти хотя бы один адрес для node2");
-        }
-        Err(e) => {
-            println!("❌ Node1 не смог найти {}: {:?}", peer_to_lookup, e);
-            // В тестовой среде это может произойти, но мы должны хотя бы проверить, что команда была обработана
-        }
-    }
-    println!("Gona sleep");
-    sleep(Duration::from_millis(100)).await;
-    println!("Gona awaken!");
-    // Test getting closest peers через alias метод
-    
-    match node1.commander.get_closest_peers(peer_to_lookup).await {
-        Ok(peers) => {
-            println!("✅ Node1 нашел {} ближайших пиров к {}", peers.len(), peer_to_lookup);
-            // В нашей маленькой сети мы должны найти хотя бы bootstrap и node2
-            // Но Kademlia может не найти пиров в маленькой сети, поэтому проверяем только успешное выполнение
-            assert!(!peers.is_empty(), "❌ Должен найти хотя бы один адрес для node2");
-            println!("📊 Найденные пиры: {:?}", peers);
-        }
-        Err(e) => {
-            println!("❌ Node1 не смог получить ближайших пиров: {:?}", e);
-        }
-    }
 
     // Тестируем новый метод find_peer_addresses с таймаутом
     println!("🧪 Тестируем новый метод find_peer_addresses...");

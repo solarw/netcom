@@ -10,10 +10,10 @@ use tracing::{debug, info};
 
 use super::behaviour::{XRoutesBehaviour, XRoutesBehaviourEvent};
 use super::command::XRoutesCommand;
+use super::pending_task_manager::PendingTaskManager;
 use super::types::{XRoutesConfig, XROUTES_IDENTIFY_PROTOCOL};
 
 /// State for tracking Kademlia operations
-#[derive(Default)]
 struct KadState {
     /// Pending bootstrap operations
     pending_bootstrap: HashMap<kad::QueryId, oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>>,
@@ -21,6 +21,24 @@ struct KadState {
     pending_find_peer: HashMap<kad::QueryId, (PeerId, oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>>>)>,
     /// Pending closest peers operations
     pending_closest_peers: HashMap<kad::QueryId, oneshot::Sender<Result<Vec<PeerId>, Box<dyn std::error::Error + Send + Sync>>>>,
+    /// Pending tasks for find peer addresses operations with timeout
+    find_addresses_tasks: PendingTaskManager<
+        kad::QueryId, 
+        Vec<Multiaddr>, 
+        Box<dyn std::error::Error + Send + Sync>,
+        PeerId  // Extra тип - целевой peer_id
+    >,
+}
+
+impl Default for KadState {
+    fn default() -> Self {
+        Self {
+            pending_bootstrap: HashMap::new(),
+            pending_find_peer: HashMap::new(),
+            pending_closest_peers: HashMap::new(),
+            find_addresses_tasks: PendingTaskManager::new(),
+        }
+    }
 }
 
 /// Handler for XRoutesBehaviour
@@ -83,8 +101,34 @@ impl XRoutesHandler {
                         }
                     }
                     kad::QueryResult::GetClosestPeers(Ok(peers)) => {
-                        // Check if this is a FindPeer or GetClosestPeers query
-                        if let Some((target_peer_id, response)) = self.kad_state.pending_find_peer.remove(&id) {
+                        // Сначала проверяем задачи FindPeerAddresses с таймаутом
+                        if let Some(target_peer_id) = self.kad_state.find_addresses_tasks.get_task_extra(&id) {
+                            // Для FindPeerAddresses, извлекаем адреса из peers и фильтруем только для целевого peer_id
+                            let target_peer_id_str = target_peer_id.to_string();
+                            let addresses: Vec<Multiaddr> = peers.peers.iter()
+                                .flat_map(|peer_info| {
+                                    // Извлекаем адреса из PeerInfo
+                                    peer_info.addrs.clone()
+                                })
+                                .filter(|addr| {
+                                    // Фильтруем только адреса, которые содержат целевой peer ID
+                                    addr.to_string().contains(&target_peer_id_str)
+                                })
+                                .collect();
+                            
+                            let addresses_len = addresses.len();
+                            if addresses.is_empty() {
+                                // Если адреса не найдены, устанавливаем ошибку - peer не найден
+                                let error_msg = format!("Peer {} not found in Kademlia DHT", target_peer_id);
+                                let _ = self.kad_state.find_addresses_tasks.set_task_error(&id, error_msg.into());
+                                info!("❌ [XRoutesHandler] Find peer addresses failed: peer {} not found", target_peer_id);
+                            } else {
+                                let _ = self.kad_state.find_addresses_tasks.set_task_result(&id, addresses);
+                                info!("✅ [XRoutesHandler] Find peer addresses completed with {} addresses for peer: {:?}", addresses_len, target_peer_id);
+                            }
+                        }
+                        // Затем проверяем обычные операции FindPeer
+                        else if let Some((target_peer_id, response)) = self.kad_state.pending_find_peer.remove(&id) {
                             // For FindPeer, we need to extract addresses from the peers
                             // and filter only addresses that belong to the target peer
                             let target_peer_id_str = target_peer_id.to_string();
@@ -120,7 +164,14 @@ impl XRoutesHandler {
                         }
                     }
                     kad::QueryResult::GetClosestPeers(Err(e)) => {
-                        if let Some((target_peer_id, response)) = self.kad_state.pending_find_peer.remove(&id) {
+                        // Сначала проверяем задачи FindPeerAddresses с таймаутом
+                        if let Some(target_peer_id) = self.kad_state.find_addresses_tasks.get_task_extra(&id) {
+                            let error_msg = format!("{:?}", e);
+                            let _ = self.kad_state.find_addresses_tasks.set_task_error(&id, e.into());
+                            debug!("❌ [XRoutesHandler] Find peer addresses failed for peer {:?}: {}", target_peer_id, error_msg);
+                        }
+                        // Затем проверяем обычные операции FindPeer
+                        else if let Some((target_peer_id, response)) = self.kad_state.pending_find_peer.remove(&id) {
                             let error_msg = format!("{:?}", e);
                             let _ = response.send(Err(e.into()));
                             debug!("❌ [XRoutesHandler] Find peer failed for peer {:?}: {}", target_peer_id, error_msg);
@@ -289,11 +340,18 @@ impl BehaviourHandler for XRoutesHandler {
             XRoutesCommand::FindPeerAddresses { peer_id, timeout, response } => {
                 debug!("🔄 [XRoutesHandler] Find peer addresses with timeout: {:?} for peer: {:?}", timeout, peer_id);
                 if let Some(kad) = behaviour.kad.as_mut() {
-                    // For now, we'll always initiate search since we don't have direct access to local addresses
-                    // In a real implementation, we might check the routing table or use a different approach
+                    // Инициируем поиск в Kademlia
                     let query_id = kad.get_closest_peers(peer_id);
-                    self.kad_state.pending_find_peer.insert(query_id, (peer_id, response));
-                    info!("✅ [XRoutesHandler] Find peer addresses started for: {:?} with timeout: {:?}", peer_id, timeout);
+                    
+                    // Добавляем задачу в PendingTaskManager с таймаутом и целевым peer_id как extra данными
+                    self.kad_state.find_addresses_tasks.add_pending_task_with_extra(
+                        query_id,
+                        timeout,
+                        response,
+                        peer_id,
+                    );
+                    
+                    info!("✅ [XRoutesHandler] Find peer addresses started for: {:?} with timeout: {:?} (query_id: {:?})", peer_id, timeout, query_id);
                 } else {
                     let _ = response.send(Err("Kademlia behaviour not enabled".into()));
                     debug!("❌ [XRoutesHandler] Cannot find peer addresses: Kademlia not enabled");

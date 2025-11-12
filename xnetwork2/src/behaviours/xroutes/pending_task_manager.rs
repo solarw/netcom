@@ -46,26 +46,28 @@ impl fmt::Display for TaskTimeoutError {
 }
 
 /// Структура для хранения информации о задаче
-struct PendingTask<T, O, E> {
+struct PendingTask<T, O, E, X> {
     task_id: T,
     due_to: Instant,
     result_tx: oneshot::Sender<Result<O, E>>,
     handler: AbortHandle,
+    extra: Option<X>,  // Дополнительные данные задачи
 }
 
 /// Централизованный менеджер асинхронных задач с таймаутом
-pub struct PendingTaskManager<T, O, E> {
-    tasks: Arc<Mutex<HashMap<T, PendingTask<T, O, E>>>>,
+pub struct PendingTaskManager<T, O, E, X> {
+    tasks: Arc<Mutex<HashMap<T, PendingTask<T, O, E, X>>>>,
 }
 
 // Убираем реализацию Default, так как она требует, чтобы T и R тоже были Default
 // Вместо этого используем явный вызов new()
 
-impl<T, O, E> PendingTaskManager<T, O, E> 
+impl<T, O, E, X> PendingTaskManager<T, O, E, X> 
 where 
     T: Eq + std::hash::Hash + Clone + Send + 'static,
     O: Send + 'static,
     E: From<TaskTimeoutError> + Send + 'static,
+    X: Clone + Send + 'static,
 {
     /// Создает новый PendingTaskManager
     pub fn new() -> Self {
@@ -109,6 +111,7 @@ where
             due_to,
             result_tx,
             handler,
+            extra: None,
         };
 
         self.tasks.lock().unwrap().insert(task_id, pending_task);
@@ -174,6 +177,111 @@ where
             pending_task.handler.abort();
         }
     }
+
+    /// Добавляет задачу с таймаутом и дополнительными данными
+    /// 
+    /// # Аргументы
+    /// - `task_id`: уникальный идентификатор задачи
+    /// - `timeout`: время таймаута
+    /// - `result_tx`: канал для отправки результата
+    /// - `extra`: дополнительные данные задачи
+    /// 
+    /// # Примечание
+    /// При срабатывании таймаута отправляется ошибка TaskTimeoutError через канал.
+    pub fn add_pending_task_with_extra(
+        &self,
+        task_id: T,
+        timeout: Duration,
+        result_tx: oneshot::Sender<Result<O, E>>,
+        extra: X,
+    ) {
+        let due_to = Instant::now() + timeout;
+        let tasks = Arc::clone(&self.tasks);
+        let task_id_clone = task_id.clone();
+
+        // Создаем фоновую задачу для таймаута
+        let handler = tokio::spawn(async move {
+            tokio::time::sleep(timeout).await;
+            
+            let mut tasks = tasks.lock().unwrap();
+            if let Some(pending_task) = tasks.remove(&task_id_clone) {
+                // При таймауте отправляем ошибку TaskTimeoutError
+                let _ = pending_task.result_tx.send(Err(TaskTimeoutError.into()));
+            }
+        }).abort_handle();
+
+        let pending_task = PendingTask {
+            task_id: task_id.clone(),
+            due_to,
+            result_tx,
+            handler,
+            extra: Some(extra),
+        };
+
+        self.tasks.lock().unwrap().insert(task_id, pending_task);
+    }
+
+    /// Получает дополнительные данные задачи
+    /// 
+    /// # Аргументы
+    /// - `task_id`: идентификатор задачи
+    /// 
+    /// # Возвращает
+    /// - `Some(extra)`: если задача найдена и есть дополнительные данные
+    /// - `None`: если задача не найдена или нет дополнительных данных
+    pub fn get_task_extra(&self, task_id: &T) -> Option<X> {
+        self.tasks.lock().unwrap()
+            .get(task_id)
+            .and_then(|task| task.extra.clone())
+    }
+
+    /// Устанавливает дополнительные данные задачи
+    /// 
+    /// # Аргументы
+    /// - `task_id`: идентификатор задачи
+    /// - `extra`: новые дополнительные данные
+    /// 
+    /// # Возвращает
+    /// - `Ok(true)`: если дополнительные данные успешно установлены
+    /// - `Ok(false)`: если задача не найдена
+    /// - `Err`: если произошла ошибка
+    pub fn set_task_extra(&self, task_id: &T, extra: X) -> Result<bool, PendingTaskError> {
+        let mut tasks = self.tasks.lock().unwrap();
+        
+        if let Some(pending_task) = tasks.get_mut(task_id) {
+            pending_task.extra = Some(extra);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Устанавливает ошибку задачи и отменяет таймаут
+    /// 
+    /// # Аргументы
+    /// - `task_id`: идентификатор задачи
+    /// - `error`: ошибка для отправки
+    /// 
+    /// # Возвращает
+    /// - `Ok(true)`: если ошибка успешно установлена
+    /// - `Ok(false)`: если задача не найдена
+    /// - `Err`: если произошла ошибка отправки
+    pub fn set_task_error(&self, task_id: &T, error: E) -> Result<bool, PendingTaskError> {
+        let mut tasks = self.tasks.lock().unwrap();
+        
+        if let Some(pending_task) = tasks.remove(task_id) {
+            // Отменяем таймаут
+            pending_task.handler.abort();
+            
+            // Отправляем ошибку
+            match pending_task.result_tx.send(Err(error)) {
+                Ok(()) => Ok(true),
+                Err(_) => Err(PendingTaskError::TaskAlreadyCompleted),
+            }
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -191,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_successful_completion_before_timeout() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         let (tx, rx) = oneshot::channel();
         
         manager.add_pending_task(1, Duration::from_secs(10), tx);
@@ -211,7 +319,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_timeout_triggered() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         let (tx, rx) = oneshot::channel();
         
         manager.add_pending_task(1, Duration::from_millis(100), tx);
@@ -230,7 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_double_result_set() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         let (tx, rx) = oneshot::channel();
         
         manager.add_pending_task(1, Duration::from_secs(10), tx);
@@ -251,7 +359,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_expired() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         
         // Добавляем задачу с очень коротким таймаутом
         let (tx1, _) = oneshot::channel();
@@ -277,7 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_access() {
-        let manager: StdArc<PendingTaskManager<u32, u32, String>> = StdArc::new(PendingTaskManager::new());
+        let manager: StdArc<PendingTaskManager<u32, u32, String, ()>> = StdArc::new(PendingTaskManager::new());
         
         let mut handles = vec![];
         
@@ -327,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_not_found() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         
         // Пытаемся установить результат для несуществующей задачи
         let result = manager.set_task_result(&999, "not found".to_string());
@@ -336,7 +444,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_clear_all() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         
         // Добавляем несколько задач
         for i in 0..5 {
@@ -356,7 +464,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_zero_timeout() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         let (tx, rx) = oneshot::channel();
         
         // Добавляем задачу с нулевым таймаутом
@@ -376,7 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_very_short_timeout() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         let (tx, rx) = oneshot::channel();
         
         // Добавляем задачу с очень коротким таймаутом
@@ -396,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_cancellation_before_timeout() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         let (tx, rx) = oneshot::channel();
         
         manager.add_pending_task(1, Duration::from_secs(10), tx);
@@ -413,7 +521,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reuse_task_id() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         
         // Первая задача с task_id = 1
         let (tx1, rx1) = oneshot::channel();
@@ -447,7 +555,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_high_concurrency() {
-        let manager: StdArc<PendingTaskManager<u32, u32, String>> = StdArc::new(PendingTaskManager::new());
+        let manager: StdArc<PendingTaskManager<u32, u32, String, ()>> = StdArc::new(PendingTaskManager::new());
         
         let mut handles = vec![];
         let num_tasks = 100;
@@ -487,7 +595,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_multiple_expired() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         
         // Добавляем несколько задач с короткими таймаутами
         for i in 0..5 {
@@ -516,7 +624,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_result_after_timeout() {
-        let manager: PendingTaskManager<u32, String, String> = PendingTaskManager::new();
+        let manager: PendingTaskManager<u32, String, String, ()> = PendingTaskManager::new();
         let (tx, rx) = oneshot::channel();
         
         manager.add_pending_task(1, Duration::from_millis(50), tx);
