@@ -1,8 +1,0 @@
-[profile.default]
-slow-timeout = { period = "70s", terminate-after = 2 }
-
-
-
-[[profile.default.overrides]]
-filter = 'test(/node_core/)'
-slow-timeout = { period = "7s", terminate-after = 2 }
