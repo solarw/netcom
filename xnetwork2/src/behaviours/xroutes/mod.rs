@@ -9,7 +9,7 @@ mod pending_task_manager;
 mod types;
 
 pub use behaviour::{XRoutesBehaviour, XRoutesBehaviourEvent};
-pub use command::XRoutesCommand;
+pub use command::{XRoutesCommand, MdnsCacheStatus};
 pub use handler::XRoutesHandler;
 pub use pending_task_manager::PendingTaskManager;
 pub use types::{XRoutesConfig, XRoutesStatus};

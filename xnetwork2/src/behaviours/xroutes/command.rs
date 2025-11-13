@@ -1,7 +1,21 @@
 //! Commands for XRoutes behaviour
 
 use libp2p::{PeerId, Multiaddr};
+use std::time::SystemTime;
 use super::types::XRoutesStatus;
+
+/// Status information for mDNS cache
+#[derive(Debug, Clone)]
+pub struct MdnsCacheStatus {
+    /// Total number of peers in cache
+    pub total_peers: usize,
+    /// Current cache size (number of entries)
+    pub cache_size: usize,
+    /// When the cache was last updated
+    pub last_update: SystemTime,
+    /// Default TTL for cache entries in seconds
+    pub ttl_seconds: u64,
+}
 
 /// Commands for controlling XRoutes behaviours
 #[derive(Debug)]
@@ -72,5 +86,34 @@ pub enum XRoutesCommand {
         timeout: std::time::Duration,
         /// Response channel with found addresses
         response: tokio::sync::oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get all peers from mDNS cache
+    GetMdnsPeers {
+        /// Response channel with all mDNS peers and their addresses
+        response: tokio::sync::oneshot::Sender<Result<Vec<(PeerId, Vec<Multiaddr>)>, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Find a specific peer in mDNS cache
+    FindMdnsPeer {
+        /// Peer ID to find
+        peer_id: PeerId,
+        /// Response channel with found addresses
+        response: tokio::sync::oneshot::Sender<Result<Option<Vec<Multiaddr>>, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get mDNS cache status
+    GetMdnsCacheStatus {
+        /// Response channel with cache status
+        response: tokio::sync::oneshot::Sender<Result<MdnsCacheStatus, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Clear mDNS cache
+    ClearMdnsCache {
+        /// Response channel with number of cleared entries
+        response: tokio::sync::oneshot::Sender<Result<usize, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Enable mDNS with custom TTL
+    EnableMdnsWithTtl {
+        /// Custom TTL in seconds
+        ttl_seconds: u64,
+        /// Response channel for enable completion
+        response: tokio::sync::oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
     },
 }

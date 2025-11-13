@@ -105,6 +105,21 @@ pub enum NodeEvent {
     KademliaRoutingUpdated { 
         peer_id: PeerId 
     },
+
+    // mDNS события
+    /// mDNS discovered a new peer in local network
+    MdnsPeerDiscovered { 
+        peer_id: PeerId, 
+        addresses: Vec<Multiaddr> 
+    },
+    /// mDNS peer expired (TTL reached)
+    MdnsPeerExpired { 
+        peer_id: PeerId 
+    },
+    /// mDNS error occurred
+    MdnsError { 
+        error: String 
+    },
 }
 
 impl NodeEvent {
@@ -130,6 +145,9 @@ impl NodeEvent {
             NodeEvent::KademliaPeerDiscovered { .. } => "KademliaPeerDiscovered",
             NodeEvent::KademliaBootstrapCompleted { .. } => "KademliaBootstrapCompleted",
             NodeEvent::KademliaRoutingUpdated { .. } => "KademliaRoutingUpdated",
+            NodeEvent::MdnsPeerDiscovered { .. } => "MdnsPeerDiscovered",
+            NodeEvent::MdnsPeerExpired { .. } => "MdnsPeerExpired",
+            NodeEvent::MdnsError { .. } => "MdnsError",
         }
     }
 

@@ -293,4 +293,70 @@ impl Commander {
         self.send(command).await?;
         response_rx.await?
     }
+
+    // mDNS cache commands
+
+    /// Get all peers from mDNS cache
+    pub async fn get_mdns_peers(
+        &self,
+    ) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetMdnsPeers {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Find a specific peer in mDNS cache
+    pub async fn find_mdns_peer(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Option<Vec<Multiaddr>>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::FindMdnsPeer {
+            peer_id,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get mDNS cache status
+    pub async fn get_mdns_cache_status(
+        &self,
+    ) -> Result<crate::behaviours::xroutes::MdnsCacheStatus, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetMdnsCacheStatus {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Clear mDNS cache
+    pub async fn clear_mdns_cache(
+        &self,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::ClearMdnsCache {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Enable mDNS with custom TTL
+    pub async fn enable_mdns_with_ttl(
+        &self,
+        ttl_seconds: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::EnableMdnsWithTtl {
+            ttl_seconds,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
 }

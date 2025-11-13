@@ -1,7 +1,7 @@
 //! Node creation and management for XNetwork2
 
 use command_swarm::{SwarmLoop, SwarmLoopBuilder, SwarmLoopStopper};
-use libp2p::{identity, quic};
+use libp2p::{identity, quic, Multiaddr, PeerId};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::node_events::NodeEvent;
@@ -146,5 +146,122 @@ impl Node {
     /// Available immediately after node creation, no need to wait for startup.
     pub fn keypair(&self) -> &identity::Keypair {
         &self.keypair
+    }
+
+    // Convenience methods for common operations
+
+    /// Stop the node (alias for force_shutdown)
+    pub async fn stop(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.force_shutdown().await
+    }
+
+    // XRoutes convenience methods
+
+    /// Enable identify behaviour
+    pub async fn enable_identify(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.enable_identify().await
+    }
+
+    /// Disable identify behaviour
+    pub async fn disable_identify(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.disable_identify().await
+    }
+
+    /// Enable mDNS discovery
+    pub async fn enable_mdns(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.enable_mdns().await
+    }
+
+    /// Disable mDNS discovery
+    pub async fn disable_mdns(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.disable_mdns().await
+    }
+
+    /// Enable Kademlia DHT discovery
+    pub async fn enable_kad(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.enable_kad().await
+    }
+
+    /// Disable Kademlia DHT discovery
+    pub async fn disable_kad(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.disable_kad().await
+    }
+
+    /// Get current status of XRoutes behaviours
+    pub async fn get_xroutes_status(&self) -> Result<crate::behaviours::xroutes::XRoutesStatus, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.get_xroutes_status().await
+    }
+
+    /// Bootstrap to a peer for Kademlia DHT
+    pub async fn bootstrap_to_peer(
+        &self,
+        peer_id: PeerId,
+        addresses: Vec<Multiaddr>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.bootstrap_to_peer(peer_id, addresses).await
+    }
+
+    /// Find a peer through Kademlia DHT
+    pub async fn find_peer(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.find_peer(peer_id).await
+    }
+
+    /// Get closest peers through Kademlia DHT
+    pub async fn get_closest_peers(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Vec<PeerId>, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.get_closest_peers(peer_id).await
+    }
+
+    /// Find peer addresses with automatic search and timeout
+    pub async fn find_peer_addresses(
+        &self,
+        peer_id: PeerId,
+        timeout: std::time::Duration,
+    ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.find_peer_addresses(peer_id, timeout).await
+    }
+
+    // mDNS cache methods
+
+    /// Get all peers from mDNS cache
+    pub async fn get_mdns_peers(
+        &self,
+    ) -> Result<Vec<(PeerId, Vec<Multiaddr>)>, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.get_mdns_peers().await
+    }
+
+    /// Find a specific peer in mDNS cache
+    pub async fn find_mdns_peer(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Option<Vec<Multiaddr>>, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.find_mdns_peer(peer_id).await
+    }
+
+    /// Get mDNS cache status
+    pub async fn get_mdns_cache_status(
+        &self,
+    ) -> Result<crate::behaviours::xroutes::MdnsCacheStatus, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.get_mdns_cache_status().await
+    }
+
+    /// Clear mDNS cache
+    pub async fn clear_mdns_cache(
+        &self,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.clear_mdns_cache().await
+    }
+
+    /// Enable mDNS with custom TTL
+    pub async fn enable_mdns_with_ttl(
+        &self,
+        ttl_seconds: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.enable_mdns_with_ttl(ttl_seconds).await
     }
 }

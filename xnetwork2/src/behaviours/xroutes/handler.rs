@@ -5,13 +5,67 @@ use async_trait::async_trait;
 use command_swarm::BehaviourHandler;
 use libp2p::{identify, mdns, kad, identity, PeerId, Multiaddr};
 use std::collections::HashMap;
+use std::time::{SystemTime, Duration};
 use tokio::sync::oneshot;
 use tracing::{debug, info};
 
 use super::behaviour::{XRoutesBehaviour, XRoutesBehaviourEvent};
-use super::command::XRoutesCommand;
+use super::command::{XRoutesCommand, MdnsCacheStatus};
 use super::pending_task_manager::PendingTaskManager;
 use super::types::{XRoutesConfig, XROUTES_IDENTIFY_PROTOCOL};
+
+/// Record for mDNS peer with TTL
+#[derive(Debug, Clone)]
+struct MdnsPeerRecord {
+    /// Peer addresses
+    addresses: Vec<Multiaddr>,
+    /// When this record was last updated
+    last_updated: SystemTime,
+    /// TTL in seconds
+    ttl_seconds: u64,
+}
+
+impl MdnsPeerRecord {
+    /// Create a new mDNS peer record
+    fn new(addresses: Vec<Multiaddr>, ttl_seconds: u64) -> Self {
+        Self {
+            addresses,
+            last_updated: SystemTime::now(),
+            ttl_seconds,
+        }
+    }
+
+    /// Check if the record has expired
+    fn is_expired(&self) -> bool {
+        match SystemTime::now().duration_since(self.last_updated) {
+            Ok(elapsed) => elapsed.as_secs() >= self.ttl_seconds,
+            Err(_) => true, // If time went backwards, consider expired
+        }
+    }
+
+    /// Update the record with new addresses
+    fn update(&mut self, addresses: Vec<Multiaddr>) {
+        self.addresses = addresses;
+        self.last_updated = SystemTime::now();
+    }
+}
+
+/// State for tracking mDNS operations
+struct MdnsState {
+    /// Cache of mDNS discovered peers
+    peer_cache: HashMap<PeerId, MdnsPeerRecord>,
+    /// Default TTL for mDNS records in seconds
+    default_ttl_seconds: u64,
+}
+
+impl Default for MdnsState {
+    fn default() -> Self {
+        Self {
+            peer_cache: HashMap::new(),
+            default_ttl_seconds: 60, // 1 minute default TTL
+        }
+    }
+}
 
 /// State for tracking Kademlia operations
 struct KadState {
@@ -48,6 +102,8 @@ pub struct XRoutesHandler {
     config: XRoutesConfig,
     /// Local peer ID for enabling behaviours
     local_peer_id: Option<PeerId>,
+    /// State for mDNS operations
+    mdns_state: MdnsState,
     /// State for Kademlia operations
     kad_state: KadState,
 }
@@ -58,6 +114,7 @@ impl XRoutesHandler {
         Self { 
             config,
             local_peer_id: None,
+            mdns_state: MdnsState::default(),
             kad_state: KadState::default(),
         }
     }
@@ -67,6 +124,7 @@ impl XRoutesHandler {
         Self { 
             config,
             local_peer_id: Some(local_peer_id),
+            mdns_state: MdnsState::default(),
             kad_state: KadState::default(),
         }
     }
@@ -74,6 +132,67 @@ impl XRoutesHandler {
     /// Set local peer ID
     pub fn set_local_peer_id(&mut self, local_peer_id: PeerId) {
         self.local_peer_id = Some(local_peer_id);
+    }
+
+    /// Handle mDNS discovered event
+    fn handle_mdns_discovered(&mut self, list: &Vec<(PeerId, Multiaddr)>, behaviour: &mut XRoutesBehaviour) {
+        debug!("🔍 [XRoutesHandler] Processing mDNS discovered {} peers", list.len());
+        
+        // Group addresses by peer_id
+        let mut peers_by_id: HashMap<PeerId, Vec<Multiaddr>> = HashMap::new();
+        for (peer_id, addr) in list {
+            peers_by_id.entry(*peer_id).or_default().push(addr.clone());
+        }
+
+        // Update cache and add to Kademlia if enabled
+        for (peer_id, addresses) in peers_by_id {
+            // Update cache
+            let record = MdnsPeerRecord::new(addresses.clone(), self.mdns_state.default_ttl_seconds);
+            self.mdns_state.peer_cache.insert(peer_id, record);
+
+            // Add to Kademlia if enabled
+            if let Some(kad) = behaviour.kad.as_mut() {
+                for addr in &addresses {
+                    kad.add_address(&peer_id, addr.clone());
+                    debug!("📍 [XRoutesHandler] Added mDNS peer to Kademlia: {} -> {}", peer_id, addr);
+                }
+                info!("✅ [XRoutesHandler] Added mDNS peer {} with {} addresses to Kademlia", peer_id, addresses.len());
+            }
+
+            info!("✅ [XRoutesHandler] mDNS peer discovered: {} with {} addresses", peer_id, addresses.len());
+        }
+    }
+
+    /// Handle mDNS expired event
+    fn handle_mdns_expired(&mut self, list: &Vec<(PeerId, Multiaddr)>) {
+        debug!("🗑️ [XRoutesHandler] Processing mDNS expired {} peers", list.len());
+        
+        // Group addresses by peer_id
+        let mut peers_by_id: HashMap<PeerId, Vec<Multiaddr>> = HashMap::new();
+        for (peer_id, addr) in list {
+            peers_by_id.entry(*peer_id).or_default().push(addr.clone());
+        }
+
+        // Remove expired peers from cache
+        for (peer_id, _) in peers_by_id {
+            if self.mdns_state.peer_cache.remove(&peer_id).is_some() {
+                info!("🗑️ [XRoutesHandler] Removed expired mDNS peer: {}", peer_id);
+            }
+        }
+    }
+
+    /// Clean expired mDNS records
+    fn clean_expired_mdns_records(&mut self) -> usize {
+        let before_count = self.mdns_state.peer_cache.len();
+        self.mdns_state.peer_cache.retain(|_, record| !record.is_expired());
+        let after_count = self.mdns_state.peer_cache.len();
+        let removed_count = before_count - after_count;
+        
+        if removed_count > 0 {
+            debug!("🧹 [XRoutesHandler] Cleaned {} expired mDNS records", removed_count);
+        }
+        
+        removed_count
     }
 
     /// Handle Kademlia events
@@ -357,6 +476,85 @@ impl BehaviourHandler for XRoutesHandler {
                     debug!("❌ [XRoutesHandler] Cannot find peer addresses: Kademlia not enabled");
                 }
             }
+            XRoutesCommand::GetMdnsPeers { response } => {
+                debug!("🔄 [XRoutesHandler] Getting all mDNS peers from cache");
+                
+                // Clean expired records first
+                self.clean_expired_mdns_records();
+                
+                // Collect all peers and their addresses
+                let peers: Vec<(PeerId, Vec<Multiaddr>)> = self.mdns_state.peer_cache
+                    .iter()
+                    .map(|(peer_id, record)| (peer_id.clone(), record.addresses.clone()))
+                    .collect();
+                
+                info!("✅ [XRoutesHandler] Returning {} mDNS peers from cache", peers.len());
+                let _ = response.send(Ok(peers));
+            }
+            XRoutesCommand::FindMdnsPeer { peer_id, response } => {
+                debug!("🔄 [XRoutesHandler] Finding specific peer in mDNS cache: {:?}", peer_id);
+                
+                // Clean expired records first
+                self.clean_expired_mdns_records();
+                
+                // Find the peer in cache
+                let addresses = self.mdns_state.peer_cache
+                    .get(&peer_id)
+                    .map(|record| record.addresses.clone());
+                
+                if addresses.is_some() {
+                    info!("✅ [XRoutesHandler] Found peer {:?} in mDNS cache", peer_id);
+                } else {
+                    debug!("❌ [XRoutesHandler] Peer {:?} not found in mDNS cache", peer_id);
+                }
+                
+                let _ = response.send(Ok(addresses));
+            }
+            XRoutesCommand::GetMdnsCacheStatus { response } => {
+                debug!("🔄 [XRoutesHandler] Getting mDNS cache status");
+                
+                // Clean expired records first
+                let cleaned_count = self.clean_expired_mdns_records();
+                
+                let status = MdnsCacheStatus {
+                    total_peers: self.mdns_state.peer_cache.len(),
+                    cache_size: self.mdns_state.peer_cache.len(),
+                    last_update: SystemTime::now(),
+                    ttl_seconds: self.mdns_state.default_ttl_seconds,
+                };
+                
+                info!("✅ [XRoutesHandler] mDNS cache status: {} peers, cleaned {} expired", 
+                      status.total_peers, cleaned_count);
+                let _ = response.send(Ok(status));
+            }
+            XRoutesCommand::ClearMdnsCache { response } => {
+                debug!("🔄 [XRoutesHandler] Clearing mDNS cache");
+                
+                let cleared_count = self.mdns_state.peer_cache.len();
+                self.mdns_state.peer_cache.clear();
+                
+                info!("✅ [XRoutesHandler] Cleared {} entries from mDNS cache", cleared_count);
+                let _ = response.send(Ok(cleared_count));
+            }
+            XRoutesCommand::EnableMdnsWithTtl { ttl_seconds, response } => {
+                debug!("🔄 [XRoutesHandler] Enabling mDNS with custom TTL: {} seconds", ttl_seconds);
+                
+                if let Some(local_peer_id) = self.local_peer_id {
+                    // Set custom TTL
+                    self.mdns_state.default_ttl_seconds = ttl_seconds;
+                    
+                    if let Err(e) = behaviour.enable_mdns(local_peer_id) {
+                        debug!("❌ [XRoutesHandler] Failed to enable mDNS with TTL: {}", e);
+                        let _ = response.send(Err(e.into()));
+                    } else {
+                        info!("✅ [XRoutesHandler] mDNS behaviour enabled with TTL: {} seconds", ttl_seconds);
+                        let _ = response.send(Ok(()));
+                    }
+                } else {
+                    debug!("❌ [XRoutesHandler] Cannot enable mDNS with TTL: local_peer_id not set");
+                    let _ = response.send(Err("local_peer_id not set".into()));
+                }
+            }
         }
     }
 
@@ -427,28 +625,10 @@ impl BehaviourHandler for XRoutesHandler {
             XRoutesBehaviourEvent::Mdns(mdns_event) => {
                 match mdns_event {
                     mdns::Event::Discovered(list) => {
-                        debug!(
-                            "🔍 [XRoutesHandler] mDNS discovered {} peers",
-                            list.len()
-                        );
-                        for (peer_id, addr) in list {
-                            debug!(
-                                "   - Peer: {:?}, Address: {:?}",
-                                peer_id, addr
-                            );
-                        }
+                        self.handle_mdns_discovered(list, behaviour);
                     }
                     mdns::Event::Expired(list) => {
-                        debug!(
-                            "🗑️ [XRoutesHandler] mDNS expired {} peers",
-                            list.len()
-                        );
-                        for (peer_id, addr) in list {
-                            debug!(
-                                "   - Peer: {:?}, Address: {:?}",
-                                peer_id, addr
-                            );
-                        }
+                        self.handle_mdns_expired(list);
                     }
                 }
             }

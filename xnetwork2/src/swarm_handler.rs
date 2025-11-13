@@ -207,6 +207,27 @@ impl XNetworkSwarmHandler {
                                     _ => {}
                                 }
                             }
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::Mdns(mdns_event) => {
+                                match mdns_event {
+                                    libp2p::mdns::Event::Discovered(list) => {
+                                        // Transform mDNS discovered event to NodeEvent
+                                        for (peer_id, address) in list {
+                                            let _ = event_sender.send(NodeEvent::MdnsPeerDiscovered {
+                                                peer_id: *peer_id,
+                                                addresses: vec![address.clone()],
+                                            });
+                                        }
+                                    }
+                                    libp2p::mdns::Event::Expired(list) => {
+                                        // Transform mDNS expired event to NodeEvent
+                                        for (peer_id, _) in list {
+                                            let _ = event_sender.send(NodeEvent::MdnsPeerExpired {
+                                                peer_id: *peer_id,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
                             _ => {
                                 debug!("📡 [SwarmHandler] XRoutes event: {:?}", xroutes_event);
                             }
