@@ -1,5 +1,6 @@
 //! Commander for sending commands to XNetwork2 node
 
+use libp2p::core::transport::ListenerId;
 use libp2p::{Multiaddr, PeerId};
 use tokio::sync::{mpsc, oneshot};
 
@@ -55,10 +56,58 @@ impl Commander {
     pub async fn listen_on(
         &self,
         addr: Multiaddr,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<ListenerId, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ListenOn {
             addr,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Listen on an address and wait for first listen address event
+    pub async fn listen_and_wait(
+        &self,
+        addr: Multiaddr,
+        timeout: std::time::Duration,
+    ) -> Result<Multiaddr, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ListenAndWait {
+            addr,
+            timeout,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Dial a peer and wait for connection established
+    pub async fn dial_and_wait(
+        &self,
+        peer_id: PeerId,
+        addr: Multiaddr,
+        timeout: std::time::Duration,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::DialAndWait {
+            peer_id,
+            addr,
+            timeout,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Send echo command and get response
+    pub async fn echo(
+        &self,
+        message: String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::Echo {
+            message,
             response: response_tx,
         });
         self.send(command).await?;
@@ -82,20 +131,6 @@ impl Commander {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::Shutdown {
             stopper: self.stopper.clone(),
-            response: response_tx,
-        });
-        self.send(command).await?;
-        response_rx.await?
-    }
-
-    /// Send echo command and get response
-    pub async fn echo(
-        &self,
-        message: String,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::Echo {
-            message,
             response: response_tx,
         });
         self.send(command).await?;

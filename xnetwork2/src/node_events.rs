@@ -3,6 +3,7 @@
 //! Cloneable events that are sent to developers through event channels
 
 use libp2p::{Multiaddr, PeerId, swarm::ConnectionId};
+use libp2p::core::transport::ListenerId;
 use tokio::sync::oneshot;
 use xstream::events::{InboundUpgradeDecision, StreamOpenDecisionSender};
 use xstream::types::XStreamID;
@@ -23,9 +24,15 @@ pub enum NodeEvent {
         connection_id: ConnectionId 
     },
     /// New listener address added
-    NewListenAddr { address: Multiaddr },
+    NewListenAddr { 
+        listener_id: ListenerId,
+        address: Multiaddr 
+    },
     /// Listener address removed
-    ExpiredListenAddr { address: Multiaddr },
+    ExpiredListenAddr { 
+        listener_id: ListenerId,
+        address: Multiaddr 
+    },
 
     // Аутентификация события
     /// Mutual authentication successfully completed

@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         loop {
             match events1.recv().await {
                 Ok(event) => match event {
-                    NodeEvent::NewListenAddr { address } => {
+                    NodeEvent::NewListenAddr { address, listener_id: _ } => {
                         println!("📡 [СОБЫТИЕ-1] Нода начала прослушивать адрес: {}", address);
                     }
                     NodeEvent::ConnectionEstablished { peer_id, connection_id } => {
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     NodeEvent::ConnectionClosed { peer_id, connection_id } => {
                         println!("🔌 [СОБЫТИЕ-1] Соединение закрыто с пиром: {}, connection: {:?}", peer_id, connection_id);
                     }
-                    NodeEvent::ExpiredListenAddr { address } => {
+                    NodeEvent::ExpiredListenAddr { address, listener_id: _ } => {
                         println!("❌ [СОБЫТИЕ-1] Адрес прослушивания истек: {}", address);
                     }
                     _ => {
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         loop {
             match events2.recv().await {
                 Ok(event) => match event {
-                    NodeEvent::NewListenAddr { address } => {
+                    NodeEvent::NewListenAddr { address, listener_id: _ } => {
                         println!("📡 [СОБЫТИЕ-2] Нода начала прослушивать адрес: {}", address);
                     }
                     NodeEvent::ConnectionEstablished { peer_id, connection_id } => {
@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     NodeEvent::ConnectionClosed { peer_id, connection_id } => {
                         println!("🔌 [СОБЫТИЕ-2] Соединение закрыто с пиром: {}, connection: {:?}", peer_id, connection_id);
                     }
-                    NodeEvent::ExpiredListenAddr { address } => {
+                    NodeEvent::ExpiredListenAddr { address, listener_id: _ } => {
                         println!("❌ [СОБЫТИЕ-2] Адрес прослушивания истек: {}", address);
                     }
                     _ => {

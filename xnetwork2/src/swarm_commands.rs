@@ -1,8 +1,9 @@
 //! Swarm-level commands for XNetwork2
 
 use libp2p::{Multiaddr, PeerId};
+use libp2p::core::transport::ListenerId;
 use tokio::sync::oneshot;
-
+use std::time::Duration;
 use std::fmt;
 
 /// Swarm-level commands for XNetwork2 with response channels
@@ -13,10 +14,23 @@ pub enum SwarmLevelCommand {
         addr: Multiaddr,
         response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
     },
-    /// Listen on an address
+    /// Dial a peer and wait for connection established
+    DialAndWait {
+        peer_id: PeerId,
+        addr: Multiaddr,
+        timeout: Duration,
+        response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Listen on an address (returns ListenerId)
     ListenOn {
         addr: Multiaddr,
-        response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+        response: oneshot::Sender<Result<ListenerId, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Listen on an address and wait for first listen address event
+    ListenAndWait {
+        addr: Multiaddr,
+        timeout: Duration,
+        response: oneshot::Sender<Result<Multiaddr, Box<dyn std::error::Error + Send + Sync>>>,
     },
     /// Disconnect from a peer
     Disconnect {
@@ -54,8 +68,14 @@ impl fmt::Debug for SwarmLevelCommand {
             SwarmLevelCommand::Dial { peer_id, addr, .. } => {
                 write!(f, "Dial(peer_id: {}, addr: {})", peer_id, addr)
             }
+            SwarmLevelCommand::DialAndWait { peer_id, addr, timeout, .. } => {
+                write!(f, "DialAndWait(peer_id: {}, addr: {}, timeout: {:?})", peer_id, addr, timeout)
+            }
             SwarmLevelCommand::ListenOn { addr, .. } => {
                 write!(f, "ListenOn(addr: {})", addr)
+            }
+            SwarmLevelCommand::ListenAndWait { addr, timeout, .. } => {
+                write!(f, "ListenAndWait(addr: {}, timeout: {:?})", addr, timeout)
             }
             SwarmLevelCommand::Disconnect { peer_id, .. } => {
                 write!(f, "Disconnect(peer_id: {})", peer_id)

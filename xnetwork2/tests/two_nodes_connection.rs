@@ -118,7 +118,7 @@ async fn test_two_nodes_connection_in_5_seconds() {
         ).await.expect("❌ Таймаут ожидания события NewListenAddr - событие не пришло за 1 секунду");
 
         let listen_addr = match listen_event {
-            NodeEvent::NewListenAddr { address } => address,
+            NodeEvent::NewListenAddr { address, listener_id: _ } => address,
             _ => panic!("❌ Получено неожиданное событие: {:?}", listen_event),
         };
 

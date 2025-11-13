@@ -51,7 +51,7 @@ async fn test_node_lifecycle_in_5_seconds() {
                 match events.recv().await {
                     Ok(event) => {
                         println!("📡 Получено событие: {:?}", event);
-                        if let xnetwork2::node_events::NodeEvent::NewListenAddr { address } = event
+                        if let xnetwork2::node_events::NodeEvent::NewListenAddr { address, listener_id: _ } = event
                         {
                             return address;
                         }

@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use command_swarm::SwarmHandler;
 use libp2p::{Multiaddr, PeerId, Swarm};
+use libp2p::core::transport::ListenerId;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
 
@@ -11,6 +12,7 @@ use crate::node_events::NodeEvent;
 use crate::swarm_commands::{NetworkState, SwarmLevelCommand};
 use xauth::events::PorAuthEvent;
 use xstream::events::XStreamEvent;
+use crate::behaviours::xroutes::PendingTaskManager;
 
 /// Swarm handler for XNetwork2
 pub struct XNetworkSwarmHandler {
@@ -18,6 +20,10 @@ pub struct XNetworkSwarmHandler {
     event_sender: Option<broadcast::Sender<NodeEvent>>,
     /// Track authenticated peers
     authenticated_peers: std::collections::HashSet<PeerId>,
+    /// Pending tasks for listen_and_wait operations
+    listen_wait_tasks: PendingTaskManager<ListenerId, Multiaddr, Box<dyn std::error::Error + Send + Sync>, ()>,
+    /// Pending tasks for dial_and_wait operations
+    dial_wait_tasks: PendingTaskManager<PeerId, (), Box<dyn std::error::Error + Send + Sync>, ()>,
 }
 
 impl Default for XNetworkSwarmHandler {
@@ -25,6 +31,8 @@ impl Default for XNetworkSwarmHandler {
         Self {
             event_sender: None,
             authenticated_peers: std::collections::HashSet::new(),
+            listen_wait_tasks: PendingTaskManager::new(),
+            dial_wait_tasks: PendingTaskManager::new(),
         }
     }
 }
@@ -35,6 +43,8 @@ impl XNetworkSwarmHandler {
         Self {
             event_sender: Some(event_sender),
             authenticated_peers: std::collections::HashSet::new(),
+            listen_wait_tasks: PendingTaskManager::new(),
+            dial_wait_tasks: PendingTaskManager::new(),
         }
     }
 
@@ -64,13 +74,20 @@ impl XNetworkSwarmHandler {
 
         match event {
             // Network events
-            libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
+            libp2p::swarm::SwarmEvent::NewListenAddr { listener_id, address, .. } => {
+                // Complete pending listen_and_wait task if exists
+                if self.listen_wait_tasks.set_task_result(&listener_id, address.clone()).is_ok() {
+                    debug!("✅ [SwarmHandler] Completed listen_and_wait task for listener_id: {:?}", listener_id);
+                }
+                
                 let _ = event_sender.send(NodeEvent::NewListenAddr {
+                    listener_id: listener_id.clone(),
                     address: address.clone(),
                 });
             }
-            libp2p::swarm::SwarmEvent::ExpiredListenAddr { address, .. } => {
+            libp2p::swarm::SwarmEvent::ExpiredListenAddr { listener_id, address, .. } => {
                 let _ = event_sender.send(NodeEvent::ExpiredListenAddr {
+                    listener_id: listener_id.clone(),
                     address: address.clone(),
                 });
             }
@@ -80,6 +97,11 @@ impl XNetworkSwarmHandler {
                 ..
             } => {
                 println!("Conn established {:?}", peer_id);
+                // Complete pending dial_and_wait task if exists
+                if self.dial_wait_tasks.set_task_result(&peer_id, ()).is_ok() {
+                    debug!("✅ [SwarmHandler] Completed dial_and_wait task for peer: {}", peer_id);
+                }
+                
                 let _ = event_sender.send(NodeEvent::ConnectionEstablished {
                     peer_id: *peer_id,
                     connection_id: *connection_id,
@@ -314,7 +336,6 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                 );
                 let result = swarm
                     .listen_on(addr.clone())
-                    .map(|_| ())
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
                 if result.is_ok() {
                     info!("📡 [SwarmHandler] Listening on address {}", addr);
@@ -325,6 +346,27 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                     );
                 }
                 let _ = response.send(result);
+            }
+            SwarmLevelCommand::ListenAndWait { addr, timeout, response } => {
+                debug!(
+                    "🔄 [SwarmHandler] Processing ListenAndWait command - Addr: {}, Timeout: {:?}",
+                    addr, timeout
+                );
+                
+                // First, start listening
+                let listener_id = match swarm.listen_on(addr.clone()) {
+                    Ok(listener_id) => listener_id,
+                    Err(e) => {
+                        let error = Box::new(e) as Box<dyn std::error::Error + Send + Sync>;
+                        let _ = response.send(Err(error));
+                        return;
+                    }
+                };
+                
+                info!("📡 [SwarmHandler] Started listening on address {} with listener_id: {:?}", addr, listener_id);
+                
+                // Add pending task to wait for NewListenAddr event
+                self.listen_wait_tasks.add_pending_task(listener_id, timeout, response);
             }
             SwarmLevelCommand::Disconnect { peer_id, response } => {
                 debug!(
@@ -369,6 +411,38 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                 );
                 info!("📢 [SwarmHandler] Echo command received: '{}'", message);
                 let _ = response.send(Ok(message));
+            }
+            SwarmLevelCommand::DialAndWait {
+                peer_id,
+                addr,
+                timeout,
+                response,
+            } => {
+                debug!(
+                    "🔄 [SwarmHandler] Processing DialAndWait command - Peer: {:?}, Addr: {}, Timeout: {:?}",
+                    peer_id, addr, timeout
+                );
+                
+                // Check if peer is already connected
+                if swarm.connected_peers().any(|p| p == &peer_id) {
+                    debug!("✅ [SwarmHandler] Peer {} is already connected, completing dial_and_wait immediately", peer_id);
+                    let _ = response.send(Ok(()));
+                    return;
+                }
+                
+                // Start dialing
+                let result = swarm.dial(addr.clone());
+                if let Err(e) = result {
+                    let error = Box::new(e) as Box<dyn std::error::Error + Send + Sync>;
+                    debug!("❌ [SwarmHandler] Failed to dial peer {}: {:?}", peer_id, error);
+                    let _ = response.send(Err(error));
+                    return;
+                }
+                
+                info!("📡 [SwarmHandler] Dialing peer {} at address {}, waiting for connection", peer_id, addr);
+                
+                // Add pending task to wait for ConnectionEstablished event
+                self.dial_wait_tasks.add_pending_task(peer_id, timeout, response);
             }
         }
     }

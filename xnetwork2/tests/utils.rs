@@ -128,7 +128,7 @@ pub async fn setup_listening_node(node: &mut Node) -> Result<Multiaddr, Box<dyn 
         ).await.expect("❌ Таймаут ожидания события NewListenAddr - событие не пришло за 5 секунд");
 
         let listen_addr = match listen_event {
-            NodeEvent::NewListenAddr { address } => address,
+            NodeEvent::NewListenAddr { address, listener_id: _ } => address,
             _ => panic!("❌ Получено неожиданное событие: {:?}", listen_event),
         };
 
@@ -180,7 +180,7 @@ pub async fn setup_listening_node_with_addr(node: &mut Node, addr: String) -> Re
         ).await.expect("❌ Таймаут ожидания события NewListenAddr - событие не пришло за 5 секунд");
 
         let listen_addr = match listen_event {
-            NodeEvent::NewListenAddr { address } => address,
+            NodeEvent::NewListenAddr { address, listener_id: _ } => address,
             _ => panic!("❌ Получено неожиданное событие: {:?}", listen_event),
         };
 
