@@ -19,7 +19,7 @@ use utils::{setup_listening_node, wait_for_event};
 #[tokio::test]
 async fn test_mdns_discovery() {
     // Initialize logging for debugging
-    let _ = tracing_subscriber::fmt::try_init();
+    //let _ = tracing_subscriber::fmt::try_init();
     println!("🚀 Starting mDNS discovery test...");
 
     // Create first node

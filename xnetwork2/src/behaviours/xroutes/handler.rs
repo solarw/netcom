@@ -3,6 +3,7 @@
 
 use async_trait::async_trait;
 use command_swarm::BehaviourHandler;
+use libp2p::identity::PublicKey;
 use libp2p::{identify, mdns, kad, identity, PeerId, Multiaddr};
 use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
@@ -96,12 +97,12 @@ impl Default for KadState {
 }
 
 /// Handler for XRoutesBehaviour
-#[derive(Default)]
 pub struct XRoutesHandler {
     /// Configuration for the handler
     config: XRoutesConfig,
     /// Local peer ID for enabling behaviours
-    local_peer_id: Option<PeerId>,
+    local_peer_id: PeerId,
+    local_public_key: PublicKey,
     /// State for mDNS operations
     mdns_state: MdnsState,
     /// State for Kademlia operations
@@ -110,29 +111,17 @@ pub struct XRoutesHandler {
 
 impl XRoutesHandler {
     /// Create a new XRoutesHandler with configuration
-    pub fn new(config: XRoutesConfig) -> Self {
-        Self { 
+    pub fn new(local_public_key: PublicKey, config: XRoutesConfig) -> Self {
+        let local_peer_id = local_public_key.to_peer_id();
+        Self {
+            local_public_key, 
             config,
-            local_peer_id: None,
+            local_peer_id: local_peer_id,
             mdns_state: MdnsState::default(),
             kad_state: KadState::default(),
         }
     }
 
-    /// Create a new XRoutesHandler with local peer ID
-    pub fn with_local_peer_id(config: XRoutesConfig, local_peer_id: PeerId) -> Self {
-        Self { 
-            config,
-            local_peer_id: Some(local_peer_id),
-            mdns_state: MdnsState::default(),
-            kad_state: KadState::default(),
-        }
-    }
-
-    /// Set local peer ID
-    pub fn set_local_peer_id(&mut self, local_peer_id: PeerId) {
-        self.local_peer_id = Some(local_peer_id);
-    }
 
     /// Handle mDNS discovered event
     fn handle_mdns_discovered(&mut self, list: &Vec<(PeerId, Multiaddr)>, behaviour: &mut XRoutesBehaviour) {
@@ -330,18 +319,9 @@ impl BehaviourHandler for XRoutesHandler {
         match cmd {
             XRoutesCommand::EnableIdentify { response } => {
                 debug!("🔄 [XRoutesHandler] Enabling identify behaviour");
-                if let Some(local_peer_id) = self.local_peer_id {
-                    // Создаем временный ключ для Identify
-                    let keypair = identity::Keypair::generate_ed25519();
-                    let public_key = keypair.public();
-                    let config = identify::Config::new(XROUTES_IDENTIFY_PROTOCOL.to_string(), public_key);
-                    behaviour.enable_identify(config);
-                    info!("✅ [XRoutesHandler] Identify behaviour enabled");
-                    let _ = response.send(Ok(()));
-                } else {
-                    debug!("❌ [XRoutesHandler] Cannot enable Identify: local_peer_id not set");
-                    let _ = response.send(Err("local_peer_id not set".into()));
-                }
+                behaviour.enable_identify(self.local_public_key.clone());
+                info!("✅ [XRoutesHandler] Identify behaviour enabled");
+                let _ = response.send(Ok(()));
 
             }
             XRoutesCommand::DisableIdentify { response } => {
@@ -352,18 +332,15 @@ impl BehaviourHandler for XRoutesHandler {
             }
             XRoutesCommand::EnableMdns { response } => {
                 debug!("🔄 [XRoutesHandler] Enabling mDNS behaviour");
-                if let Some(local_peer_id) = self.local_peer_id {
-                    if let Err(e) = behaviour.enable_mdns(local_peer_id) {
-                        debug!("❌ [XRoutesHandler] Failed to enable mDNS: {}", e);
-                        let _ = response.send(Err(e.into()));
-                    } else {
-                        info!("✅ [XRoutesHandler] mDNS behaviour enabled");
-                        let _ = response.send(Ok(()));
-                    }
+            
+                if let Err(e) = behaviour.enable_mdns(self.local_peer_id) {
+                    debug!("❌ [XRoutesHandler] Failed to enable mDNS: {}", e);
+                    let _ = response.send(Err(e.into()));
                 } else {
-                    debug!("❌ [XRoutesHandler] Cannot enable mDNS: local_peer_id not set");
-                    let _ = response.send(Err("local_peer_id not set".into()));
+                    info!("✅ [XRoutesHandler] mDNS behaviour enabled");
+                    let _ = response.send(Ok(()));
                 }
+                
             }
             XRoutesCommand::DisableMdns { response } => {
                 debug!("🔄 [XRoutesHandler] Disabling mDNS behaviour");
@@ -373,14 +350,9 @@ impl BehaviourHandler for XRoutesHandler {
             }
             XRoutesCommand::EnableKad { response } => {
                 debug!("🔄 [XRoutesHandler] Enabling Kademlia behaviour");
-                if let Some(local_peer_id) = self.local_peer_id {
-                    behaviour.enable_kad(local_peer_id);
-                    info!("✅ [XRoutesHandler] Kademlia behaviour enabled");
-                    let _ = response.send(Ok(()));
-                } else {
-                    debug!("❌ [XRoutesHandler] Cannot enable Kademlia: local_peer_id not set");
-                    let _ = response.send(Err("local_peer_id not set".into()));
-                }
+                behaviour.enable_kad(self.local_peer_id);
+                info!("✅ [XRoutesHandler] Kademlia behaviour enabled");
+                let _ = response.send(Ok(()));
             }
             XRoutesCommand::DisableKad { response } => {
                 debug!("🔄 [XRoutesHandler] Disabling Kademlia behaviour");
@@ -539,21 +511,18 @@ impl BehaviourHandler for XRoutesHandler {
             XRoutesCommand::EnableMdnsWithTtl { ttl_seconds, response } => {
                 debug!("🔄 [XRoutesHandler] Enabling mDNS with custom TTL: {} seconds", ttl_seconds);
                 
-                if let Some(local_peer_id) = self.local_peer_id {
-                    // Set custom TTL
-                    self.mdns_state.default_ttl_seconds = ttl_seconds;
-                    
-                    if let Err(e) = behaviour.enable_mdns(local_peer_id) {
-                        debug!("❌ [XRoutesHandler] Failed to enable mDNS with TTL: {}", e);
-                        let _ = response.send(Err(e.into()));
-                    } else {
-                        info!("✅ [XRoutesHandler] mDNS behaviour enabled with TTL: {} seconds", ttl_seconds);
-                        let _ = response.send(Ok(()));
-                    }
+            
+                // Set custom TTL
+                self.mdns_state.default_ttl_seconds = ttl_seconds;
+                
+                if let Err(e) = behaviour.enable_mdns(self.local_peer_id) {
+                    debug!("❌ [XRoutesHandler] Failed to enable mDNS with TTL: {}", e);
+                    let _ = response.send(Err(e.into()));
                 } else {
-                    debug!("❌ [XRoutesHandler] Cannot enable mDNS with TTL: local_peer_id not set");
-                    let _ = response.send(Err("local_peer_id not set".into()));
+                    info!("✅ [XRoutesHandler] mDNS behaviour enabled with TTL: {} seconds", ttl_seconds);
+                    let _ = response.send(Ok(()));
                 }
+            
             }
         }
     }
@@ -567,9 +536,6 @@ impl BehaviourHandler for XRoutesHandler {
                             "📨 [XRoutesHandler] Identify received - Peer: {:?}, Protocols: {:?}",
                             peer_id, info.protocols
                         );
-                        // Печатаем событие IdentifyReceived
-                        println!("🆔 [XRoutesHandler] IdentifyReceived - Peer: {:?}, Addresses: {:?} {:?}", 
-                                 peer_id, info.listen_addrs, identify_event);
 
                         // Добавляем адреса в Kademlia DHT
                         if let Some(kad) = behaviour.kad.as_mut() {
@@ -634,6 +600,13 @@ impl BehaviourHandler for XRoutesHandler {
             }
             XRoutesBehaviourEvent::Kad(kad_event) => {
                 self.handle_kad_event(kad_event.clone()).await;
+            }
+            XRoutesBehaviourEvent::RelayServer(relay_event) => {
+                // TODO: Add relay server event handling
+
+            }
+            XRoutesBehaviourEvent::RelayClient(relay_client_event) => {
+                // TODO: Add relay client event handling
             }
         }
     }

@@ -234,7 +234,10 @@ impl XNetworkSwarmHandler {
                         }
                     }
                     // Skip other behaviour events
-                    _ => {}
+                    _ => {
+
+                        debug!("📡 [SwarmHandler] beh event: {:?}", behaviour_event);
+                    }
                 }
             }
 

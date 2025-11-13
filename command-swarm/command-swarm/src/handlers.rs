@@ -6,7 +6,7 @@ use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 
 /// Trait for handling commands and events of a specific behaviour
 #[async_trait::async_trait]
-pub trait BehaviourHandler: Send + Default {
+pub trait BehaviourHandler: Send  {
     /// Type of behaviour that this handler processes
     type Behaviour;
 

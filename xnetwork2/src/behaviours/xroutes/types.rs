@@ -11,6 +11,9 @@ pub struct XRoutesConfig {
     pub enable_mdns: bool,
     /// Enable Kademlia DHT discovery
     pub enable_kad: bool,
+    /// Enable relay server behaviour
+    pub enable_relay_server: bool,
+    // relay_client теперь всегда включен, поэтому enable_relay_client убран
 }
 
 impl Default for XRoutesConfig {
@@ -19,6 +22,7 @@ impl Default for XRoutesConfig {
             enable_identify: true,
             enable_mdns: true,
             enable_kad: true,
+            enable_relay_server: false,
         }
     }
 }
@@ -53,7 +57,14 @@ impl XRoutesConfig {
             enable_identify: false,
             enable_mdns: false,
             enable_kad: false,
+            enable_relay_server: false,
         }
+    }
+
+    /// Enable relay server behaviour
+    pub fn with_relay_server(mut self, enable: bool) -> Self {
+        self.enable_relay_server = enable;
+        self
     }
 }
 
@@ -66,6 +77,10 @@ pub struct XRoutesStatus {
     pub mdns_enabled: bool,
     /// Kademlia behaviour status
     pub kad_enabled: bool,
+    /// Relay server behaviour status
+    pub relay_server_enabled: bool,
+    /// Relay client behaviour status
+    pub relay_client_enabled: bool,
 }
 
 impl Default for XRoutesStatus {
@@ -74,6 +89,8 @@ impl Default for XRoutesStatus {
             identify_enabled: false,
             mdns_enabled: false,
             kad_enabled: false,
+            relay_server_enabled: false,
+            relay_client_enabled: false,
         }
     }
 }

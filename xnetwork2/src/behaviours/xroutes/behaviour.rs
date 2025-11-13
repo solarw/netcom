@@ -2,12 +2,7 @@
 use std::time::Duration;
 
 use libp2p::{
-    identify,
-    mdns,
-    kad,
-    swarm::behaviour::toggle::Toggle,
-    swarm::NetworkBehaviour,
-    PeerId,
+    PeerId, identify::{self, Config}, identity::PublicKey, kad, mdns, relay, swarm::{NetworkBehaviour, behaviour::toggle::Toggle}
 };
 
 use super::types::XROUTES_IDENTIFY_PROTOCOL;
@@ -22,6 +17,10 @@ pub struct XRoutesBehaviour {
     pub mdns: Toggle<mdns::tokio::Behaviour>,
     /// Kademlia DHT discovery behaviour
     pub kad: Toggle<kad::Behaviour<kad::store::MemoryStore>>,
+    /// Relay server behaviour
+    pub relay_server: Toggle<relay::Behaviour>,
+    /// Relay client behaviour
+    pub relay_client: Toggle<relay::client::Behaviour>,
 }
 
 /// Events emitted by XRoutesBehaviour
@@ -33,6 +32,10 @@ pub enum XRoutesBehaviourEvent {
     Mdns(mdns::Event),
     /// Kademlia behaviour event
     Kad(kad::Event),
+    /// Relay server behaviour event
+    RelayServer(relay::Event),
+    /// Relay client behaviour event
+    RelayClient(relay::client::Event),
 }
 
 impl From<identify::Event> for XRoutesBehaviourEvent {
@@ -53,14 +56,36 @@ impl From<kad::Event> for XRoutesBehaviourEvent {
     }
 }
 
+impl From<relay::Event> for XRoutesBehaviourEvent {
+    fn from(event: relay::Event) -> Self {
+        XRoutesBehaviourEvent::RelayServer(event)
+    }
+}
+
+impl From<relay::client::Event> for XRoutesBehaviourEvent {
+    fn from(event: relay::client::Event) -> Self {
+        XRoutesBehaviourEvent::RelayClient(event)
+    }
+}
+
 impl XRoutesBehaviour {
     /// Create a new XRoutesBehaviour with optional components
     pub fn new(
-        local_peer_id: PeerId,
+        local_public_key: PublicKey,
         config: &super::types::XRoutesConfig,
+        relay_client: Option<relay::client::Behaviour>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Create identify behaviour - disabled since it's already in main behaviour
-        let identify = Toggle::from(None);
+
+        let local_peer_id  = local_public_key.to_peer_id();
+        // Create mDNS behaviour
+
+        let identify = if config.enable_identify {
+            let config  = identify::Config::new(XROUTES_IDENTIFY_PROTOCOL.to_string(), local_public_key);
+            Toggle::from(Some(identify::Behaviour::new(config)))
+        } else {
+            Toggle::from(None)
+        };
 
         // Create mDNS behaviour
         let mdns = if config.enable_mdns {
@@ -89,15 +114,31 @@ impl XRoutesBehaviour {
             Toggle::from(None)
         };
 
+        // Create relay server behaviour
+        let relay_server = if config.enable_relay_server {
+            Toggle::from(Some(relay::Behaviour::new(local_peer_id, Default::default())))
+        } else {
+            Toggle::from(None)
+        };
+
+        // Create relay client behaviour from Option
+        let relay_client = if let Some(relay_client_behaviour) = relay_client {
+            Toggle::from(Some(relay_client_behaviour))
+        } else {
+            Toggle::from(None)
+        };
+
         Ok(Self {
             identify,
             mdns,
             kad,
+            relay_server,
+            relay_client,
         })
     }
-
     /// Enable identify behaviour
-    pub fn enable_identify(&mut self, config: identify::Config) {
+    pub fn enable_identify(&mut self, local_public_key: PublicKey) {
+        let config = identify::Config::new(XROUTES_IDENTIFY_PROTOCOL.to_string(), local_public_key);
         self.identify = Toggle::from(Some(identify::Behaviour::new(config)));
     }
 
@@ -142,6 +183,18 @@ impl XRoutesBehaviour {
             identify_enabled: self.identify.as_ref().is_some(),
             mdns_enabled: self.mdns.as_ref().is_some(),
             kad_enabled: self.kad.as_ref().is_some(),
+            relay_server_enabled: self.relay_server.as_ref().is_some(),
+            relay_client_enabled: self.relay_client.as_ref().is_some(),
         }
+    }
+
+    /// Enable relay server behaviour
+    pub fn enable_relay_server(&mut self, local_peer_id: PeerId) {
+        self.relay_server = Toggle::from(Some(relay::Behaviour::new(local_peer_id, Default::default())));
+    }
+
+    /// Disable relay server behaviour
+    pub fn disable_relay_server(&mut self) {
+        self.relay_server = Toggle::from(None);
     }
 }

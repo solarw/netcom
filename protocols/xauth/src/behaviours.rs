@@ -96,10 +96,6 @@ impl PorAuthBehaviour {
         channel: ResponseChannel<PorAuthResponse>,
     ) {
         // Log the received authentication request
-        println!(
-            "Received auth request from {:?} on connection {:?}",
-            peer_id, connection_id
-        );
 
         if let Some(conn) = self.connections.get_mut(&connection_id) {
             conn.touch();
@@ -210,11 +206,6 @@ impl PorAuthBehaviour {
             // Update state
             conn.start_outbound_auth();
 
-            println!(
-                "Starting outbound auth with peer {:?} on connection {:?}",
-                peer_id, connection_id
-            );
-
             // Send authentication request
             let request = PorAuthRequest {
                 por: self.por.clone(),
@@ -231,10 +222,6 @@ impl PorAuthBehaviour {
             // Set state to waiting for inbound auth
             conn.start_inbound_auth();
 
-            println!(
-                "Waiting for inbound auth from peer {:?} on connection {:?}",
-                peer_id, connection_id
-            );
         }
     }
 
@@ -553,10 +540,6 @@ impl NetworkBehaviour for PorAuthBehaviour {
             remote_addr,
         ) {
             Ok(handler) => {
-                println!(
-                    "Established inbound connection with peer: {:?} (connection ID: {:?})",
-                    peer, connection_id
-                );
 
                 // Store the connection for our tracking
                 let conn_data = ConnectionData::new(peer, connection_id, remote_addr.clone());
@@ -593,11 +576,6 @@ impl NetworkBehaviour for PorAuthBehaviour {
                 port_use,
             ) {
             Ok(handler) => {
-                println!(
-                    "Established outbound connection with peer: {:?} (connection ID: {:?})",
-                    peer, connection_id
-                );
-
                 // Store the connection for our tracking
                 let conn_data = ConnectionData::new(peer, connection_id, addr.clone());
                 self.connections.insert(connection_id, conn_data);
@@ -631,11 +609,6 @@ impl NetworkBehaviour for PorAuthBehaviour {
 
         match event {
             FromSwarm::ConnectionEstablished(connection_established) => {
-                println!(
-                    "Connection established with peer: {:?} (connection ID: {:?})",
-                    connection_established.peer_id, connection_established.connection_id
-                );
-
                 // Begin authentication process only in auto mode
                 if self.auto_auth_mode {
                     let _ = self.start_authentication(connection_established.connection_id);
@@ -705,11 +678,6 @@ impl NetworkBehaviour for PorAuthBehaviour {
                     error,
                     ..
                 }) => {
-                    println!(
-                        "Outbound failure for peer {:?} on connection {:?}: {:?}",
-                        peer, connection_id, error
-                    );
-
                     // Mark connection as failed if it exists
                     // Mark connection as failed if it exists
                     if let Some(conn) = self.connections.get_mut(&connection_id) {
@@ -736,11 +704,6 @@ impl NetworkBehaviour for PorAuthBehaviour {
                     error,
                     ..
                 }) => {
-                    println!(
-                        "Inbound failure for peer {:?} on connection {:?}: {:?}",
-                        peer, connection_id, error
-                    );
-
                     // Mark connection as failed if it exists
                     if let Some(conn) = self.connections.get_mut(&connection_id) {
                         conn.set_inbound_auth_failed(format!(

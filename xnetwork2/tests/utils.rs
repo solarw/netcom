@@ -161,6 +161,58 @@ pub async fn setup_listening_node(node: &mut Node) -> Result<Multiaddr, Box<dyn 
     Ok(listen_addr)
 }
 
+
+
+#[allow(dead_code)]
+pub async fn setup_listening_node_with_addr(node: &mut Node, addr: String) -> Result<Multiaddr, Box<dyn std::error::Error + Send + Sync>> {
+    println!("🎯 Настраиваем ноду для прослушивания...");
+
+    // Сначала создаем подписку на события
+    let mut events = node.subscribe();
+    
+    // Запускаем задачу ожидания события NewListenAddr ДО выполнения команды
+    let listen_addr_future = async {
+        println!("⏳ Ожидаем событие NewListenAddr (таймаут 5 секунд)...");
+        let listen_event = wait_for_event(
+            &mut events,
+            |e| matches!(e, NodeEvent::NewListenAddr { .. }),
+            Duration::from_secs(5)
+        ).await.expect("❌ Таймаут ожидания события NewListenAddr - событие не пришло за 5 секунд");
+
+        let listen_addr = match listen_event {
+            NodeEvent::NewListenAddr { address } => address,
+            _ => panic!("❌ Получено неожиданное событие: {:?}", listen_event),
+        };
+
+        println!("✅ Нода слушает на адресе: {}", listen_addr);
+        listen_addr
+    };
+
+    // Выполнить ListenOn для ноды
+    let (listen_response, listen_receiver) = tokio::sync::oneshot::channel();
+    node.commander
+        .send(XNetworkCommands::SwarmLevel(
+            SwarmLevelCommand::ListenOn { 
+                addr: addr.parse().expect("❌ Не удалось распарсить QUIC адрес"),
+                response: listen_response 
+            }
+        ))
+        .await
+        .expect("❌ Не удалось отправить команду ListenOn - критическая ошибка");
+
+    let listen_result = timeout(Duration::from_secs(5), listen_receiver)
+        .await
+        .expect("❌ Таймаут команды ListenOn")
+        .expect("❌ Не удалось получить ответ ListenOn");
+
+    assert!(listen_result.is_ok(), "❌ Нода должна слушать на QUIC адресе");
+    println!("✅ Команда ListenOn выполнена успешно");
+
+    // Ждем завершения задачи ожидания события
+    let listen_addr = listen_addr_future.await;
+    Ok(listen_addr)
+}
+
 /// Запускает задачу ожидания события ConnectionEstablished
 #[allow(dead_code)]
 pub fn spawn_connection_established_task(

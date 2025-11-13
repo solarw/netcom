@@ -29,6 +29,8 @@ pub struct NodeConfig {
     pub inbound_decision_policy: InboundDecisionPolicy,
     /// Размер буфера для каналов событий
     pub event_buffer_size: usize,
+    /// Включить relay сервер
+    pub enable_relay_server: bool,
 }
 
 impl Default for NodeConfig {
@@ -36,6 +38,7 @@ impl Default for NodeConfig {
         Self {
             inbound_decision_policy: InboundDecisionPolicy::default(),
             event_buffer_size: 32,
+            enable_relay_server: false,
         }
     }
 }
@@ -73,6 +76,22 @@ impl NodeBuilder {
         self
     }
 
+    /// Устанавливает конфигурацию XRoutes
+    pub fn with_xroutes_config<F>(mut self, config_fn: F) -> Self
+    where
+        F: FnOnce(crate::behaviours::xroutes::XRoutesConfig) -> crate::behaviours::xroutes::XRoutesConfig,
+    {
+        // Note: XRoutesConfig is currently used in XRoutesHandler, not in NodeBuilder
+        // This method is provided for future compatibility
+        self
+    }
+
+    /// Включает relay сервер
+    pub fn with_relay_server(mut self) -> Self {
+        self.config.enable_relay_server = true;
+        self
+    }
+
     /// Создает Node с текущей конфигурацией
     pub async fn build(
         self,
@@ -90,7 +109,7 @@ impl NodeBuilder {
             .unwrap_or_else(|| identity::Keypair::generate_ed25519());
         let peer_id = keypair.public().to_peer_id();
         println!("🔑 Generated/using keypair with PeerId: {}", peer_id);
-
+        
         // Создаем QUIC транспорт
         let quic_config = quic::Config::new(&keypair);
         let quic_transport = quic::tokio::Transport::new(quic_config);
@@ -108,7 +127,9 @@ impl NodeBuilder {
             .with_tokio()
             .with_other_transport(|_key| quic_transport)
             .expect("Failed to create QUIC transport")
-            .with_behaviour(|key| {
+            .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)
+            .expect("Failed to create relay client transport")
+            .with_behaviour(|key, relay_client_behaviour| {
                 let peer_id = key.public().to_peer_id();
 
                 // Create behaviours
@@ -132,13 +153,14 @@ impl NodeBuilder {
 
                 let xstream_behaviour = xstream::behaviour::XStreamNetworkBehaviour::new_with_policy(xstream_policy);
 
-                // Create XRoutes behaviour with default configuration
-                // Note: XRoutes behaviour currently only uses peer ID for mDNS and Kademlia
-                // Identify behaviour is handled separately in the main behaviour
-                let xroutes_behaviour = crate::behaviours::xroutes::XRoutesBehaviour::new(
-                    peer_id,
-                    &crate::behaviours::xroutes::XRoutesConfig::disabled(), // Disable identify in XRoutes since it's already in main behaviour
-                ).expect("Failed to create XRoutes behaviour");
+        // Create XRoutes behaviour with relay server configuration
+        let xroutes_config = crate::behaviours::xroutes::XRoutesConfig::disabled()
+            .with_relay_server(self.config.enable_relay_server).with_identify(true);
+        let xroutes_behaviour = crate::behaviours::xroutes::XRoutesBehaviour::new(
+            keypair.public(),
+            &xroutes_config,
+            Some(relay_client_behaviour), // Pass the relay client behaviour as Some
+        ).expect("Failed to create XRoutes behaviour");
 
                 // Create KeepAlive behaviour
                 let keep_alive_behaviour = crate::behaviours::keep_alive::KeepAliveBehaviour::new();
@@ -172,9 +194,9 @@ impl NodeBuilder {
                 ping: crate::behaviours::PingHandler::default(),
                 xauth: crate::behaviours::XAuthHandler::default(),
                 xstream: crate::behaviours::XStreamHandler::default(),
-                xroutes: crate::behaviours::XRoutesHandler::with_local_peer_id(
+                xroutes: crate::behaviours::XRoutesHandler::new(
+                    keypair.public(),
                     crate::behaviours::xroutes::XRoutesConfig::default(),
-                    peer_id,
                 ),
                 keep_alive: crate::behaviours::KeepAliveHandler::default(),
             };

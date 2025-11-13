@@ -36,8 +36,9 @@ async fn test_xroutes_simple_status() {
     
     println!("✅ Status received: {:?}", status);
     
-    // With disabled config in node_builder, all behaviours should be disabled
-    assert!(!status.identify_enabled, "Identify should be disabled initially");
+    // With disabled config in node_builder, identify should be enabled by default
+    // but mDNS and Kademlia should be disabled
+    assert!(status.identify_enabled, "Identify should be enabled initially");
     assert!(!status.mdns_enabled, "mDNS should be disabled initially");
     assert!(!status.kad_enabled, "Kademlia should be disabled initially");
     

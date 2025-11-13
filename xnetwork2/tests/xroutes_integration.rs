@@ -26,8 +26,9 @@ async fn test_xroutes_initial_status() {
     let status = node.commander.get_xroutes_status().await
         .expect("Failed to get XRoutes status");
     
-    // With disabled config in node_builder, all behaviours should be disabled
-    assert!(!status.identify_enabled, "Identify should be disabled initially");
+    // With disabled config in node_builder, identify should be enabled by default
+    // but mDNS and Kademlia should be disabled
+    assert!(status.identify_enabled, "Identify should be enabled initially");
     assert!(!status.mdns_enabled, "mDNS should be disabled initially");
     assert!(!status.kad_enabled, "Kademlia should be disabled initially");
     
@@ -175,7 +176,7 @@ async fn test_xroutes_enable_both_behaviours() {
     
     assert!(status.mdns_enabled, "mDNS should be enabled");
     assert!(status.kad_enabled, "Kademlia should be enabled");
-    assert!(!status.identify_enabled, "Identify should remain disabled");
+    assert!(status.identify_enabled, "Identify should remain enabled");
     
     println!("✅ Both behaviours enabled successfully: {:?}", status);
     
@@ -195,7 +196,7 @@ async fn test_xroutes_enable_both_behaviours() {
     
     assert!(!status.mdns_enabled, "mDNS should be disabled");
     assert!(!status.kad_enabled, "Kademlia should be disabled");
-    assert!(!status.identify_enabled, "Identify should remain disabled");
+    assert!(status.identify_enabled, "Identify should remain enabled");
     
     println!("✅ Both behaviours disabled successfully: {:?}", status);
     

@@ -19,6 +19,8 @@
 /// 
 /// This generates:
 /// ```rust
+/// use libp2p::PeerId;
+/// 
 /// pub enum EchoCommand {
 ///     SendMessage {
 ///         peer_id: PeerId,
