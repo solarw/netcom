@@ -85,7 +85,6 @@ async fn test_mdns_discovery() {
 
     // Wait for mDNS discovery with timeout - smart waiting for events
     println!("⏳ Waiting for mDNS discovery (max 5 seconds)...");
-    println!("111111111111111111111111111111111111111111111111111");
     let discovery_timeout = Duration::from_secs(5);
     let mut discovery_happened = false;
 

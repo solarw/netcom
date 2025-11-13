@@ -74,16 +74,25 @@ impl XNetworkSwarmHandler {
                     address: address.clone(),
                 });
             }
-            libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, connection_id, .. } => {
-                let _ = event_sender.send(NodeEvent::ConnectionEstablished { 
+            libp2p::swarm::SwarmEvent::ConnectionEstablished {
+                peer_id,
+                connection_id,
+                ..
+            } => {
+                println!("Conn established {:?}", peer_id);
+                let _ = event_sender.send(NodeEvent::ConnectionEstablished {
                     peer_id: *peer_id,
-                    connection_id: *connection_id 
+                    connection_id: *connection_id,
                 });
             }
-            libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, connection_id, .. } => {
-                let _ = event_sender.send(NodeEvent::ConnectionClosed { 
+            libp2p::swarm::SwarmEvent::ConnectionClosed {
+                peer_id,
+                connection_id,
+                ..
+            } => {
+                let _ = event_sender.send(NodeEvent::ConnectionClosed {
                     peer_id: *peer_id,
-                    connection_id: *connection_id 
+                    connection_id: *connection_id,
                 });
             }
 
@@ -106,22 +115,34 @@ impl XNetworkSwarmHandler {
                                     metadata: metadata.clone(),
                                 });
                             }
-                            PorAuthEvent::MutualAuthSuccess { peer_id, connection_id, .. } => {
-                                let _ = event_sender.send(NodeEvent::PeerMutualAuthSuccess { 
+                            PorAuthEvent::MutualAuthSuccess {
+                                peer_id,
+                                connection_id,
+                                ..
+                            } => {
+                                let _ = event_sender.send(NodeEvent::PeerMutualAuthSuccess {
                                     peer_id: *peer_id,
-                                    connection_id: *connection_id 
+                                    connection_id: *connection_id,
                                 });
                             }
-                            PorAuthEvent::OutboundAuthSuccess { peer_id, connection_id, .. } => {
-                                let _ = event_sender.send(NodeEvent::PeerOutboundAuthSuccess { 
+                            PorAuthEvent::OutboundAuthSuccess {
+                                peer_id,
+                                connection_id,
+                                ..
+                            } => {
+                                let _ = event_sender.send(NodeEvent::PeerOutboundAuthSuccess {
                                     peer_id: *peer_id,
-                                    connection_id: *connection_id 
+                                    connection_id: *connection_id,
                                 });
                             }
-                            PorAuthEvent::InboundAuthSuccess { peer_id, connection_id, .. } => {
-                                let _ = event_sender.send(NodeEvent::PeerInboundAuthSuccess { 
+                            PorAuthEvent::InboundAuthSuccess {
+                                peer_id,
+                                connection_id,
+                                ..
+                            } => {
+                                let _ = event_sender.send(NodeEvent::PeerInboundAuthSuccess {
                                     peer_id: *peer_id,
-                                    connection_id: *connection_id 
+                                    connection_id: *connection_id,
                                 });
                             }
                             // Skip authentication failures and other XAuth events
@@ -165,7 +186,7 @@ impl XNetworkSwarmHandler {
                             } => {
                                 // Always forward incoming stream requests to application for decision making
                                 debug!(
-                                    "🔍 [SwarmHandler] Forwarding111111111111111 IncomingStreamRequest from peer: {}, connection: {:?}",
+                                    "🔍 [SwarmHandler] Forwarding IncomingStreamRequest from peer: {}, connection: {:?}",
                                     peer_id, connection_id
                                 );
                                 let _ =
@@ -183,22 +204,30 @@ impl XNetworkSwarmHandler {
                             super::behaviours::xroutes::XRoutesBehaviourEvent::Kad(kad_event) => {
                                 match kad_event {
                                     libp2p::kad::Event::RoutingUpdated { peer, .. } => {
-                                        let _ = event_sender.send(NodeEvent::KademliaRoutingUpdated {
-                                            peer_id: *peer,
-                                        });
+                                        let _ =
+                                            event_sender.send(NodeEvent::KademliaRoutingUpdated {
+                                                peer_id: *peer,
+                                            });
                                     }
-                                    libp2p::kad::Event::OutboundQueryProgressed { result, .. } => {
+                                    libp2p::kad::Event::OutboundQueryProgressed {
+                                        result, ..
+                                    } => {
                                         match result {
                                             libp2p::kad::QueryResult::Bootstrap(Ok(_)) => {
-                                                let _ = event_sender.send(NodeEvent::KademliaBootstrapCompleted);
+                                                let _ = event_sender
+                                                    .send(NodeEvent::KademliaBootstrapCompleted);
                                             }
-                                            libp2p::kad::QueryResult::GetClosestPeers(Ok(peers)) => {
+                                            libp2p::kad::QueryResult::GetClosestPeers(Ok(
+                                                peers,
+                                            )) => {
                                                 // Emit discovery events for found peers
                                                 for peer_info in &peers.peers {
-                                                    let _ = event_sender.send(NodeEvent::KademliaPeerDiscovered {
-                                                        peer_id: peer_info.peer_id,
-                                                        addresses: peer_info.addrs.clone(),
-                                                    });
+                                                    let _ = event_sender.send(
+                                                        NodeEvent::KademliaPeerDiscovered {
+                                                            peer_id: peer_info.peer_id,
+                                                            addresses: peer_info.addrs.clone(),
+                                                        },
+                                                    );
                                                 }
                                             }
                                             _ => {}
@@ -212,10 +241,11 @@ impl XNetworkSwarmHandler {
                                     libp2p::mdns::Event::Discovered(list) => {
                                         // Transform mDNS discovered event to NodeEvent
                                         for (peer_id, address) in list {
-                                            let _ = event_sender.send(NodeEvent::MdnsPeerDiscovered {
-                                                peer_id: *peer_id,
-                                                addresses: vec![address.clone()],
-                                            });
+                                            let _ =
+                                                event_sender.send(NodeEvent::MdnsPeerDiscovered {
+                                                    peer_id: *peer_id,
+                                                    addresses: vec![address.clone()],
+                                                });
                                         }
                                     }
                                     libp2p::mdns::Event::Expired(list) => {
@@ -235,7 +265,6 @@ impl XNetworkSwarmHandler {
                     }
                     // Skip other behaviour events
                     _ => {
-
                         debug!("📡 [SwarmHandler] beh event: {:?}", behaviour_event);
                     }
                 }
@@ -358,9 +387,6 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
         match event {
             libp2p::swarm::SwarmEvent::Behaviour(behaviour_event) => {
                 match behaviour_event {
-                    XNetworkBehaviourEvent::Identify(event) => {
-                        debug!("📡 [SwarmHandler] Identify event: {:?}", event);
-                    }
                     XNetworkBehaviourEvent::Ping(event) => {
                         debug!("📡 [SwarmHandler] Ping event: {:?}", event);
                     }
@@ -369,31 +395,51 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
 
                         // Добавляем специальную отладочную информацию для событий аутентификации
                         match event {
-                            PorAuthEvent::MutualAuthSuccess { peer_id, connection_id, .. } => {
+                            PorAuthEvent::MutualAuthSuccess {
+                                peer_id,
+                                connection_id,
+                                ..
+                            } => {
                                 debug!(
                                     "🎉 [SwarmHandler] MUTUAL AUTH SUCCESS for peer: {}, connection: {:?}",
                                     peer_id, connection_id
                                 );
                             }
-                            PorAuthEvent::OutboundAuthSuccess { peer_id, connection_id, .. } => {
+                            PorAuthEvent::OutboundAuthSuccess {
+                                peer_id,
+                                connection_id,
+                                ..
+                            } => {
                                 debug!(
                                     "✅ [SwarmHandler] OUTBOUND AUTH SUCCESS for peer: {}, connection: {:?}",
                                     peer_id, connection_id
                                 );
                             }
-                            PorAuthEvent::InboundAuthSuccess { peer_id, connection_id, .. } => {
+                            PorAuthEvent::InboundAuthSuccess {
+                                peer_id,
+                                connection_id,
+                                ..
+                            } => {
                                 debug!(
                                     "✅ [SwarmHandler] INBOUND AUTH SUCCESS for peer: {}, connection: {:?}",
                                     peer_id, connection_id
                                 );
                             }
-                            PorAuthEvent::OutboundAuthFailure { peer_id, connection_id, .. } => {
+                            PorAuthEvent::OutboundAuthFailure {
+                                peer_id,
+                                connection_id,
+                                ..
+                            } => {
                                 debug!(
                                     "❌ [SwarmHandler] OUTBOUND AUTH FAILURE for peer: {}, connection: {:?}",
                                     peer_id, connection_id
                                 );
                             }
-                            PorAuthEvent::InboundAuthFailure { peer_id, connection_id, .. } => {
+                            PorAuthEvent::InboundAuthFailure {
+                                peer_id,
+                                connection_id,
+                                ..
+                            } => {
                                 debug!(
                                     "❌ [SwarmHandler] INBOUND AUTH FAILURE for peer: {}, connection: {:?}",
                                     peer_id, connection_id
@@ -408,20 +454,20 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                     XNetworkBehaviourEvent::Xroutes(event) => {
                         debug!("📡 [SwarmHandler] XRoutes event: {:?}", event);
                         match event {
-                            super::behaviours::xroutes::XRoutesBehaviourEvent::Identify(identify_event) => {
-                                match identify_event {
-                                    libp2p::identify::Event::Received {peer_id,  info, connection_id} => {
-                                        swarm.add_external_address(info.observed_addr.clone());
-                                    }
-                                    _ => {}
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::Identify(
+                                identify_event,
+                            ) => match identify_event {
+                                libp2p::identify::Event::Received {
+                                    peer_id,
+                                    info,
+                                    connection_id,
+                                } => {
+                                    swarm.add_external_address(info.observed_addr.clone());
                                 }
-                            }
+                                _ => {}
+                            },
                             _ => {}
                         }
-                        
-                        
-
-                        
                     }
                     XNetworkBehaviourEvent::KeepAlive(event) => {
                         debug!("📡 [SwarmHandler] KeepAlive event: {:?}", event);

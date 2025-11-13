@@ -532,11 +532,6 @@ impl BehaviourHandler for XRoutesHandler {
             XRoutesBehaviourEvent::Identify(identify_event) => {
                 match identify_event {
                     identify::Event::Received { peer_id, info, .. } => {
-                        debug!(
-                            "📨 [XRoutesHandler] Identify received - Peer: {:?}, Protocols: {:?}",
-                            peer_id, info.protocols
-                        );
-
                         // Добавляем адреса в Kademlia DHT
                         if let Some(kad) = behaviour.kad.as_mut() {
                             for addr in &info.listen_addrs {
@@ -548,25 +543,8 @@ impl BehaviourHandler for XRoutesHandler {
                         } else {
                             debug!("⚠️ [XRoutesHandler] Kademlia not enabled, cannot add addresses for peer: {}", peer_id);
                         }
-
-                        if let Some(kad) = behaviour.kad.as_mut() {
-                    
-                                        let kbuckets_info = kad.kbuckets();
-                    // kbuckets_info — это impl Iterator<Item = KBucketRef<'_, KBucketKey<PeerId>, Addresses>>
-                    for (i, bucket) in kbuckets_info.enumerate() {
-                        println!("Bucket {}:", i);
-                        for entry in bucket.iter() {
-                            // entry имеет тип NodeRefView<'_, KBucketKey<PeerId>, Addresses>
-                            let peer_id: &PeerId = &entry.node.key.preimage(); // доступ к PeerId
-                            let addresses: &Addresses = &entry.node.value;   // доступ к адресам
-                            println!("  PeerId: {:?}", peer_id);
-                            println!("  Addresses: {:?}", addresses);
-                        }
-                    }}
-                    
-
-
-
+                    }
+                    identify::Event::Pushed { peer_id, info , ..} => {
 
                     }
                     identify::Event::Sent { peer_id, .. } => {
@@ -574,16 +552,12 @@ impl BehaviourHandler for XRoutesHandler {
                             "📤 [XRoutesHandler] Identify sent to peer: {:?}",
                             peer_id
                         );
-                        // Печатаем событие IdentifySent
-                        println!("🆔 [XRoutesHandler] IdentifySent - Peer: {:?}", peer_id);
                     }
                     identify::Event::Error { peer_id, error, .. } => {
-                        debug!(
+                        println!(
                             "❌ [XRoutesHandler] Identify error with peer {:?}: {}",
                             peer_id, error
                         );
-                        // Печатаем событие IdentifyError
-                        println!("❌ [XRoutesHandler] IdentifyError - Peer: {:?}, Error: {}", peer_id, error);
                     }
                     _ => {}
                 }

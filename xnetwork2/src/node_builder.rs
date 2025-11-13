@@ -37,7 +37,7 @@ impl Default for NodeConfig {
     fn default() -> Self {
         Self {
             inbound_decision_policy: InboundDecisionPolicy::default(),
-            event_buffer_size: 32,
+            event_buffer_size: 100,
             enable_relay_server: false,
         }
     }
@@ -132,11 +132,6 @@ impl NodeBuilder {
             .with_behaviour(|key, relay_client_behaviour| {
                 let peer_id = key.public().to_peer_id();
 
-                // Create behaviours
-                let identify_behaviour = libp2p::identify::Behaviour::new(libp2p::identify::Config::new(
-                    "/xnetwork2/1.0.0".to_string(),
-                    key.public(),
-                ));
                 let ping_config = libp2p::ping::Config::new()
                     .with_interval(Duration::from_secs(1))
                     ; // держать соединение активным
@@ -167,7 +162,6 @@ impl NodeBuilder {
 
                 // Create main behaviour
                 crate::main_behaviour::XNetworkBehaviour {
-                    identify: identify_behaviour,
                     ping: ping_behaviour,
                     xauth: xauth_behaviour,
                     xstream: xstream_behaviour,
@@ -190,7 +184,7 @@ impl NodeBuilder {
                 swarm_handler: crate::swarm_handler::XNetworkSwarmHandler::with_event_sender(
                     event_sender.clone(),
                 ),
-                identify: crate::behaviours::IdentifyHandler::default(),
+                //identify: crate::behaviours::IdentifyHandler::default(),
                 ping: crate::behaviours::PingHandler::default(),
                 xauth: crate::behaviours::XAuthHandler::default(),
                 xstream: crate::behaviours::XStreamHandler::default(),

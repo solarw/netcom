@@ -11,7 +11,6 @@ use command_swarm::{
 make_command_swarm! {
     behaviour_name: XNetworkBehaviour,
     behaviours_handlers: {
-        identify: IdentifyHandler,
         ping: PingHandler,
         xauth: XAuthHandler,
         xstream: XStreamHandler,

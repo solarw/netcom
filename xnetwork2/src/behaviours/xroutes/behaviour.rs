@@ -2,7 +2,11 @@
 use std::time::Duration;
 
 use libp2p::{
-    PeerId, identify::{self, Config}, identity::PublicKey, kad, mdns, relay, swarm::{NetworkBehaviour, behaviour::toggle::Toggle}
+    PeerId,
+    identify::{self, Config},
+    identity::PublicKey,
+    kad, mdns, relay,
+    swarm::{NetworkBehaviour, behaviour::toggle::Toggle},
 };
 
 use super::types::XROUTES_IDENTIFY_PROTOCOL;
@@ -77,12 +81,11 @@ impl XRoutesBehaviour {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Create identify behaviour - disabled since it's already in main behaviour
 
-        let local_peer_id  = local_public_key.to_peer_id();
+        let local_peer_id = local_public_key.to_peer_id();
         // Create mDNS behaviour
 
         let identify = if config.enable_identify {
-            let config  = identify::Config::new(XROUTES_IDENTIFY_PROTOCOL.to_string(), local_public_key);
-            Toggle::from(Some(identify::Behaviour::new(config)))
+           Toggle::from(Some(XRoutesBehaviour::make_identify_behaviour(local_public_key)))
         } else {
             Toggle::from(None)
         };
@@ -101,7 +104,7 @@ impl XRoutesBehaviour {
         let kad = if config.enable_kad {
             let store = kad::store::MemoryStore::new(local_peer_id);
             let mut kad_config = kad::Config::default();
-            kad_config.set_query_timeout(Duration::from_secs(3*60));
+            kad_config.set_query_timeout(Duration::from_secs(3 * 60));
             kad_config.set_periodic_bootstrap_interval(Some(Duration::from_secs(5)));
             kad_config.set_replication_interval(Some(Duration::from_secs(5)));
             kad_config.set_provider_publication_interval(Some(Duration::from_secs(5)));
@@ -116,7 +119,10 @@ impl XRoutesBehaviour {
 
         // Create relay server behaviour
         let relay_server = if config.enable_relay_server {
-            Toggle::from(Some(relay::Behaviour::new(local_peer_id, Default::default())))
+            Toggle::from(Some(relay::Behaviour::new(
+                local_peer_id,
+                Default::default(),
+            )))
         } else {
             Toggle::from(None)
         };
@@ -136,10 +142,16 @@ impl XRoutesBehaviour {
             relay_client,
         })
     }
+
+    pub fn make_identify_behaviour(local_public_key: PublicKey) -> identify::Behaviour {
+        let mut config =
+            identify::Config::new(XROUTES_IDENTIFY_PROTOCOL.to_string(), local_public_key)
+                .with_push_listen_addr_updates(true);
+        identify::Behaviour::new(config)
+    }
     /// Enable identify behaviour
     pub fn enable_identify(&mut self, local_public_key: PublicKey) {
-        let config = identify::Config::new(XROUTES_IDENTIFY_PROTOCOL.to_string(), local_public_key);
-        self.identify = Toggle::from(Some(identify::Behaviour::new(config)));
+        self.identify = Toggle::from(Some(XRoutesBehaviour::make_identify_behaviour(local_public_key)));
     }
 
     /// Disable identify behaviour
@@ -148,7 +160,10 @@ impl XRoutesBehaviour {
     }
 
     /// Enable mDNS behaviour
-    pub fn enable_mdns(&mut self, local_peer_id: PeerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn enable_mdns(
+        &mut self,
+        local_peer_id: PeerId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.mdns = Toggle::from(Some(mdns::tokio::Behaviour::new(
             mdns::Config::default(),
             local_peer_id,
@@ -190,7 +205,10 @@ impl XRoutesBehaviour {
 
     /// Enable relay server behaviour
     pub fn enable_relay_server(&mut self, local_peer_id: PeerId) {
-        self.relay_server = Toggle::from(Some(relay::Behaviour::new(local_peer_id, Default::default())));
+        self.relay_server = Toggle::from(Some(relay::Behaviour::new(
+            local_peer_id,
+            Default::default(),
+        )));
     }
 
     /// Disable relay server behaviour
