@@ -10,15 +10,15 @@ use xstream::events::IncomingConnectionApprovePolicy;
 /// Политика принятия решений для входящих потоков
 #[derive(Debug, Clone, Copy)]
 pub enum InboundDecisionPolicy {
-    /// Автоматически одобрять все входящие потоки (по умолчанию, обратная совместимость)
+    /// Автоматически одобрять все входящие потоки
     AutoApprove,
-    /// Передавать события для ручного принятия решений через NodeEvent
+    /// Передавать события для ручного принятия решений через NodeEvent (по умолчанию)
     ManualApprove,
 }
 
 impl Default for InboundDecisionPolicy {
     fn default() -> Self {
-        Self::AutoApprove
+        Self::ManualApprove
     }
 }
 

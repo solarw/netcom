@@ -38,7 +38,7 @@ pub struct Node {
 impl Node {
     /// Create a new XNetwork2 node with default configuration
     ///
-    /// For backward compatibility, uses AutoApprove policy for inbound streams
+    /// Uses ManualApprove policy for inbound streams by default
     pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         crate::node_builder::NodeBuilder::new().build().await
     }

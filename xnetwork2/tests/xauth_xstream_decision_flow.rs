@@ -5,71 +5,8 @@ use tokio::time::timeout;
 use xnetwork2::Node;
 use xnetwork2::node_events::NodeEvent;
 
-/// Утилита для ожидания конкретного события с таймаутом
-async fn wait_for_event<F>(
-    events: &mut tokio::sync::broadcast::Receiver<NodeEvent>,
-    predicate: F,
-    timeout_duration: Duration,
-) -> Result<NodeEvent, Box<dyn std::error::Error + Send + Sync>>
-where
-    F: Fn(&NodeEvent) -> bool,
-{
-    timeout(timeout_duration, async {
-        loop {
-            match events.recv().await {
-                Ok(event) => {
-                    if predicate(&event) {
-                        return Ok(event);
-                    }
-                }
-                Err(e) => {
-                    return Err(format!(
-                        "❌ Ошибка получения события: {} - система событий не работает",
-                        e
-                    )
-                    .into());
-                }
-            }
-        }
-    })
-    .await?
-}
-
-/// Утилита для ожидания двух событий в неизвестном порядке
-async fn wait_for_two_events<F1, F2>(
-    events1: &mut tokio::sync::broadcast::Receiver<NodeEvent>,
-    events2: &mut tokio::sync::broadcast::Receiver<NodeEvent>,
-    predicate1: F1,
-    predicate2: F2,
-    timeout_duration: Duration,
-) -> Result<(NodeEvent, NodeEvent), Box<dyn std::error::Error + Send + Sync>>
-where
-    F1: Fn(&NodeEvent) -> bool,
-    F2: Fn(&NodeEvent) -> bool,
-{
-    timeout(timeout_duration, async {
-        let mut event1_opt = None;
-        let mut event2_opt = None;
-
-        while event1_opt.is_none() || event2_opt.is_none() {
-            tokio::select! {
-                Ok(event) = events1.recv() => {
-                    if predicate1(&event) && event1_opt.is_none() {
-                        event1_opt = Some(event);
-                    }
-                }
-                Ok(event) = events2.recv() => {
-                    if predicate2(&event) && event2_opt.is_none() {
-                        event2_opt = Some(event);
-                    }
-                }
-            }
-        }
-
-        Ok((event1_opt.unwrap(), event2_opt.unwrap()))
-    })
-    .await?
-}
+mod utils;
+use utils::{wait_for_event, wait_for_two_events};
 
 /// Тестирует поток решений XAuth и XStream
 /// Весь тест должен укладываться в 5 секунд

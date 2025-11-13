@@ -78,6 +78,7 @@ where
 
 /// Запускает задачу ожидания и автоматического подтверждения PoR запроса
 /// Возвращает JoinHandle для последующего ожидания
+#[allow(dead_code)]
 pub fn spawn_por_task(
     node: &mut Node,
     expected_peer_id: libp2p::PeerId,
@@ -110,6 +111,7 @@ pub fn spawn_por_task(
 
 /// Настраивает ноду для прослушивания и возвращает адрес
 /// Автоматически отправляет ListenOn и ожидает NewListenAddr
+#[allow(dead_code)]
 pub async fn setup_listening_node(node: &mut Node) -> Result<Multiaddr, Box<dyn std::error::Error + Send + Sync>> {
     println!("🎯 Настраиваем ноду для прослушивания...");
 
@@ -160,6 +162,7 @@ pub async fn setup_listening_node(node: &mut Node) -> Result<Multiaddr, Box<dyn 
 }
 
 /// Запускает задачу ожидания события ConnectionEstablished
+#[allow(dead_code)]
 pub fn spawn_connection_established_task(
     node: &mut Node,
     expected_peer_id: libp2p::PeerId,
@@ -187,6 +190,7 @@ pub fn spawn_connection_established_task(
 }
 
 /// Выполняет Dial и ожидает установки соединения
+#[allow(dead_code)]
 pub async fn dial_and_wait_connection(
     node: &mut Node,
     peer_id: libp2p::PeerId,
@@ -229,6 +233,7 @@ pub async fn dial_and_wait_connection(
 }
 
 /// Полный цикл установки соединения с автоматической аутентификацией
+#[allow(dead_code)]
 pub async fn setup_connection_with_auth(
     node_a: &mut Node,
     node_b: &mut Node,
@@ -259,6 +264,7 @@ pub async fn setup_connection_with_auth(
 
 /// Запускает задачу ожидания VerifyPorRequest в ручном режиме (без автоматического подтверждения)
 /// Возвращает JoinHandle и Receiver для получения события
+#[allow(dead_code)]
 pub fn spawn_manual_por_task(
     node: &mut Node,
     expected_peer_id: libp2p::PeerId,
@@ -289,6 +295,7 @@ pub fn spawn_manual_por_task(
 }
 
 /// Ожидает события VerifyPorRequest на обеих нодах в ручном режиме
+#[allow(dead_code)]
 pub async fn wait_for_manual_por_requests(
     node1: &mut Node,
     node2: &mut Node,
@@ -322,6 +329,7 @@ pub async fn wait_for_manual_por_requests(
 }
 
 /// Утилита для проверки отсутствия автоматической аутентификации
+#[allow(dead_code)]
 pub async fn assert_no_auth_events(
     node1: &mut Node,
     node2: &mut Node,
@@ -371,6 +379,7 @@ pub async fn assert_no_auth_events(
 }
 
 /// Получает connection_id для указанного пира из состояния сети
+#[allow(dead_code)]
 pub async fn get_connection_id(
     node: &mut Node,
     peer_id: libp2p::PeerId,
@@ -396,6 +405,7 @@ pub async fn get_connection_id(
 
 /// Запускает задачу ожидания ConnectionEstablished для получения connection_id
 /// Должна запускаться ДО dial_and_wait_connection
+#[allow(dead_code)]
 pub fn spawn_connection_id_listener_task(
     node: &mut Node,
     expected_peer_id: libp2p::PeerId,
@@ -426,6 +436,7 @@ pub fn spawn_connection_id_listener_task(
 
 /// Создает асинхронную задачу, которая ждет завершения аутентификации для указанного пира
 /// Ожидает любое из трех событий успешной аутентификации: MutualAuthSuccess, OutboundAuthSuccess, InboundAuthSuccess
+#[allow(dead_code)]
 pub fn spawn_auth_completion_task(
     node: &mut Node,
     expected_peer_id: libp2p::PeerId,
@@ -457,6 +468,7 @@ pub fn spawn_auth_completion_task(
 }
 
 /// Создает асинхронную задачу, которая ждет VerifyPorRequest и сразу подтверждает его
+#[allow(dead_code)]
 pub fn spawn_auto_respond_por_task(
     node: &mut Node,
     expected_peer_id: libp2p::PeerId,
