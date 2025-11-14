@@ -88,7 +88,7 @@ impl Commander {
         peer_id: PeerId,
         addr: Multiaddr,
         timeout: std::time::Duration,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<libp2p::swarm::ConnectionId, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::DialAndWait {
             peer_id,

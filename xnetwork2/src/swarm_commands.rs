@@ -19,7 +19,7 @@ pub enum SwarmLevelCommand {
         peer_id: PeerId,
         addr: Multiaddr,
         timeout: Duration,
-        response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+        response: oneshot::Sender<Result<libp2p::swarm::ConnectionId, Box<dyn std::error::Error + Send + Sync>>>,
     },
     /// Listen on an address (returns ListenerId)
     ListenOn {

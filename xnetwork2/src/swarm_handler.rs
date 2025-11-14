@@ -14,6 +14,14 @@ use xauth::events::PorAuthEvent;
 use xstream::events::XStreamEvent;
 use crate::behaviours::xroutes::PendingTaskManager;
 
+/// Key for dial_and_wait operations to handle multiple connections to same peer
+/// We use a combination of peer_id and connection attempt counter to handle multiple connections
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct DialWaitKey {
+    peer_id: PeerId,
+    attempt_id: u64, // Simple counter to distinguish multiple connection attempts to same peer
+}
+
 /// Swarm handler for XNetwork2
 pub struct XNetworkSwarmHandler {
     /// Broadcast channel for sending NodeEvents to multiple subscribers
@@ -23,7 +31,7 @@ pub struct XNetworkSwarmHandler {
     /// Pending tasks for listen_and_wait operations
     listen_wait_tasks: PendingTaskManager<ListenerId, Multiaddr, Box<dyn std::error::Error + Send + Sync>, ()>,
     /// Pending tasks for dial_and_wait operations
-    dial_wait_tasks: PendingTaskManager<PeerId, (), Box<dyn std::error::Error + Send + Sync>, ()>,
+    dial_wait_tasks: PendingTaskManager<DialWaitKey, libp2p::swarm::ConnectionId, Box<dyn std::error::Error + Send + Sync>, ()>,
 }
 
 impl Default for XNetworkSwarmHandler {
@@ -94,12 +102,30 @@ impl XNetworkSwarmHandler {
             libp2p::swarm::SwarmEvent::ConnectionEstablished {
                 peer_id,
                 connection_id,
+                endpoint,
                 ..
             } => {
                 println!("Conn established {:?}", peer_id);
-                // Complete pending dial_and_wait task if exists
-                if self.dial_wait_tasks.set_task_result(&peer_id, ()).is_ok() {
-                    debug!("✅ [SwarmHandler] Completed dial_and_wait task for peer: {}", peer_id);
+                
+                // Try to complete pending dial_and_wait task if exists
+                // We need to find any DialWaitKey that matches this peer_id
+                // This is a simplified approach - we complete the first matching task for this peer
+                // In practice, we should track which specific dial attempt corresponds to which connection
+                
+                // Try to find and complete any pending task for this peer
+                let mut completed = false;
+                for key in self.dial_wait_tasks.get_pending_keys() {
+                    if key.peer_id == *peer_id {
+                        if self.dial_wait_tasks.set_task_result(&key, *connection_id).is_ok() {
+                            debug!("✅ [SwarmHandler] Completed dial_and_wait task for peer: {} with connection_id: {:?}", peer_id, connection_id);
+                            completed = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if !completed {
+                    debug!("📡 [SwarmHandler] Connection established for peer: {} with connection_id: {:?}, but no matching dial_and_wait task found", peer_id, connection_id);
                 }
                 
                 let _ = event_sender.send(NodeEvent::ConnectionEstablished {
@@ -423,12 +449,16 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                     peer_id, addr, timeout
                 );
                 
-                // Check if peer is already connected
-                if swarm.connected_peers().any(|p| p == &peer_id) {
-                    debug!("✅ [SwarmHandler] Peer {} is already connected, completing dial_and_wait immediately", peer_id);
-                    let _ = response.send(Ok(()));
-                    return;
-                }
+                // Generate a simple attempt_id based on current time
+                let attempt_id = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64;
+                
+                let key = DialWaitKey {
+                    peer_id,
+                    attempt_id,
+                };
                 
                 // Start dialing
                 let result = swarm.dial(addr.clone());
@@ -442,7 +472,7 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                 info!("📡 [SwarmHandler] Dialing peer {} at address {}, waiting for connection", peer_id, addr);
                 
                 // Add pending task to wait for ConnectionEstablished event
-                self.dial_wait_tasks.add_pending_task(peer_id, timeout, response);
+                self.dial_wait_tasks.add_pending_task(key, timeout, response);
             }
         }
     }
