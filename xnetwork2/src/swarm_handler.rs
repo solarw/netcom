@@ -128,6 +128,11 @@ impl XNetworkSwarmHandler {
                     debug!("📡 [SwarmHandler] Connection established for peer: {} with connection_id: {:?}, but no matching dial_and_wait task found", peer_id, connection_id);
                 }
                 
+                // Start authentication for this connection
+                // Note: We can't call commander directly from here, but we can emit an event
+                // that the application can listen to and then call start_auth_for_connection
+                debug!("🔐 [SwarmHandler] Connection established - authentication will need to be started manually for connection: {:?}", connection_id);
+                
                 let _ = event_sender.send(NodeEvent::ConnectionEstablished {
                     peer_id: *peer_id,
                     connection_id: *connection_id,
@@ -473,6 +478,29 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                 
                 // Add pending task to wait for ConnectionEstablished event
                 self.dial_wait_tasks.add_pending_task(key, timeout, response);
+            }
+            SwarmLevelCommand::StartAuthForConnection { connection_id, response } => {
+                debug!(
+                    "🔄 [SwarmHandler] Processing StartAuthForConnection command - Connection: {:?}",
+                    connection_id
+                );
+                
+                // Start actual authentication using the xauth behaviour
+                let result = swarm.behaviour_mut().xauth.start_authentication(connection_id)
+                    .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + Send + Sync>);
+                
+                match &result {
+                    Ok(_) => {
+                        debug!("🔐 [SwarmHandler] Authentication successfully started for connection: {:?}", connection_id);
+                        info!("🔐 [SwarmHandler] Authentication started for connection: {:?}", connection_id);
+                    }
+                    Err(e) => {
+                        debug!("❌ [SwarmHandler] Failed to start authentication for connection {:?}: {:?}", connection_id, e);
+                        info!("❌ [SwarmHandler] Failed to start authentication for connection {:?}: {:?}", connection_id, e);
+                    }
+                }
+                
+                let _ = response.send(result);
             }
         }
     }

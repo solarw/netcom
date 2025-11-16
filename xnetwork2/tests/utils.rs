@@ -298,8 +298,26 @@ pub async fn setup_connection_with_auth(
     let por_task_a_to_b = spawn_por_task(node_a, *node_b.peer_id(), timeout_duration);
     let por_task_b_to_a = spawn_por_task(node_b, *node_a.peer_id(), timeout_duration);
 
-    // Выполняем Dial и ожидаем соединения
-    dial_and_wait_connection(node_a, *node_b.peer_id(), addr_b, timeout_duration).await?;
+    // Запускаем задачу ожидания соединения на node_b ДО Dial
+    let connection_task_b = spawn_connection_established_task(node_b, *node_a.peer_id(), timeout_duration);
+
+    // Выполняем Dial и ожидаем соединения на node_a
+    let connection_id_a = dial_and_wait_connection(node_a, *node_b.peer_id(), addr_b, timeout_duration).await?;
+
+    // Ожидаем соединения на node_b
+    let connection_id_b = connection_task_b.await
+        .expect("❌ Задача ожидания соединения на node_b завершилась с ошибкой (join)")
+        .expect("❌ Задача ожидания соединения на node_b завершилась с ошибкой (task)");
+
+    // После установки соединения явно запускаем аутентификацию на ОБЕИХ сторонах
+    // В ручном режиме аутентификация должна запускаться явно на обеих сторонах
+    println!("🔄 Запускаем ручную аутентификацию на node_a для connection_id: {:?}", connection_id_a);
+    node_a.commander.start_auth_for_connection(connection_id_a).await
+        .expect("❌ Не удалось запустить аутентификацию на node_a - критическая ошибка");
+
+    println!("🔄 Запускаем ручную аутентификацию на node_b для connection_id: {:?}", connection_id_b);
+    node_b.commander.start_auth_for_connection(connection_id_b).await
+        .expect("❌ Не удалось запустить аутентификацию на node_b - критическая ошибка");
 
     // Ждем завершения аутентификации
     println!("⏳ Ждем завершения аутентификации...");

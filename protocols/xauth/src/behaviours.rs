@@ -73,7 +73,7 @@ impl PorAuthBehaviour {
             por,
             metadata,
             pending_verifications: HashMap::new(),
-            auto_auth_mode: true, // по умолчанию автоматический режим
+            auto_auth_mode: false, // по умолчанию ручной режим
         }
     }
 

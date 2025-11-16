@@ -108,7 +108,30 @@ async fn test_two_nodes_xauth_mutual_authentication_in_5_seconds() {
         println!("   Node1 → Node2: {}", node1_peer_id);
         println!("   Node2 → Node1: {}", node2_peer_id);
 
-        // 9. ОЖИДАНИЕ СОБЫТИЙ VerifyPorRequest НА ОБЕИХ НОДАХ (4.8-5.5 секунды)
+        // 9. ЗАПУСК АУТЕНТИФИКАЦИИ В РУЧНОМ РЕЖИМЕ
+        println!("🔐 Запускаем аутентификацию в ручном режиме...");
+        
+        // Получаем connection_id для обеих нод
+        let node1_conn_id = match node1_connected {
+            NodeEvent::ConnectionEstablished { connection_id, .. } => connection_id,
+            _ => panic!("❌ Нода1 получила неожиданное событие"),
+        };
+
+        let node2_conn_id = match node2_connected {
+            NodeEvent::ConnectionEstablished { connection_id, .. } => connection_id,
+            _ => panic!("❌ Нода2 получила неожиданное событие"),
+        };
+
+        // Запускаем аутентификацию для обеих нод
+        println!("🔄 Запускаем аутентификацию для ноды1...");
+        node1.commander.start_auth_for_connection(node1_conn_id).await
+            .expect("❌ Не удалось запустить аутентификацию для ноды1");
+
+        println!("🔄 Запускаем аутентификацию для ноды2...");
+        node2.commander.start_auth_for_connection(node2_conn_id).await
+            .expect("❌ Не удалось запустить аутентификацию для ноды2");
+
+        // 10. ОЖИДАНИЕ СОБЫТИЙ VerifyPorRequest НА ОБЕИХ НОДАХ (4.8-5.5 секунды)
         println!("🔐 Ожидаем события VerifyPorRequest на обеих нодах (таймаут 3 секунды)...");
         let (node1_por_request, node2_por_request) = wait_for_two_events(
             &mut node1_events,

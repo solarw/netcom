@@ -51,6 +51,11 @@ pub enum SwarmLevelCommand {
         message: String,
         response: oneshot::Sender<Result<String, Box<dyn std::error::Error + Send + Sync>>>,
     },
+    /// Start authentication for a connection
+    StartAuthForConnection {
+        connection_id: libp2p::swarm::ConnectionId,
+        response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    },
 }
 
 /// Network state information
@@ -88,6 +93,9 @@ impl fmt::Debug for SwarmLevelCommand {
             }
             SwarmLevelCommand::Echo { message, .. } => {
                 write!(f, "Echo(message: '{}')", message)
+            }
+            SwarmLevelCommand::StartAuthForConnection { connection_id, .. } => {
+                write!(f, "StartAuthForConnection(connection_id: {:?})", connection_id)
             }
         }
     }

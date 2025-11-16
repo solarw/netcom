@@ -170,6 +170,10 @@ async fn test_xstream_decision_approval_success() {
 
     println!("📡 Нода1 слушает на: {}", node1_addr);
 
+    // Создаем подписки на события до подключения
+    let mut node1_events = node1.subscribe();
+    let mut node2_events = node2.subscribe();
+
     // Нода2 подключается к ноде1
     node2
         .commander
@@ -178,6 +182,55 @@ async fn test_xstream_decision_approval_success() {
         .expect("❌ Нода2 не смогла подключиться к ноде1");
 
     println!("✅ Нода2 подключилась к ноде1");
+
+    // Ждем события ConnectionEstablished на обеих нодах
+    let (node1_conn_id, node2_conn_id) = tokio::join!(
+        async {
+            loop {
+                match timeout(Duration::from_secs(5), node1_events.recv()).await {
+                    Ok(Ok(NodeEvent::ConnectionEstablished { connection_id, peer_id })) => {
+                        if peer_id == *node2.peer_id() {
+                            return connection_id;
+                        }
+                    }
+                    Ok(Ok(_)) => continue,
+                    Ok(Err(_)) => panic!("❌ Канал событий ноды1 закрыт"),
+                    Err(_) => panic!("❌ Таймаут ожидания соединения на ноде1"),
+                }
+            }
+        },
+        async {
+            loop {
+                match timeout(Duration::from_secs(5), node2_events.recv()).await {
+                    Ok(Ok(NodeEvent::ConnectionEstablished { connection_id, peer_id })) => {
+                        if peer_id == *node1.peer_id() {
+                            return connection_id;
+                        }
+                    }
+                    Ok(Ok(_)) => continue,
+                    Ok(Err(_)) => panic!("❌ Канал событий ноды2 закрыт"),
+                    Err(_) => panic!("❌ Таймаут ожидания соединения на ноде2"),
+                }
+            }
+        }
+    );
+
+    println!("✅ Соединение установлено на обеих нодах:");
+    println!("   Нода1 connection_id: {:?}", node1_conn_id);
+    println!("   Нода2 connection_id: {:?}", node2_conn_id);
+
+    // Запускаем аутентификацию для обеих нод
+    println!("🔐 Запускаем аутентификацию в ручном режиме...");
+    node1
+        .commander
+        .start_auth_for_connection(node1_conn_id)
+        .await
+        .expect("❌ Не удалось запустить аутентификацию для ноды1");
+    node2
+        .commander
+        .start_auth_for_connection(node2_conn_id)
+        .await
+        .expect("❌ Не удалось запустить аутентификацию для ноды2");
 
     // Создаем задачи для обработки аутентификации на обеих нодах
     let node1_commander = node1.commander.clone();

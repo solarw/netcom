@@ -171,8 +171,8 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_10_seconds() {
             Duration::from_secs(2)
         ).await.expect("❌ Таймаут ожидания события ConnectionEstablished - соединение не установлено за 2 секунды");
 
-        let node2_peer_id = match node2_connected {
-            NodeEvent::ConnectionEstablished { peer_id, connection_id: _ } => peer_id,
+        let (node2_peer_id, node2_conn_id) = match node2_connected {
+            NodeEvent::ConnectionEstablished { peer_id, connection_id } => (peer_id, connection_id),
             _ => panic!("❌ Нода2 получила неожиданное событие: {:?}", node2_connected),
         };
 
@@ -184,9 +184,30 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_10_seconds() {
         println!("✅ Соединение установлено корректно:");
         println!("   Node2 → Node1: {}", node2_peer_id);
 
-        // 8. ОЖИДАНИЕ И ПОДТВЕРЖДЕНИЕ АУТЕНТИФИКАЦИИ
-        println!("🔐 Ожидаем и подтверждаем аутентификацию...");
+        // 8. ЗАПУСК АУТЕНТИФИКАЦИИ В РУЧНОМ РЕЖИМЕ
+        println!("🔐 Запускаем аутентификацию в ручном режиме...");
         
+        // Получаем connection_id для ноды1
+        let node1_connection_id = wait_for_event(
+            &mut node1_events,
+            |e| matches!(e, NodeEvent::ConnectionEstablished { .. }),
+            Duration::from_secs(2)
+        ).await.expect("❌ Не удалось получить ConnectionEstablished для ноды1");
+        
+        let node1_conn_id = match node1_connection_id {
+            NodeEvent::ConnectionEstablished { connection_id, .. } => connection_id,
+            _ => panic!("❌ Нода1 получила неожиданное событие"),
+        };
+
+        // Запускаем аутентификацию для обеих нод
+        println!("🔄 Запускаем аутентификацию для ноды1...");
+        node1.commander.start_auth_for_connection(node1_conn_id).await
+            .expect("❌ Не удалось запустить аутентификацию для ноды1");
+
+        println!("🔄 Запускаем аутентификацию для ноды2...");
+        node2.commander.start_auth_for_connection(node2_conn_id).await
+            .expect("❌ Не удалось запустить аутентификацию для ноды2");
+
         // Запускаем задачи автоматического подтверждения PoR на обеих нодах
         let por_task_node1 = spawn_auto_respond_por_task(&mut node1, *node2.peer_id(), Duration::from_secs(3));
         let por_task_node2 = spawn_auto_respond_por_task(&mut node2, *node1.peer_id(), Duration::from_secs(3));

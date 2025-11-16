@@ -168,7 +168,7 @@ impl Commander {
         connection_id: libp2p::swarm::ConnectionId,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::xauth(XAuthCommand::StartAuthForConnection {
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::StartAuthForConnection {
             connection_id,
             response: response_tx,
         });
