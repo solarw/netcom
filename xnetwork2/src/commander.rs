@@ -381,4 +381,14 @@ impl Commander {
         self.send(command).await?;
         response_rx.await?
     }
+
+    /// Enable relay server
+    pub async fn enable_relay_server(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::EnableRelayServer {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
 }

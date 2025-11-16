@@ -512,6 +512,7 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
             <XNetworkBehaviour as libp2p::swarm::NetworkBehaviour>::ToSwarm,
         >,
     ) {
+        println!("Event: {:?}", event);
         // First, transform and emit the event through the channel
         self.transform_and_emit_event(event);
 

@@ -14,6 +14,12 @@ pub struct XRoutesConfig {
     /// Enable relay server behaviour
     pub enable_relay_server: bool,
     // relay_client теперь всегда включен, поэтому enable_relay_client убран
+    /// Enable DCUtR for hole punching
+    pub enable_dcutr: bool,
+    /// Enable AutoNAT for NAT type detection
+    pub enable_autonat: bool,
+    /// Enable automatic hole punching
+    pub auto_hole_punching: bool,
 }
 
 impl Default for XRoutesConfig {
@@ -23,6 +29,9 @@ impl Default for XRoutesConfig {
             enable_mdns: true,
             enable_kad: true,
             enable_relay_server: false,
+            enable_dcutr: false,
+            enable_autonat: false,
+            auto_hole_punching: false,
         }
     }
 }
@@ -58,12 +67,33 @@ impl XRoutesConfig {
             enable_mdns: false,
             enable_kad: false,
             enable_relay_server: false,
+            enable_dcutr: false,
+            enable_autonat: false,
+            auto_hole_punching: false,
         }
     }
 
     /// Enable relay server behaviour
     pub fn with_relay_server(mut self, enable: bool) -> Self {
         self.enable_relay_server = enable;
+        self
+    }
+
+    /// Enable DCUtR for hole punching
+    pub fn with_dcutr(mut self, enable: bool) -> Self {
+        self.enable_dcutr = enable;
+        self
+    }
+
+    /// Enable AutoNAT for NAT type detection
+    pub fn with_autonat(mut self, enable: bool) -> Self {
+        self.enable_autonat = enable;
+        self
+    }
+
+    /// Enable automatic hole punching
+    pub fn with_auto_hole_punching(mut self, enable: bool) -> Self {
+        self.auto_hole_punching = enable;
         self
     }
 }
@@ -81,6 +111,10 @@ pub struct XRoutesStatus {
     pub relay_server_enabled: bool,
     /// Relay client behaviour status
     pub relay_client_enabled: bool,
+    /// DCUtR behaviour status
+    pub dcutr_enabled: bool,
+    /// AutoNAT behaviour status
+    pub autonat_enabled: bool,
 }
 
 impl Default for XRoutesStatus {
@@ -91,6 +125,8 @@ impl Default for XRoutesStatus {
             kad_enabled: false,
             relay_server_enabled: false,
             relay_client_enabled: false,
+            dcutr_enabled: false,
+            autonat_enabled: false,
         }
     }
 }

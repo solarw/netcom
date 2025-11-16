@@ -40,7 +40,7 @@ pub enum AuthResult {
     Error(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AuthDirection {
     Inbound,  // From remote peer to us
     Outbound, // From us to remote peer

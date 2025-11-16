@@ -307,6 +307,7 @@ impl XRoutesHandler {
             _ => {}
         }
     }
+
 }
 
 #[async_trait]
@@ -524,6 +525,13 @@ impl BehaviourHandler for XRoutesHandler {
                 }
             
             }
+            XRoutesCommand::EnableRelayServer { response } => {
+                debug!("🔄 [XRoutesHandler] Enabling relay server");
+                
+                behaviour.enable_relay_server(self.local_peer_id);
+                info!("✅ [XRoutesHandler] Relay server enabled");
+                let _ = response.send(Ok(()));
+            }
         }
     }
 
@@ -581,6 +589,14 @@ impl BehaviourHandler for XRoutesHandler {
             }
             XRoutesBehaviourEvent::RelayClient(relay_client_event) => {
                 // TODO: Add relay client event handling
+            }
+            XRoutesBehaviourEvent::Dcutr(dcutr_event) => {
+                debug!("🔄 [XRoutesHandler] DCUtR event received: {:?}", dcutr_event);
+                // DCUtR events are handled automatically by the behaviour
+            }
+            XRoutesBehaviourEvent::Autonat(autonat_event) => {
+                debug!("🔄 [XRoutesHandler] AutoNAT event received: {:?}", autonat_event);
+                // AutoNAT events are handled automatically by the behaviour
             }
         }
     }

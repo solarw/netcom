@@ -25,6 +25,10 @@ pub struct XRoutesBehaviour {
     pub relay_server: Toggle<relay::Behaviour>,
     /// Relay client behaviour
     pub relay_client: Toggle<relay::client::Behaviour>,
+    /// DCUtR behaviour for hole punching
+    pub dcutr: Toggle<libp2p::dcutr::Behaviour>,
+    /// AutoNAT behaviour for NAT type detection
+    pub autonat: Toggle<libp2p::autonat::Behaviour>,
 }
 
 /// Events emitted by XRoutesBehaviour
@@ -40,6 +44,10 @@ pub enum XRoutesBehaviourEvent {
     RelayServer(relay::Event),
     /// Relay client behaviour event
     RelayClient(relay::client::Event),
+    /// DCUtR behaviour event
+    Dcutr(libp2p::dcutr::Event),
+    /// AutoNAT behaviour event
+    Autonat(libp2p::autonat::Event),
 }
 
 impl From<identify::Event> for XRoutesBehaviourEvent {
@@ -69,6 +77,18 @@ impl From<relay::Event> for XRoutesBehaviourEvent {
 impl From<relay::client::Event> for XRoutesBehaviourEvent {
     fn from(event: relay::client::Event) -> Self {
         XRoutesBehaviourEvent::RelayClient(event)
+    }
+}
+
+impl From<libp2p::dcutr::Event> for XRoutesBehaviourEvent {
+    fn from(event: libp2p::dcutr::Event) -> Self {
+        XRoutesBehaviourEvent::Dcutr(event)
+    }
+}
+
+impl From<libp2p::autonat::Event> for XRoutesBehaviourEvent {
+    fn from(event: libp2p::autonat::Event) -> Self {
+        XRoutesBehaviourEvent::Autonat(event)
     }
 }
 
@@ -134,12 +154,31 @@ impl XRoutesBehaviour {
             Toggle::from(None)
         };
 
+        // Create DCUtR behaviour
+        let dcutr = if config.enable_dcutr {
+            Toggle::from(Some(libp2p::dcutr::Behaviour::new(local_peer_id)))
+        } else {
+            Toggle::from(None)
+        };
+
+        // Create AutoNAT behaviour
+        let autonat = if config.enable_autonat {
+            Toggle::from(Some(libp2p::autonat::Behaviour::new(
+                local_peer_id,
+                Default::default(),
+            )))
+        } else {
+            Toggle::from(None)
+        };
+
         Ok(Self {
             identify,
             mdns,
             kad,
             relay_server,
             relay_client,
+            dcutr,
+            autonat,
         })
     }
 
@@ -200,6 +239,8 @@ impl XRoutesBehaviour {
             kad_enabled: self.kad.as_ref().is_some(),
             relay_server_enabled: self.relay_server.as_ref().is_some(),
             relay_client_enabled: self.relay_client.as_ref().is_some(),
+            dcutr_enabled: self.dcutr.as_ref().is_some(),
+            autonat_enabled: self.autonat.as_ref().is_some(),
         }
     }
 

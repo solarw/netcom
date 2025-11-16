@@ -29,6 +29,12 @@ pub struct NodeConfig {
     pub event_buffer_size: usize,
     /// Включить relay сервер
     pub enable_relay_server: bool,
+    /// Включить DCUtR для hole punching
+    pub enable_dcutr: bool,
+    /// Включить AutoNAT для определения типа NAT
+    pub enable_autonat: bool,
+    /// Включить Kademlia DHT discovery
+    pub enable_kademlia: bool,
 }
 
 impl Default for NodeConfig {
@@ -37,6 +43,9 @@ impl Default for NodeConfig {
             inbound_decision_policy: InboundDecisionPolicy::default(),
             event_buffer_size: 100,
             enable_relay_server: false,
+            enable_dcutr: false,
+            enable_autonat: false,
+            enable_kademlia: false,
         }
     }
 }
@@ -74,6 +83,33 @@ impl NodeBuilder {
         self
     }
 
+    /// Устанавливает фиксированный приватный ключ из байтов (Ed25519)
+    pub fn with_fixed_key(mut self, key_bytes: Vec<u8>) -> Self {
+        use libp2p::identity::ed25519;
+        
+        if key_bytes.len() == 32 {
+            // Создаем ключ из 32-байтного seed используя правильный API
+            let mut seed_copy = key_bytes.clone();
+            match ed25519::SecretKey::try_from_bytes(&mut seed_copy) {
+                Ok(secret_key) => {
+                    let ed25519_keypair = ed25519::Keypair::from(secret_key);
+                    self.keypair = Some(identity::Keypair::from(ed25519_keypair));
+                    println!("✅ Fixed key loaded successfully from 32-byte seed");
+                }
+                Err(e) => {
+                    eprintln!("⚠️ Failed to create keypair from 32-byte seed: {}", e);
+                    // Fallback to generated key
+                    self.keypair = Some(identity::Keypair::generate_ed25519());
+                }
+            }
+        } else {
+            eprintln!("⚠️ Invalid key length: {} bytes, expected 32", key_bytes.len());
+            // Fallback to generated key
+            self.keypair = Some(identity::Keypair::generate_ed25519());
+        }
+        self
+    }
+
     /// Устанавливает конфигурацию XRoutes
     pub fn with_xroutes_config<F>(mut self, config_fn: F) -> Self
     where
@@ -87,6 +123,32 @@ impl NodeBuilder {
     /// Включает relay сервер
     pub fn with_relay_server(mut self) -> Self {
         self.config.enable_relay_server = true;
+        self
+    }
+
+    /// Включает DCUtR для hole punching
+    pub fn with_dcutr(mut self) -> Self {
+        self.config.enable_dcutr = true;
+        self
+    }
+
+    /// Включает AutoNAT для определения типа NAT
+    pub fn with_autonat(mut self) -> Self {
+        self.config.enable_autonat = true;
+        self
+    }
+
+    /// Включает все механизмы NAT traversal (relay, DCUtR, AutoNAT)
+    pub fn with_nat_traversal(mut self) -> Self {
+        self.config.enable_relay_server = true;
+        self.config.enable_dcutr = true;
+        self.config.enable_autonat = true;
+        self
+    }
+
+    /// Включает Kademlia DHT discovery
+    pub fn with_kademlia(mut self) -> Self {
+        self.config.enable_kademlia = true;
         self
     }
 
@@ -141,9 +203,13 @@ impl NodeBuilder {
 
                 let xstream_behaviour = xstream::behaviour::XStreamNetworkBehaviour::new_with_policy(xstream_policy);
 
-        // Create XRoutes behaviour with relay server configuration
+        // Create XRoutes behaviour with NAT traversal configuration
         let xroutes_config = crate::behaviours::xroutes::XRoutesConfig::disabled()
-            .with_relay_server(self.config.enable_relay_server).with_identify(true);
+            .with_relay_server(self.config.enable_relay_server)
+            .with_dcutr(self.config.enable_dcutr)
+            .with_autonat(self.config.enable_autonat)
+            .with_kad(self.config.enable_kademlia)
+            .with_identify(true);
         let xroutes_behaviour = crate::behaviours::xroutes::XRoutesBehaviour::new(
             keypair.public(),
             &xroutes_config,

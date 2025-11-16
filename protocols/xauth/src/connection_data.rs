@@ -20,6 +20,9 @@ pub struct ConnectionData {
     pub inbound_auth: DirectionalAuthState,
     // Outbound authentication state (us authenticating remote peer)
     pub outbound_auth: DirectionalAuthState,
+    // Timeout flags to make timeout events idempotent
+    pub outbound_timed_out: bool,
+    pub inbound_timed_out: bool,
 }
 
 impl ConnectionData {
@@ -34,6 +37,8 @@ impl ConnectionData {
             last_activity: now,
             inbound_auth: DirectionalAuthState::NotStarted,
             outbound_auth: DirectionalAuthState::NotStarted,
+            outbound_timed_out: false,
+            inbound_timed_out: false,
         }
     }
 
@@ -108,6 +113,13 @@ impl ConnectionData {
     // Check for authentication timeouts
     pub fn check_timeout(&self, auth_timeout: Duration) -> Option<AuthDirection> {
         let now = Instant::now();
+
+        // Ignore timeout if both directions are NotStarted
+        if matches!(self.inbound_auth, DirectionalAuthState::NotStarted)
+            && matches!(self.outbound_auth, DirectionalAuthState::NotStarted)
+        {
+            return None;
+        }
 
         // Check each authentication direction for timeout
         let inbound_timeout = match &self.inbound_auth {

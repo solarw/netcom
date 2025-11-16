@@ -379,47 +379,56 @@ impl PorAuthBehaviour {
         // Process timeouts
         for (connection_id, peer_id, direction, address) in timed_out_connections {
             if let Some(conn) = self.connections.get_mut(&connection_id) {
-                // Update connection state based on timeout direction
+                // Update connection state based on timeout direction with idempotent flags
                 match direction {
                     AuthDirection::Outbound => {
-                        if matches!(conn.outbound_auth, DirectionalAuthState::InProgress { .. }) {
+                        if !conn.outbound_timed_out && matches!(conn.outbound_auth, DirectionalAuthState::InProgress { .. }) {
                             conn.set_outbound_auth_failed(
                                 "Outbound authentication timed out".to_string(),
                             );
+                            conn.outbound_timed_out = true;
                         }
                     }
                     AuthDirection::Inbound => {
-                        if matches!(conn.inbound_auth, DirectionalAuthState::InProgress { .. }) {
+                        if !conn.inbound_timed_out && matches!(conn.inbound_auth, DirectionalAuthState::InProgress { .. }) {
                             conn.set_inbound_auth_failed(
                                 "Inbound authentication timed out".to_string(),
                             );
+                            conn.inbound_timed_out = true;
                         }
                     }
                     AuthDirection::Both => {
-                        // Set both as failed if they were in progress
-                        if matches!(conn.outbound_auth, DirectionalAuthState::InProgress { .. }) {
+                        // Set both as failed if they were in progress and not already timed out
+                        if !conn.outbound_timed_out && matches!(conn.outbound_auth, DirectionalAuthState::InProgress { .. }) {
                             conn.set_outbound_auth_failed("Authentication timed out".to_string());
+                            conn.outbound_timed_out = true;
                         }
 
-                        if matches!(conn.inbound_auth, DirectionalAuthState::InProgress { .. }) {
+                        if !conn.inbound_timed_out && matches!(conn.inbound_auth, DirectionalAuthState::InProgress { .. }) {
                             conn.set_inbound_auth_failed("Authentication timed out".to_string());
+                            conn.inbound_timed_out = true;
                         }
                     }
                 }
 
-                // Generate timeout event
-                self.pending_events
-                    .push_back(ToSwarm::GenerateEvent(PorAuthEvent::AuthTimeout {
-                        peer_id,
-                        connection_id,
-                        address,
-                        direction: direction.clone(),
-                    }));
+                // Generate timeout event only if we actually processed a timeout
+                if (direction == AuthDirection::Outbound && conn.outbound_timed_out)
+                    || (direction == AuthDirection::Inbound && conn.inbound_timed_out)
+                    || (direction == AuthDirection::Both && (conn.outbound_timed_out || conn.inbound_timed_out))
+                {
+                    self.pending_events
+                        .push_back(ToSwarm::GenerateEvent(PorAuthEvent::AuthTimeout {
+                            peer_id,
+                            connection_id,
+                            address,
+                            direction: direction.clone(),
+                        }));
 
-                println!(
-                    "Authentication timeout for peer {:?} on connection {:?}: {:?}",
-                    peer_id, connection_id, direction
-                );
+                    println!(
+                        "Authentication timeout for peer {:?} on connection {:?}: {:?}",
+                        peer_id, connection_id, direction
+                    );
+                }
             }
         }
 

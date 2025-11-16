@@ -116,4 +116,9 @@ pub enum XRoutesCommand {
         /// Response channel for enable completion
         response: tokio::sync::oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
     },
+    /// Enable relay server
+    EnableRelayServer {
+        /// Response channel for enable completion
+        response: tokio::sync::oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    },
 }
