@@ -10,9 +10,7 @@ use xstream::events::IncomingConnectionApprovePolicy;
 /// Политика принятия решений для входящих потоков
 #[derive(Debug, Clone, Copy)]
 pub enum InboundDecisionPolicy {
-    /// Автоматически одобрять все входящие потоки
-    AutoApprove,
-    /// Передавать события для ручного принятия решений через NodeEvent (по умолчанию)
+    /// Передавать события для ручного принятия решений через NodeEvent
     ManualApprove,
 }
 
@@ -114,13 +112,8 @@ impl NodeBuilder {
         let quic_config = quic::Config::new(&keypair);
         let quic_transport = quic::tokio::Transport::new(quic_config);
 
-        // Определяем политику для XStream на основе конфигурации
-        let xstream_policy = match self.config.inbound_decision_policy {
-            InboundDecisionPolicy::AutoApprove => IncomingConnectionApprovePolicy::AutoApprove,
-            InboundDecisionPolicy::ManualApprove => {
-                IncomingConnectionApprovePolicy::ApproveViaEvent
-            }
-        };
+        // Определяем политику для XStream - всегда ручной контроль через события
+        let xstream_policy = IncomingConnectionApprovePolicy::ApproveViaEvent;
 
         // Создаем swarm с XStream поведением с выбранной политикой
         let swarm = libp2p::SwarmBuilder::with_existing_identity(keypair.clone())

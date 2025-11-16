@@ -34,8 +34,8 @@ async fn test_simple_mutual_authentication() {
     
     println!("✅ Initial state: no mutual authentication");
     
-    // Test manual mode prevents automatic authentication
-    // In a real scenario, the application would call start_authentication()
+    // Test that authentication requires explicit start
+    // In a real scenario, the application must call start_authentication()
     // when it wants to authenticate a connection
     
     // Test that we can create connection IDs (even though they won't work without real connections)

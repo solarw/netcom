@@ -25,9 +25,9 @@ impl BehaviourHandler for XAuthHandler {
                     "🔄 [XAuthHandler] Processing StartAuth command for peer: {:?}",
                     peer_id
                 );
-                // Note: XAuth automatically handles authentication on connection
+                // Note: XAuth requires explicit authentication start via StartAuthForConnection
                 info!(
-                    "🔐 [XAuthHandler] Authentication will be handled automatically for peer: {:?}",
+                    "🔐 [XAuthHandler] Authentication requires explicit start for peer: {:?}",
                     peer_id
                 );
             }
@@ -57,25 +57,12 @@ impl BehaviourHandler for XAuthHandler {
                     }
                 }
             }
-            XAuthCommand::SetAutoAuthMode { auto, response } => {
-                debug!(
-                    "🔄 [XAuthHandler] Processing SetAutoAuthMode command: {}",
-                    if auto { "automatic" } else { "manual" }
-                );
-                
-                behaviour.set_auto_auth_mode(auto);
-                info!(
-                    "🔐 [XAuthHandler] Authentication mode set to: {}",
-                    if auto { "automatic" } else { "manual" }
-                );
-                let _ = response.send(Ok(()));
-            }
             XAuthCommand::ApproveAuth { peer_id } => {
                 debug!(
                     "🔄 [XAuthHandler] Processing ApproveAuth command for peer: {:?}",
                     peer_id
                 );
-                // Note: XAuth automatically approves/rejects based on PoR
+                // Note: XAuth requires explicit PoR verification approval
                 info!(
                     "✅ [XAuthHandler] Authentication approved for peer: {:?}",
                     peer_id
@@ -86,7 +73,7 @@ impl BehaviourHandler for XAuthHandler {
                     "🔄 [XAuthHandler] Processing RejectAuth command for peer: {:?}",
                     peer_id
                 );
-                // Note: XAuth automatically approves/rejects based on PoR
+                // Note: XAuth requires explicit PoR verification rejection
                 info!(
                     "❌ [XAuthHandler] Authentication rejected for peer: {:?}",
                     peer_id

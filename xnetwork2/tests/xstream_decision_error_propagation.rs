@@ -10,10 +10,10 @@ use xnetwork2::{InboundDecisionPolicy, Node};
 async fn test_xstream_decision_error_propagation() {
     println!("🧪 Тестируем передачу ошибок при отклонении входящих XStream...");
 
-    // Создаем две ноды с разными политиками принятия решений
+    // Создаем две ноды с ручной политикой принятия решений
     let mut node1 = Node::builder()
         .await
-        .with_inbound_decision_policy(InboundDecisionPolicy::AutoApprove)
+        .with_inbound_decision_policy(InboundDecisionPolicy::ManualApprove)
         .build()
         .await
         .expect("❌ Не удалось создать ноду1");
@@ -26,7 +26,7 @@ async fn test_xstream_decision_error_propagation() {
         .expect("❌ Не удалось создать ноду2");
 
     println!("✅ Созданы две ноды:");
-    println!("   - Нода1: AutoApprove (автоматически одобряет все входящие потоки)");
+    println!("   - Нода1: ManualApprove (требует ручного одобрения)");
     println!("   - Нода2: ManualApprove (требует ручного одобрения)");
 
     // Запускаем обе ноды
@@ -120,10 +120,10 @@ async fn test_xstream_decision_error_propagation() {
 async fn test_xstream_decision_approval_success() {
     println!("🧪 Тестируем успешное открытие XStream после одобрения...");
 
-    // Создаем две ноды с разными политиками принятия решений
+    // Создаем две ноды с ручной политикой принятия решений
     let mut node1 = Node::builder()
         .await
-        .with_inbound_decision_policy(InboundDecisionPolicy::AutoApprove)
+        .with_inbound_decision_policy(InboundDecisionPolicy::ManualApprove)
         .build()
         .await
         .expect("❌ Не удалось создать ноду1");
@@ -136,7 +136,7 @@ async fn test_xstream_decision_approval_success() {
         .expect("❌ Не удалось создать ноду2");
 
     println!("✅ Созданы две ноды:");
-    println!("   - Нода1: AutoApprove (автоматически одобряет все входящие потоки)");
+    println!("   - Нода1: ManualApprove (требует ручного одобрения)");
     println!("   - Нода2: ManualApprove (требует ручного одобрения)");
 
     // Запускаем обе ноды

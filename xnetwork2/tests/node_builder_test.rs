@@ -2,25 +2,24 @@
 
 use xnetwork2::{InboundDecisionPolicy, Node};
 
-/// Тестирует создание Node с разными политиками принятия решений
+/// Тестирует создание Node с разными конфигурациями
 #[tokio::test]
-async fn test_node_builder_with_different_policies() {
-    println!("🧪 Тестируем NodeBuilder с разными политиками принятия решений...");
+async fn test_node_builder_with_different_configurations() {
+    println!("🧪 Тестируем NodeBuilder с разными конфигурациями...");
 
-    // Тест 1: Node с AutoApprove политикой (по умолчанию)
-    println!("🆕 Тест 1: Создаем ноду с AutoApprove политикой...");
-    let mut node_auto = Node::builder()
+    // Тест 1: Node с политикой по умолчанию (ManualApprove)
+    println!("🆕 Тест 1: Создаем ноду с политикой по умолчанию...");
+    let mut node_default = Node::builder()
         .await
-        .with_inbound_decision_policy(InboundDecisionPolicy::AutoApprove)
         .build()
         .await
-        .expect("❌ Не удалось создать ноду с AutoApprove политикой");
+        .expect("❌ Не удалось создать ноду с политикой по умолчанию");
 
-    println!("✅ Нода с AutoApprove политикой создана успешно");
-    println!("   PeerId: {}", node_auto.peer_id());
+    println!("✅ Нода с политикой по умолчанию создана успешно");
+    println!("   PeerId: {}", node_default.peer_id());
 
-    // Тест 2: Node с ManualApprove политикой
-    println!("🆕 Тест 2: Создаем ноду с ManualApprove политикой...");
+    // Тест 2: Node с явной ManualApprove политикой
+    println!("🆕 Тест 2: Создаем ноду с явной ManualApprove политикой...");
     let mut node_manual = Node::builder()
         .await
         .with_inbound_decision_policy(InboundDecisionPolicy::ManualApprove)
@@ -35,7 +34,6 @@ async fn test_node_builder_with_different_policies() {
     println!("🆕 Тест 3: Создаем ноду с кастомным размером буфера событий...");
     let mut node_custom = Node::builder()
         .await
-        .with_inbound_decision_policy(InboundDecisionPolicy::ManualApprove)
         .with_event_buffer_size(64)
         .build()
         .await
@@ -46,10 +44,10 @@ async fn test_node_builder_with_different_policies() {
 
     // Запускаем ноды
     println!("🚀 Запускаем все ноды...");
-    node_auto
+    node_default
         .start()
         .await
-        .expect("❌ Не удалось запустить ноду с AutoApprove");
+        .expect("❌ Не удалось запустить ноду с политикой по умолчанию");
     node_manual
         .start()
         .await
@@ -60,17 +58,17 @@ async fn test_node_builder_with_different_policies() {
         .expect("❌ Не удалось запустить ноду с кастомным буфером");
 
     println!("✅ Все ноды успешно запущены:");
-    println!("   AutoApprove: {}", node_auto.get_task_status());
+    println!("   Default: {}", node_default.get_task_status());
     println!("   ManualApprove: {}", node_manual.get_task_status());
     println!("   CustomBuffer: {}", node_custom.get_task_status());
 
     // Останавливаем ноды
     println!("🛑 Останавливаем все ноды...");
-    node_auto
+    node_default
         .commander
         .shutdown()
         .await
-        .expect("❌ Не удалось остановить ноду с AutoApprove");
+        .expect("❌ Не удалось остановить ноду с политикой по умолчанию");
     node_manual
         .commander
         .shutdown()
@@ -82,10 +80,10 @@ async fn test_node_builder_with_different_policies() {
         .await
         .expect("❌ Не удалось остановить ноду с кастомным буфером");
 
-    node_auto
+    node_default
         .wait_for_shutdown()
         .await
-        .expect("❌ Не удалось дождаться завершения ноды с AutoApprove");
+        .expect("❌ Не удалось дождаться завершения ноды с политикой по умолчанию");
     node_manual
         .wait_for_shutdown()
         .await

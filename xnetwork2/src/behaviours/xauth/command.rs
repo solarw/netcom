@@ -13,11 +13,6 @@ pub enum XAuthCommand {
         connection_id: ConnectionId,
         response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>
     },
-    /// Set authentication mode (automatic or manual)
-    SetAutoAuthMode { 
-        auto: bool,
-        response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>
-    },
     /// Approve authentication request
     ApproveAuth { peer_id: PeerId },
     /// Reject authentication request

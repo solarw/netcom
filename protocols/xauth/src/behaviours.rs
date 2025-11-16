@@ -47,9 +47,6 @@ pub struct PorAuthBehaviour {
 
     // Storage for pending PoR verifications using ConnectionId
     pending_verifications: HashMap<ConnectionId, PendingVerification>,
-
-    // Authentication mode: true for automatic, false for manual
-    auto_auth_mode: bool,
 }
 
 impl PorAuthBehaviour {
@@ -73,7 +70,6 @@ impl PorAuthBehaviour {
             por,
             metadata,
             pending_verifications: HashMap::new(),
-            auto_auth_mode: false, // по умолчанию ручной режим
         }
     }
 
@@ -505,19 +501,6 @@ impl PorAuthBehaviour {
         None
     }
 
-    // Set authentication mode (true for automatic, false for manual)
-    pub fn set_auto_auth_mode(&mut self, auto: bool) {
-        self.auto_auth_mode = auto;
-        println!(
-            "🔄 [XAuth] Authentication mode set to: {}",
-            if auto { "automatic" } else { "manual" }
-        );
-    }
-
-    // Get current authentication mode
-    pub fn get_auto_auth_mode(&self) -> bool {
-        self.auto_auth_mode
-    }
 }
 
 // Implement NetworkBehaviour manually
@@ -609,15 +592,11 @@ impl NetworkBehaviour for PorAuthBehaviour {
 
         match event {
             FromSwarm::ConnectionEstablished(connection_established) => {
-                // Begin authentication process only in auto mode
-                if self.auto_auth_mode {
-                    let _ = self.start_authentication(connection_established.connection_id);
-                } else {
-                    println!(
-                        "🔄 [XAuth] Manual mode: authentication not started automatically for connection {:?}",
-                        connection_established.connection_id
-                    );
-                }
+                // Authentication always requires explicit start
+                println!(
+                    "🔄 [XAuth] Authentication requires explicit start for connection {:?}",
+                    connection_established.connection_id
+                );
             }
             FromSwarm::ConnectionClosed(connection_closed) => {
                 // Clean up when a connection is closed
