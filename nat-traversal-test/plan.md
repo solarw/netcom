@@ -79,6 +79,7 @@ nat-traversal-test/
 ### 3. Создание программы node
 **Параметры командной строки:**
 - `--relay-address` (обязательный) - адрес relay сервера
+- `--relay-peer-id` (обязательный) - peer_id relay сервера
 - `--target-peer` (опциональный) - peer_id узла для подключения
 
 **Логика:**
@@ -104,6 +105,8 @@ RELAY_KEY=base64_key_here
 NODE1_KEY=base64_key_here  
 NODE2_KEY=base64_key_here
 NODE2_PEER_ID=12D3KooW...
+RELAY_PEER_ID=12D3KooW...
+RELAY_ADDRESS=172.20.0.10:15003
 ```
 
 ### 7. Создание Dockerfile
@@ -124,11 +127,12 @@ services:
       - nat2
     environment:
       - NODE_KEY=${RELAY_KEY}
+      - RELAY_ADDRESS=${RELAY_ADDRESS}
 
   node2:
     build: .
     container_name: node2
-    command: ["node", "--relay-address", "relay:15003"]
+    command: ["node", "--relay-address", "${RELAY_ADDRESS}", "--relay-peer-id", "${RELAY_PEER_ID}"]
     networks:
       - nat2
     environment:
@@ -139,7 +143,7 @@ services:
   node1:
     build: .
     container_name: node1
-    command: ["node", "--relay-address", "relay:15003", "--target-peer", "${NODE2_PEER_ID}"]
+    command: ["node", "--relay-address", "${RELAY_ADDRESS}", "--relay-peer-id", "${RELAY_PEER_ID}", "--target-peer", "${NODE2_PEER_ID}"]
     networks:
       - nat1
     environment:

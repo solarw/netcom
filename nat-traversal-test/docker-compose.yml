@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: nat-traversal-test/Dockerfile
+    container_name: nat-traversal-relay
+    command: ["relay"]
+    environment:
+      - RUST_LOG=debug
+      - NODE_KEY=${RELAY_KEY}
+      - RELAY_ADDRESS=${RELAY_ADDRESS}
+    ports:
+      - "15003:15003/udp"
+    network_mode: host
+    # networks:
+    #  public_net:
+    #    ipv4_address: 172.20.0.10
+    #  nat1_net:
+    #    ipv4_address: 172.21.0.10
+    #  nat2_net:
+    #    ipv4_address: 172.22.0.10
+    healthcheck:
+      test: ["CMD", "timeout", "5", "bash", "-c", "echo 'Checking relay health...'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  node2:
+    build:
+      context: ..
+      dockerfile: nat-traversal-test/Dockerfile
+    container_name: nat-traversal-node2
+    command: ["node", "--relay-address", "192.168.1.99", "--relay-peer-id", "${RELAY_PEER_ID}"]
+    environment:
+      - RUST_LOG=debug
+      - NODE_KEY=${NODE2_KEY}
+    depends_on:
+      relay:
+        condition: service_healthy
+    networks:
+      nat2_net:
+        ipv4_address: 172.22.0.20
+    healthcheck:
+      test: ["CMD", "timeout", "10", "bash", "-c", "echo 'Checking node2 health...'"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  node1:
+    build:
+      context: ..
+      dockerfile: nat-traversal-test/Dockerfile
+    container_name: nat-traversal-node1
+    command: ["node", "--relay-address", "192.168.1.99", "--relay-peer-id", "${RELAY_PEER_ID}", "--target-peer", "${NODE2_PEER_ID}"]
+    environment:
+      - RUST_LOG=debug
+      - NODE_KEY=${NODE1_KEY}
+    depends_on:
+      relay:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+    networks:
+      nat1_net:
+        ipv4_address: 172.21.0.20
+    healthcheck:
+      test: ["CMD", "timeout", "15", "bash", "-c", "echo 'Checking node1 health...'"]
+      interval: 20s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+
+networks:
+  public_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+  nat1_net:
+    driver: bridge
+    #internal: true
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+
+  nat2_net:
+    driver: bridge
+    #internal: true
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24

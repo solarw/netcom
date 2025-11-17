@@ -1,5 +1,5 @@
 [package]
-name = "nat-traversal-test"
+name = "nat-traversal-bin"
 version = "0.1.0"
 edition = "2021"
 
@@ -22,4 +22,4 @@ path = "src/node.rs"
 
 [[bin]]
 name = "generate_env"
-path = "generate_env.rs"
+path = "src/generate_env.rs"

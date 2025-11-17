@@ -1,0 +1,9 @@
+# Исключаем ненужные файлы при копировании в Docker
+target/
+.git/
+.gitignore
+*.log
+*.tmp
+test_*
+README.md
+plan.md

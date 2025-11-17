@@ -1,0 +1,13 @@
+[package]
+name = "key-dump-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libp2p = {version = "0.56", path = "/home/solarw/hyperion/rust-libp2p/libp2p", features = []}
+base64 = "0.21"
+rand = "0.8"
+
+[[bin]]
+name = "ttest"
+path = "src/main.rs"
