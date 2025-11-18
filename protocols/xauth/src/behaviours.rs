@@ -602,10 +602,10 @@ impl NetworkBehaviour for PorAuthBehaviour {
         match event {
             FromSwarm::ConnectionEstablished(connection_established) => {
                 // Authentication always requires explicit start
-                println!(
-                    "🔄 [XAuth] Authentication requires explicit start for connection {:?}",
-                    connection_established.connection_id
-                );
+                //println!(
+                //    "🔄 [XAuth] Authentication requires explicit start for connection {:?}",
+                //    connection_established.connection_id
+                //);
             }
             FromSwarm::ConnectionClosed(connection_closed) => {
                 // Clean up when a connection is closed

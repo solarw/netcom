@@ -264,4 +264,33 @@ impl Node {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.commander.enable_mdns_with_ttl(ttl_seconds).await
     }
+
+    /// Enable relay server
+    pub async fn enable_relay_server(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.enable_relay_server().await
+    }
+
+    /// Add a peer as AutoNAT server
+    pub async fn add_autonat_server(
+        &self,
+        peer_id: PeerId,
+        address: Option<Multiaddr>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.add_autonat_server(peer_id, address).await
+    }
+
+    /// Set Kademlia mode (client, server, auto)
+    pub async fn set_kad_mode(
+        &self,
+        mode: crate::behaviours::xroutes::types::KadMode,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.set_kad_mode(mode).await
+    }
+
+    /// Get current Kademlia mode
+    pub async fn get_kad_mode(
+        &self,
+    ) -> Result<crate::behaviours::xroutes::types::KadMode, Box<dyn std::error::Error + Send + Sync>> {
+        self.commander.get_kad_mode().await
+    }
 }

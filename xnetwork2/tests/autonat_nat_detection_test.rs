@@ -21,16 +21,16 @@ async fn test_autonat_nat_detection() -> Result<(), Box<dyn std::error::Error + 
     // ФАЗА 1: Создание узлов с AutoNAT
     println!("🛠️ Фаза 1: Создание узлов с AutoNAT...");
 
-    println!("🆕 Создаем node1 с AutoNAT...");
+    println!("🆕 Создаем node1 с AutoNAT (клиентский режим)...");
     let mut node1 = NodeBuilder::new()
-        .with_autonat()  // Включаем AutoNAT для определения типа NAT
+        .with_autonat_client()  // Включаем клиентский AutoNAT для определения типа NAT
         .build()
         .await
         .expect("❌ Не удалось создать node1 узел - критическая ошибка");
 
-    println!("🆕 Создаем node2 с AutoNAT...");
+    println!("🆕 Создаем node2 с AutoNAT (клиентский режим)...");
     let mut node2 = NodeBuilder::new()
-        .with_autonat()  // Включаем AutoNAT для определения типа NAT
+        .with_autonat_client()  // Включаем клиентский AutoNAT для определения типа NAT
         .build()
         .await
         .expect("❌ Не удалось создать node2 узел - критическая ошибка");
@@ -82,8 +82,9 @@ async fn test_autonat_nat_detection() -> Result<(), Box<dyn std::error::Error + 
     match node1.get_xroutes_status().await {
         Ok(status) => {
             println!("📈 XRoutes статус node1:");
-            println!("   - AutoNAT: {}", status.autonat_enabled);
-            assert!(status.autonat_enabled, "❌ AutoNAT должен быть включен на node1");
+            println!("   - AutoNAT Server: {}", status.autonat_server_enabled);
+            println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
+            assert!(status.autonat_client_enabled, "❌ AutoNAT Client должен быть включен на node1");
         }
         Err(e) => panic!("❌ Не удалось получить статус XRoutes node1: {}", e),
     }
@@ -91,8 +92,9 @@ async fn test_autonat_nat_detection() -> Result<(), Box<dyn std::error::Error + 
     match node2.get_xroutes_status().await {
         Ok(status) => {
             println!("📈 XRoutes статус node2:");
-            println!("   - AutoNAT: {}", status.autonat_enabled);
-            assert!(status.autonat_enabled, "❌ AutoNAT должен быть включен на node2");
+            println!("   - AutoNAT Server: {}", status.autonat_server_enabled);
+            println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
+            assert!(status.autonat_client_enabled, "❌ AutoNAT Client должен быть включен на node2");
         }
         Err(e) => panic!("❌ Не удалось получить статус XRoutes node2: {}", e),
     }
@@ -201,14 +203,14 @@ async fn test_autonat_with_full_nat_traversal() -> Result<(), Box<dyn std::error
         Ok(status) => {
             println!("📈 XRoutes статус node1:");
             println!("   - DCUtR: {}", status.dcutr_enabled);
-            println!("   - AutoNAT: {}", status.autonat_enabled);
+            println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
             println!("   - Relay Server: {}", status.relay_server_enabled);
             println!("   - Identify: {}", status.identify_enabled);
             println!("   - mDNS: {}", status.mdns_enabled);
             println!("   - Kademlia: {}", status.kad_enabled);
             
             assert!(status.dcutr_enabled, "❌ DCUtR должен быть включен на node1");
-            assert!(status.autonat_enabled, "❌ AutoNAT должен быть включен на node1");
+            assert!(status.autonat_client_enabled, "❌ AutoNAT клиент должен быть включен на node1");
             assert!(status.identify_enabled, "❌ Identify должен быть включен на node1");
         }
         Err(e) => panic!("❌ Не удалось получить статус XRoutes node1: {}", e),
@@ -218,14 +220,14 @@ async fn test_autonat_with_full_nat_traversal() -> Result<(), Box<dyn std::error
         Ok(status) => {
             println!("📈 XRoutes статус node2:");
             println!("   - DCUtR: {}", status.dcutr_enabled);
-            println!("   - AutoNAT: {}", status.autonat_enabled);
+            println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
             println!("   - Relay Server: {}", status.relay_server_enabled);
             println!("   - Identify: {}", status.identify_enabled);
             println!("   - mDNS: {}", status.mdns_enabled);
             println!("   - Kademlia: {}", status.kad_enabled);
             
             assert!(status.dcutr_enabled, "❌ DCUtR должен быть включен на node2");
-            assert!(status.autonat_enabled, "❌ AutoNAT должен быть включен на node2");
+            assert!(status.autonat_client_enabled, "❌ AutoNAT клиент должен быть включен на node2");
             assert!(status.identify_enabled, "❌ Identify должен быть включен на node2");
         }
         Err(e) => panic!("❌ Не удалось получить статус XRoutes node2: {}", e),

@@ -56,6 +56,15 @@ pub enum SwarmLevelCommand {
         connection_id: libp2p::swarm::ConnectionId,
         response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
     },
+    /// Add external address to swarm
+    AddExternalAddress {
+        address: Multiaddr,
+        response: oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get all external addresses
+    GetExternalAddresses {
+        response: oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>>>,
+    },
 }
 
 /// Network state information
@@ -96,6 +105,12 @@ impl fmt::Debug for SwarmLevelCommand {
             }
             SwarmLevelCommand::StartAuthForConnection { connection_id, .. } => {
                 write!(f, "StartAuthForConnection(connection_id: {:?})", connection_id)
+            }
+            SwarmLevelCommand::AddExternalAddress { address, .. } => {
+                write!(f, "AddExternalAddress(address: {})", address)
+            }
+            SwarmLevelCommand::GetExternalAddresses { .. } => {
+                write!(f, "GetExternalAddresses")
             }
         }
     }

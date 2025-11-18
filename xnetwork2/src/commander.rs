@@ -391,4 +391,162 @@ impl Commander {
         self.send(command).await?;
         response_rx.await?
     }
+
+    /// Add a peer as AutoNAT server
+    pub async fn add_autonat_server(
+        &self,
+        peer_id: PeerId,
+        address: Option<Multiaddr>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::AddAutonatServer {
+            peer_id,
+            address,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Set Kademlia mode (client, server, auto)
+    pub async fn set_kad_mode(
+        &self,
+        mode: crate::behaviours::xroutes::types::KadMode,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::SetKadMode {
+            mode,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get current Kademlia mode
+    pub async fn get_kad_mode(
+        &self,
+    ) -> Result<crate::behaviours::xroutes::types::KadMode, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetKadMode {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    // ConnectionTracker commands
+
+    /// Get all connections
+    pub async fn get_connections(
+        &self,
+    ) -> Result<Vec<crate::connection_tracker::ConnectionInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetConnections {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get connections for a specific peer
+    pub async fn get_peer_connections(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<crate::connection_tracker::PeerConnections, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetPeerConnections {
+            peer_id,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get information about a specific connection
+    pub async fn get_connection(
+        &self,
+        connection_id: command_swarm::ConnectionId,
+    ) -> Result<crate::connection_tracker::ConnectionInfo, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetConnection {
+            connection_id,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get all connected peers
+    pub async fn get_connected_peers(
+        &self,
+    ) -> Result<Vec<PeerId>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetConnectedPeers {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get connection statistics
+    pub async fn get_connection_stats(
+        &self,
+    ) -> Result<crate::connection_tracker::ConnectionStats, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetConnectionStats {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get listen addresses
+    pub async fn get_listen_addresses(
+        &self,
+    ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetListenAddresses {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get external addresses from ConnectionTracker
+    pub async fn get_external_addresses(
+        &self,
+    ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::GetExternalAddresses {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Add external address to swarm
+    pub async fn add_external_address(
+        &self,
+        address: Multiaddr,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::AddExternalAddress {
+            address,
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
+
+    /// Get all external addresses from swarm
+    pub async fn get_swarm_external_addresses(
+        &self,
+    ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::GetExternalAddresses {
+            response: response_tx,
+        });
+        self.send(command).await?;
+        response_rx.await?
+    }
 }

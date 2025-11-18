@@ -6,7 +6,7 @@ mod behaviour;
 mod command;
 mod handler;
 mod pending_task_manager;
-mod types;
+pub mod types;
 
 pub use behaviour::{XRoutesBehaviour, XRoutesBehaviourEvent};
 pub use command::{XRoutesCommand, MdnsCacheStatus};

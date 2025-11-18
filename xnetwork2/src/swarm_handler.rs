@@ -1,18 +1,19 @@
 //! Swarm handler for XNetwork2
 
 use async_trait::async_trait;
-use command_swarm::SwarmHandler;
-use libp2p::{Multiaddr, PeerId, Swarm};
+use command_swarm::{NetworkBehaviour, SwarmHandler};
 use libp2p::core::transport::ListenerId;
+use libp2p::swarm::{FromSwarm, NewExternalAddrCandidate};
+use libp2p::{Multiaddr, PeerId, Swarm};
 use tokio::sync::broadcast;
 use tracing::{debug, info};
 
+use crate::behaviours::xroutes::PendingTaskManager;
 use crate::main_behaviour::{XNetworkBehaviour, XNetworkBehaviourEvent};
 use crate::node_events::NodeEvent;
 use crate::swarm_commands::{NetworkState, SwarmLevelCommand};
 use xauth::events::PorAuthEvent;
 use xstream::events::XStreamEvent;
-use crate::behaviours::xroutes::PendingTaskManager;
 
 /// Key for dial_and_wait operations to handle multiple connections to same peer
 /// We use a combination of peer_id and connection attempt counter to handle multiple connections
@@ -29,9 +30,15 @@ pub struct XNetworkSwarmHandler {
     /// Track authenticated peers
     authenticated_peers: std::collections::HashSet<PeerId>,
     /// Pending tasks for listen_and_wait operations
-    listen_wait_tasks: PendingTaskManager<ListenerId, Multiaddr, Box<dyn std::error::Error + Send + Sync>, ()>,
+    listen_wait_tasks:
+        PendingTaskManager<ListenerId, Multiaddr, Box<dyn std::error::Error + Send + Sync>, ()>,
     /// Pending tasks for dial_and_wait operations
-    dial_wait_tasks: PendingTaskManager<DialWaitKey, libp2p::swarm::ConnectionId, Box<dyn std::error::Error + Send + Sync>, ()>,
+    dial_wait_tasks: PendingTaskManager<
+        DialWaitKey,
+        libp2p::swarm::ConnectionId,
+        Box<dyn std::error::Error + Send + Sync>,
+        (),
+    >,
 }
 
 impl Default for XNetworkSwarmHandler {
@@ -82,18 +89,33 @@ impl XNetworkSwarmHandler {
 
         match event {
             // Network events
-            libp2p::swarm::SwarmEvent::NewListenAddr { listener_id, address, .. } => {
+            libp2p::swarm::SwarmEvent::NewListenAddr {
+                listener_id,
+                address,
+                ..
+            } => {
                 // Complete pending listen_and_wait task if exists
-                if self.listen_wait_tasks.set_task_result(&listener_id, address.clone()).is_ok() {
-                    debug!("✅ [SwarmHandler] Completed listen_and_wait task for listener_id: {:?}", listener_id);
+                if self
+                    .listen_wait_tasks
+                    .set_task_result(&listener_id, address.clone())
+                    .is_ok()
+                {
+                    debug!(
+                        "✅ [SwarmHandler] Completed listen_and_wait task for listener_id: {:?}",
+                        listener_id
+                    );
                 }
-                
+
                 let _ = event_sender.send(NodeEvent::NewListenAddr {
                     listener_id: listener_id.clone(),
                     address: address.clone(),
                 });
             }
-            libp2p::swarm::SwarmEvent::ExpiredListenAddr { listener_id, address, .. } => {
+            libp2p::swarm::SwarmEvent::ExpiredListenAddr {
+                listener_id,
+                address,
+                ..
+            } => {
                 let _ = event_sender.send(NodeEvent::ExpiredListenAddr {
                     listener_id: listener_id.clone(),
                     address: address.clone(),
@@ -106,33 +128,46 @@ impl XNetworkSwarmHandler {
                 ..
             } => {
                 println!("Conn established {:?}", peer_id);
-                
+
                 // Try to complete pending dial_and_wait task if exists
                 // We need to find any DialWaitKey that matches this peer_id
                 // This is a simplified approach - we complete the first matching task for this peer
                 // In practice, we should track which specific dial attempt corresponds to which connection
-                
+
                 // Try to find and complete any pending task for this peer
                 let mut completed = false;
                 for key in self.dial_wait_tasks.get_pending_keys() {
                     if key.peer_id == *peer_id {
-                        if self.dial_wait_tasks.set_task_result(&key, *connection_id).is_ok() {
-                            debug!("✅ [SwarmHandler] Completed dial_and_wait task for peer: {} with connection_id: {:?}", peer_id, connection_id);
+                        if self
+                            .dial_wait_tasks
+                            .set_task_result(&key, *connection_id)
+                            .is_ok()
+                        {
+                            debug!(
+                                "✅ [SwarmHandler] Completed dial_and_wait task for peer: {} with connection_id: {:?}",
+                                peer_id, connection_id
+                            );
                             completed = true;
                             break;
                         }
                     }
                 }
-                
+
                 if !completed {
-                    debug!("📡 [SwarmHandler] Connection established for peer: {} with connection_id: {:?}, but no matching dial_and_wait task found", peer_id, connection_id);
+                    debug!(
+                        "📡 [SwarmHandler] Connection established for peer: {} with connection_id: {:?}, but no matching dial_and_wait task found",
+                        peer_id, connection_id
+                    );
                 }
-                
+
                 // Start authentication for this connection
                 // Note: We can't call commander directly from here, but we can emit an event
                 // that the application can listen to and then call start_auth_for_connection
-                debug!("🔐 [SwarmHandler] Connection established - authentication will need to be started manually for connection: {:?}", connection_id);
-                
+                debug!(
+                    "🔐 [SwarmHandler] Connection established - authentication will need to be started manually for connection: {:?}",
+                    connection_id
+                );
+
                 let _ = event_sender.send(NodeEvent::ConnectionEstablished {
                     peer_id: *peer_id,
                     connection_id: *connection_id,
@@ -378,12 +413,16 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                 }
                 let _ = response.send(result);
             }
-            SwarmLevelCommand::ListenAndWait { addr, timeout, response } => {
+            SwarmLevelCommand::ListenAndWait {
+                addr,
+                timeout,
+                response,
+            } => {
                 debug!(
                     "🔄 [SwarmHandler] Processing ListenAndWait command - Addr: {}, Timeout: {:?}",
                     addr, timeout
                 );
-                
+
                 // First, start listening
                 let listener_id = match swarm.listen_on(addr.clone()) {
                     Ok(listener_id) => listener_id,
@@ -393,11 +432,15 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                         return;
                     }
                 };
-                
-                info!("📡 [SwarmHandler] Started listening on address {} with listener_id: {:?}", addr, listener_id);
-                
+
+                info!(
+                    "📡 [SwarmHandler] Started listening on address {} with listener_id: {:?}",
+                    addr, listener_id
+                );
+
                 // Add pending task to wait for NewListenAddr event
-                self.listen_wait_tasks.add_pending_task(listener_id, timeout, response);
+                self.listen_wait_tasks
+                    .add_pending_task(listener_id, timeout, response);
             }
             SwarmLevelCommand::Disconnect { peer_id, response } => {
                 debug!(
@@ -453,54 +496,112 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                     "🔄 [SwarmHandler] Processing DialAndWait command - Peer: {:?}, Addr: {}, Timeout: {:?}",
                     peer_id, addr, timeout
                 );
-                
+
                 // Generate a simple attempt_id based on current time
                 let attempt_id = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_nanos() as u64;
-                
+
                 let key = DialWaitKey {
                     peer_id,
                     attempt_id,
                 };
-                
+
                 // Start dialing
                 let result = swarm.dial(addr.clone());
                 if let Err(e) = result {
                     let error = Box::new(e) as Box<dyn std::error::Error + Send + Sync>;
-                    debug!("❌ [SwarmHandler] Failed to dial peer {}: {:?}", peer_id, error);
+                    debug!(
+                        "❌ [SwarmHandler] Failed to dial peer {}: {:?}",
+                        peer_id, error
+                    );
                     let _ = response.send(Err(error));
                     return;
                 }
-                
-                info!("📡 [SwarmHandler] Dialing peer {} at address {}, waiting for connection", peer_id, addr);
-                
+
+                info!(
+                    "📡 [SwarmHandler] Dialing peer {} at address {}, waiting for connection",
+                    peer_id, addr
+                );
+
                 // Add pending task to wait for ConnectionEstablished event
-                self.dial_wait_tasks.add_pending_task(key, timeout, response);
+                self.dial_wait_tasks
+                    .add_pending_task(key, timeout, response);
             }
-            SwarmLevelCommand::StartAuthForConnection { connection_id, response } => {
+            SwarmLevelCommand::StartAuthForConnection {
+                connection_id,
+                response,
+            } => {
                 debug!(
                     "🔄 [SwarmHandler] Processing StartAuthForConnection command - Connection: {:?}",
                     connection_id
                 );
-                
+
                 // Start actual authentication using the xauth behaviour
-                let result = swarm.behaviour_mut().xauth.start_authentication(connection_id)
-                    .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error + Send + Sync>);
-                
+                let result = swarm
+                    .behaviour_mut()
+                    .xauth
+                    .start_authentication(connection_id)
+                    .map_err(|e| {
+                        Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))
+                            as Box<dyn std::error::Error + Send + Sync>
+                    });
+
                 match &result {
                     Ok(_) => {
-                        debug!("🔐 [SwarmHandler] Authentication successfully started for connection: {:?}", connection_id);
-                        info!("🔐 [SwarmHandler] Authentication started for connection: {:?}", connection_id);
+                        debug!(
+                            "🔐 [SwarmHandler] Authentication successfully started for connection: {:?}",
+                            connection_id
+                        );
+                        info!(
+                            "🔐 [SwarmHandler] Authentication started for connection: {:?}",
+                            connection_id
+                        );
                     }
                     Err(e) => {
-                        debug!("❌ [SwarmHandler] Failed to start authentication for connection {:?}: {:?}", connection_id, e);
-                        info!("❌ [SwarmHandler] Failed to start authentication for connection {:?}: {:?}", connection_id, e);
+                        debug!(
+                            "❌ [SwarmHandler] Failed to start authentication for connection {:?}: {:?}",
+                            connection_id, e
+                        );
+                        info!(
+                            "❌ [SwarmHandler] Failed to start authentication for connection {:?}: {:?}",
+                            connection_id, e
+                        );
                     }
                 }
-                
+
                 let _ = response.send(result);
+            }
+            SwarmLevelCommand::AddExternalAddress { address, response } => {
+                debug!(
+                    "🔄 [SwarmHandler] Processing AddExternalAddress command - Address: {}",
+                    address
+                );
+
+                // Add external address to swarm
+                swarm.add_external_address(address.clone());
+
+                info!("🌐 [SwarmHandler] Added external address: {}", address);
+
+                let _ = response.send(Ok(()));
+            }
+            SwarmLevelCommand::GetExternalAddresses { response } => {
+                debug!("🔄 [SwarmHandler] Processing GetExternalAddresses command");
+
+                // Get all external addresses from swarm
+                let external_addrs: Vec<Multiaddr> = swarm.external_addresses().cloned().collect();
+
+                info!(
+                    "🌐 [SwarmHandler] Retrieved {} external addresses",
+                    external_addrs.len()
+                );
+
+                if !external_addrs.is_empty() {
+                    debug!("📡 [SwarmHandler] External addresses: {:?}", external_addrs);
+                }
+
+                let _ = response.send(Ok(external_addrs));
             }
         }
     }
@@ -512,12 +613,17 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
             <XNetworkBehaviour as libp2p::swarm::NetworkBehaviour>::ToSwarm,
         >,
     ) {
-        println!("Event: {:?}", event);
         // First, transform and emit the event through the channel
         self.transform_and_emit_event(event);
 
         // Then handle the event normally (logging, etc.)
         match event {
+            libp2p::swarm::SwarmEvent::NewExternalAddrCandidate { address } => {
+            }
+            libp2p::swarm::SwarmEvent::ExternalAddrConfirmed { address } => {
+            }
+            libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, connection_id ,.. } => {
+            }
             libp2p::swarm::SwarmEvent::Behaviour(behaviour_event) => {
                 match behaviour_event {
                     XNetworkBehaviourEvent::Ping(event) => {
@@ -595,10 +701,33 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                                     info,
                                     connection_id,
                                 } => {
-                                    swarm.add_external_address(info.observed_addr.clone());
+                                }
+                                libp2p::identify::Event::Pushed {
+                                    peer_id,
+                                    info,
+                                    connection_id,
+                                } => {
+                                    println!("Indetify pushed to peer {:?}", peer_id);
                                 }
                                 _ => {}
                             },
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::RelayServer(
+                                relay_event,
+                            ) => {}
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::RelayClient(
+                                relay_event,
+                            ) => {}
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::Dcutr(
+                                dcutr_event,
+                            ) => {}
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::AutonatClient(
+                                autonat_client_event,
+                            ) => {}
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::AutonatServer(
+                                autonat_server_event,
+                            ) => {}
+                            super::behaviours::xroutes::XRoutesBehaviourEvent::Kad(kad_event) => {
+                            }
                             _ => {}
                         }
                     }

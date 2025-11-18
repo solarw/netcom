@@ -31,8 +31,10 @@ pub struct NodeConfig {
     pub enable_relay_server: bool,
     /// Включить DCUtR для hole punching
     pub enable_dcutr: bool,
-    /// Включить AutoNAT для определения типа NAT
-    pub enable_autonat: bool,
+    /// Включить серверный AutoNAT для предоставления услуг определения NAT
+    pub enable_autonat_server: bool,
+    /// Включить клиентский AutoNAT для определения типа NAT
+    pub enable_autonat_client: bool,
     /// Включить Kademlia DHT discovery
     pub enable_kademlia: bool,
 }
@@ -44,7 +46,8 @@ impl Default for NodeConfig {
             event_buffer_size: 100,
             enable_relay_server: false,
             enable_dcutr: false,
-            enable_autonat: false,
+            enable_autonat_server: false,
+            enable_autonat_client: false,
             enable_kademlia: false,
         }
     }
@@ -132,9 +135,16 @@ impl NodeBuilder {
         self
     }
 
-    /// Включает AutoNAT для определения типа NAT
-    pub fn with_autonat(mut self) -> Self {
-        self.config.enable_autonat = true;
+
+    /// Включает серверный AutoNAT для предоставления услуг определения NAT
+    pub fn with_autonat_server(mut self) -> Self {
+        self.config.enable_autonat_server = true;
+        self
+    }
+
+    /// Включает клиентский AutoNAT для определения типа NAT
+    pub fn with_autonat_client(mut self) -> Self {
+        self.config.enable_autonat_client = true;
         self
     }
 
@@ -142,7 +152,7 @@ impl NodeBuilder {
     pub fn with_nat_traversal(mut self) -> Self {
         self.config.enable_relay_server = true;
         self.config.enable_dcutr = true;
-        self.config.enable_autonat = true;
+        self.config.enable_autonat_client = true;
         self
     }
 
@@ -207,7 +217,8 @@ impl NodeBuilder {
         let xroutes_config = crate::behaviours::xroutes::XRoutesConfig::disabled()
             .with_relay_server(self.config.enable_relay_server)
             .with_dcutr(self.config.enable_dcutr)
-            .with_autonat(self.config.enable_autonat)
+            .with_autonat_server(self.config.enable_autonat_server)
+            .with_autonat_client(self.config.enable_autonat_client)
             .with_kad(self.config.enable_kademlia)
             .with_identify(true);
         let xroutes_behaviour = crate::behaviours::xroutes::XRoutesBehaviour::new(

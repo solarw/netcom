@@ -85,14 +85,14 @@ async fn test_nat_traversal_integration() -> Result<(), Box<dyn std::error::Erro
         Ok(status) => {
             println!("📈 XRoutes статус node1:");
             println!("   - DCUtR: {}", status.dcutr_enabled);
-            println!("   - AutoNAT: {}", status.autonat_enabled);
+            println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
             println!("   - Relay Server: {}", status.relay_server_enabled);
             println!("   - Identify: {}", status.identify_enabled);
             println!("   - mDNS: {}", status.mdns_enabled);
             println!("   - Kademlia: {}", status.kad_enabled);
             
             assert!(status.dcutr_enabled, "❌ DCUtR должен быть включен на node1");
-            assert!(status.autonat_enabled, "❌ AutoNAT должен быть включен на node1");
+            assert!(status.autonat_client_enabled, "❌ AutoNAT Client должен быть включен на node1");
             assert!(status.identify_enabled, "❌ Identify должен быть включен на node1");
         }
         Err(e) => panic!("❌ Не удалось получить статус XRoutes node1: {}", e),
@@ -102,14 +102,14 @@ async fn test_nat_traversal_integration() -> Result<(), Box<dyn std::error::Erro
         Ok(status) => {
             println!("📈 XRoutes статус node2:");
             println!("   - DCUtR: {}", status.dcutr_enabled);
-            println!("   - AutoNAT: {}", status.autonat_enabled);
+            println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
             println!("   - Relay Server: {}", status.relay_server_enabled);
             println!("   - Identify: {}", status.identify_enabled);
             println!("   - mDNS: {}", status.mdns_enabled);
             println!("   - Kademlia: {}", status.kad_enabled);
             
             assert!(status.dcutr_enabled, "❌ DCUtR должен быть включен на node2");
-            assert!(status.autonat_enabled, "❌ AutoNAT должен быть включен на node2");
+            assert!(status.autonat_client_enabled, "❌ AutoNAT Client должен быть включен на node2");
             assert!(status.identify_enabled, "❌ Identify должен быть включен на node2");
         }
         Err(e) => panic!("❌ Не удалось получить статус XRoutes node2: {}", e),

@@ -1,8 +1,10 @@
 //! Commands for XRoutes behaviour
 
 use libp2p::{PeerId, Multiaddr};
+use command_swarm::ConnectionId;
 use std::time::SystemTime;
-use super::types::XRoutesStatus;
+use super::types::{XRoutesStatus, KadMode};
+use crate::connection_tracker::{ConnectionInfo, PeerConnections, ConnectionStats};
 
 /// Status information for mDNS cache
 #[derive(Debug, Clone)]
@@ -120,5 +122,65 @@ pub enum XRoutesCommand {
     EnableRelayServer {
         /// Response channel for enable completion
         response: tokio::sync::oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Add a peer as AutoNAT server
+    AddAutonatServer {
+        /// Peer ID to add as AutoNAT server
+        peer_id: PeerId,
+        /// Optional address for the AutoNAT server
+        address: Option<Multiaddr>,
+        /// Response channel for completion
+        response: tokio::sync::oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Set Kademlia mode (client, server, auto)
+    SetKadMode {
+        /// Mode to set
+        mode: KadMode,
+        /// Response channel for completion
+        response: tokio::sync::oneshot::Sender<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get current Kademlia mode
+    GetKadMode {
+        /// Response channel with current mode
+        response: tokio::sync::oneshot::Sender<Result<KadMode, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get all connections
+    GetConnections {
+        /// Response channel with all connections
+        response: tokio::sync::oneshot::Sender<Result<Vec<ConnectionInfo>, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get connections for a specific peer
+    GetPeerConnections {
+        /// Peer ID to get connections for
+        peer_id: PeerId,
+        /// Response channel with peer connections
+        response: tokio::sync::oneshot::Sender<Result<PeerConnections, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get information about a specific connection
+    GetConnection {
+        /// Connection ID to get information for
+        connection_id: ConnectionId,
+        /// Response channel with connection info
+        response: tokio::sync::oneshot::Sender<Result<ConnectionInfo, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get all connected peers
+    GetConnectedPeers {
+        /// Response channel with connected peer IDs
+        response: tokio::sync::oneshot::Sender<Result<Vec<PeerId>, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get connection statistics
+    GetConnectionStats {
+        /// Response channel with connection statistics
+        response: tokio::sync::oneshot::Sender<Result<ConnectionStats, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get listen addresses
+    GetListenAddresses {
+        /// Response channel with listen addresses
+        response: tokio::sync::oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>>>,
+    },
+    /// Get external addresses
+    GetExternalAddresses {
+        /// Response channel with external addresses
+        response: tokio::sync::oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>>>,
     },
 }

@@ -191,11 +191,11 @@ async fn test_dcutr_with_relay_fallback() -> Result<(), Box<dyn std::error::Erro
         Ok(status) => {
             println!("📈 XRoutes статус node1:");
             println!("   - DCUtR: {}", status.dcutr_enabled);
-            println!("   - AutoNAT: {}", status.autonat_enabled);
+            println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
             println!("   - Relay Server: {}", status.relay_server_enabled);
             
             assert!(status.dcutr_enabled, "❌ DCUtR должен быть включен на node1");
-            assert!(status.autonat_enabled, "❌ AutoNAT должен быть включен на node1");
+            assert!(status.autonat_client_enabled, "❌ AutoNAT клиент должен быть включен на node1");
         }
         Err(e) => panic!("❌ Не удалось получить статус XRoutes node1: {}", e),
     }
@@ -204,11 +204,11 @@ async fn test_dcutr_with_relay_fallback() -> Result<(), Box<dyn std::error::Erro
         Ok(status) => {
             println!("📈 XRoutes статус node2:");
             println!("   - DCUtR: {}", status.dcutr_enabled);
-            println!("   - AutoNAT: {}", status.autonat_enabled);
+            println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
             println!("   - Relay Server: {}", status.relay_server_enabled);
             
             assert!(status.dcutr_enabled, "❌ DCUtR должен быть включен на node2");
-            assert!(status.autonat_enabled, "❌ AutoNAT должен быть включен на node2");
+            assert!(status.autonat_client_enabled, "❌ AutoNAT клиент должен быть включен на node2");
         }
         Err(e) => panic!("❌ Не удалось получить статус XRoutes node2: {}", e),
     }

@@ -8,8 +8,10 @@ use libp2p::{
     kad, mdns, relay,
     swarm::{NetworkBehaviour, behaviour::toggle::Toggle},
 };
+use libp2p::autonat::v2;
 
-use super::types::XROUTES_IDENTIFY_PROTOCOL;
+use super::types::{XROUTES_IDENTIFY_PROTOCOL, KadMode};
+use crate::connection_tracker::ConnectionTracker;
 
 /// Composite behaviour for XRoutes with toggle components
 #[derive(NetworkBehaviour)]
@@ -27,8 +29,12 @@ pub struct XRoutesBehaviour {
     pub relay_client: Toggle<relay::client::Behaviour>,
     /// DCUtR behaviour for hole punching
     pub dcutr: Toggle<libp2p::dcutr::Behaviour>,
-    /// AutoNAT behaviour for NAT type detection
-    pub autonat: Toggle<libp2p::autonat::Behaviour>,
+    /// AutoNAT v2 client behaviour for NAT type detection
+    pub autonat_client: Toggle<v2::client::Behaviour>,
+    /// AutoNAT v2 server behaviour for providing NAT detection services
+    pub autonat_server: Toggle<v2::server::Behaviour>,
+    /// Connection tracker behaviour for monitoring connections
+    pub connection_tracker: Toggle<ConnectionTracker>,
 }
 
 /// Events emitted by XRoutesBehaviour
@@ -46,8 +52,12 @@ pub enum XRoutesBehaviourEvent {
     RelayClient(relay::client::Event),
     /// DCUtR behaviour event
     Dcutr(libp2p::dcutr::Event),
-    /// AutoNAT behaviour event
-    Autonat(libp2p::autonat::Event),
+    /// AutoNAT v2 client behaviour event
+    AutonatClient(v2::client::Event),
+    /// AutoNAT v2 server behaviour event
+    AutonatServer(v2::server::Event),
+    /// Empty event for NetworkBehaviour requirements
+    Empty,
 }
 
 impl From<identify::Event> for XRoutesBehaviourEvent {
@@ -86,9 +96,21 @@ impl From<libp2p::dcutr::Event> for XRoutesBehaviourEvent {
     }
 }
 
-impl From<libp2p::autonat::Event> for XRoutesBehaviourEvent {
-    fn from(event: libp2p::autonat::Event) -> Self {
-        XRoutesBehaviourEvent::Autonat(event)
+impl From<v2::client::Event> for XRoutesBehaviourEvent {
+    fn from(event: v2::client::Event) -> Self {
+        XRoutesBehaviourEvent::AutonatClient(event)
+    }
+}
+
+impl From<v2::server::Event> for XRoutesBehaviourEvent {
+    fn from(event: v2::server::Event) -> Self {
+        XRoutesBehaviourEvent::AutonatServer(event)
+    }
+}
+
+impl From<()> for XRoutesBehaviourEvent {
+    fn from(_: ()) -> Self {
+        XRoutesBehaviourEvent::Empty
     }
 }
 
@@ -161,12 +183,23 @@ impl XRoutesBehaviour {
             Toggle::from(None)
         };
 
-        // Create AutoNAT behaviour
-        let autonat = if config.enable_autonat {
-            Toggle::from(Some(libp2p::autonat::Behaviour::new(
-                local_peer_id,
-                Default::default(),
-            )))
+        // Create AutoNAT v2 client behaviour
+        let autonat_client = if config.enable_autonat_client {
+            Toggle::from(Some(v2::client::Behaviour::default()))
+        } else {
+            Toggle::from(None)
+        };
+
+        // Create AutoNAT v2 server behaviour
+        let autonat_server = if config.enable_autonat_server {
+            Toggle::from(Some(v2::server::Behaviour::default()))
+        } else {
+            Toggle::from(None)
+        };
+
+        // Create ConnectionTracker behaviour
+        let connection_tracker = if config.enable_connection_tracking {
+            Toggle::from(Some(ConnectionTracker::new(local_peer_id)))
         } else {
             Toggle::from(None)
         };
@@ -178,7 +211,9 @@ impl XRoutesBehaviour {
             relay_server,
             relay_client,
             dcutr,
-            autonat,
+            autonat_client,
+            autonat_server,
+            connection_tracker,
         })
     }
 
@@ -187,6 +222,26 @@ impl XRoutesBehaviour {
             identify::Config::new(XROUTES_IDENTIFY_PROTOCOL.to_string(), local_public_key)
                 .with_push_listen_addr_updates(true);
         identify::Behaviour::new(config)
+    }
+
+    /// Enable AutoNAT v2 client behaviour
+    pub fn enable_autonat_client(&mut self) {
+        self.autonat_client = Toggle::from(Some(v2::client::Behaviour::default()));
+    }
+
+    /// Disable AutoNAT v2 client behaviour
+    pub fn disable_autonat_client(&mut self) {
+        self.autonat_client = Toggle::from(None);
+    }
+
+    /// Enable AutoNAT v2 server behaviour
+    pub fn enable_autonat_server(&mut self) {
+        self.autonat_server = Toggle::from(Some(v2::server::Behaviour::default()));
+    }
+
+    /// Disable AutoNAT v2 server behaviour
+    pub fn disable_autonat_server(&mut self) {
+        self.autonat_server = Toggle::from(None);
     }
     /// Enable identify behaviour
     pub fn enable_identify(&mut self, local_public_key: PublicKey) {
@@ -233,14 +288,26 @@ impl XRoutesBehaviour {
 
     /// Get current status of behaviours
     pub fn get_status(&self) -> super::types::XRoutesStatus {
+        let kad_mode = if let Some(kad_behaviour) = self.kad.as_ref() {
+            match kad_behaviour.mode() {
+                kad::Mode::Client => Some(super::types::KadMode::Client),
+                kad::Mode::Server => Some(super::types::KadMode::Server),
+            }
+        } else {
+            None
+        };
+
         super::types::XRoutesStatus {
             identify_enabled: self.identify.as_ref().is_some(),
             mdns_enabled: self.mdns.as_ref().is_some(),
             kad_enabled: self.kad.as_ref().is_some(),
+            kad_mode,
             relay_server_enabled: self.relay_server.as_ref().is_some(),
             relay_client_enabled: self.relay_client.as_ref().is_some(),
             dcutr_enabled: self.dcutr.as_ref().is_some(),
-            autonat_enabled: self.autonat.as_ref().is_some(),
+            autonat_server_enabled: self.autonat_server.as_ref().is_some(),
+            autonat_client_enabled: self.autonat_client.as_ref().is_some(),
+            connection_tracking_enabled: self.connection_tracker.as_ref().is_some(),
         }
     }
 
@@ -255,5 +322,38 @@ impl XRoutesBehaviour {
     /// Disable relay server behaviour
     pub fn disable_relay_server(&mut self) {
         self.relay_server = Toggle::from(None);
+    }
+
+    /// Set Kademlia mode (client, server, auto)
+    pub fn set_kad_mode(&mut self, mode: KadMode) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(kad_behaviour) = self.kad.as_mut() {
+            match mode {
+                KadMode::Client => {
+                    kad_behaviour.set_mode(Some(kad::Mode::Client));
+                }
+                KadMode::Server => {
+                    kad_behaviour.set_mode(Some(kad::Mode::Server));
+                }
+                KadMode::Auto => {
+                    kad_behaviour.set_mode(None); // None enables auto mode
+                }
+            }
+            Ok(())
+        } else {
+            Err("Kademlia behaviour is not enabled".into())
+        }
+    }
+
+    /// Get current Kademlia mode
+    pub fn get_kad_mode(&self) -> Result<KadMode, Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(kad_behaviour) = self.kad.as_ref() {
+            let mode = kad_behaviour.mode();
+            match mode {
+                kad::Mode::Client => Ok(KadMode::Client),
+                kad::Mode::Server => Ok(KadMode::Server),
+            }
+        } else {
+            Err("Kademlia behaviour is not enabled".into())
+        }
     }
 }

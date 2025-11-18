@@ -8,9 +8,10 @@ RUN apt-get update && apt-get install -y \
 
 # Копируем только необходимые файлы для сборки
 WORKDIR /app
+COPY command-swarm/ command-swarm/
 COPY protocols/ protocols/
 COPY xnetwork2/ xnetwork2/
-COPY command-swarm/ command-swarm/
+
 COPY nat-traversal-bin/Cargo.toml nat-traversal-bin/Cargo.toml
 COPY nat-traversal-bin/src/ nat-traversal-bin/src/
 

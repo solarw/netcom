@@ -2,7 +2,7 @@
  use crate::xroutes::handler::kad::Addresses;
 
 use async_trait::async_trait;
-use command_swarm::BehaviourHandler;
+use command_swarm::{BehaviourHandler, ConnectionId};
 use libp2p::identity::PublicKey;
 use libp2p::{identify, mdns, kad, identity, PeerId, Multiaddr};
 use std::collections::HashMap;
@@ -14,6 +14,7 @@ use super::behaviour::{XRoutesBehaviour, XRoutesBehaviourEvent};
 use super::command::{XRoutesCommand, MdnsCacheStatus};
 use super::pending_task_manager::PendingTaskManager;
 use super::types::{XRoutesConfig, XROUTES_IDENTIFY_PROTOCOL};
+use crate::connection_tracker::{ConnectionInfo, PeerConnections, ConnectionStats};
 
 /// Record for mDNS peer with TTL
 #[derive(Debug, Clone)]
@@ -372,6 +373,7 @@ impl BehaviourHandler for XRoutesHandler {
                 if let Some(kad) = behaviour.kad.as_mut() {
                     // Add addresses to Kademlia
                     for addr in &addresses {
+                        println!("ADDR KAD {:?} {:?}", peer_id, addr);
                         kad.add_address(&peer_id, addr.clone());
                     }
                     
@@ -532,6 +534,146 @@ impl BehaviourHandler for XRoutesHandler {
                 info!("✅ [XRoutesHandler] Relay server enabled");
                 let _ = response.send(Ok(()));
             }
+            XRoutesCommand::AddAutonatServer { peer_id, address, response } => {
+                debug!("🔄 [XRoutesHandler] Adding AutoNAT server: {:?} with address: {:?}", peer_id, address);
+                
+                // Note: In autonat v2, servers are discovered automatically through connections
+                // This command is kept for compatibility but may not be needed for v2
+                info!("⚠️ [XRoutesHandler] AutoNAT v2 servers are discovered automatically, manual server addition may not be needed");
+                let _ = response.send(Ok(()));
+            }
+            XRoutesCommand::SetKadMode { mode, response } => {
+                debug!("🔄 [XRoutesHandler] Setting Kademlia mode to: {:?}", mode);
+                
+                match behaviour.set_kad_mode(mode) {
+                    Ok(()) => {
+                        info!("✅ [XRoutesHandler] Kademlia mode set to: {}", mode);
+                        let _ = response.send(Ok(()));
+                    }
+                    Err(e) => {
+                        debug!("❌ [XRoutesHandler] Failed to set Kademlia mode: {}", e);
+                        let _ = response.send(Err(e));
+                    }
+                }
+            }
+            XRoutesCommand::GetKadMode { response } => {
+                debug!("🔄 [XRoutesHandler] Getting current Kademlia mode");
+                
+                match behaviour.get_kad_mode() {
+                    Ok(mode) => {
+                        info!("✅ [XRoutesHandler] Current Kademlia mode: {}", mode);
+                        let _ = response.send(Ok(mode));
+                    }
+                    Err(e) => {
+                        debug!("❌ [XRoutesHandler] Failed to get Kademlia mode: {}", e);
+                        let _ = response.send(Err(e));
+                    }
+                }
+            }
+            // ConnectionTracker commands
+            XRoutesCommand::GetConnections { response } => {
+                debug!("🔄 [XRoutesHandler] Getting all connections");
+                
+                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
+                    let connections: Vec<ConnectionInfo> = connection_tracker.get_all_connections()
+                        .into_iter()
+                        .cloned()
+                        .collect();
+                    info!("✅ [XRoutesHandler] Returning {} connections", connections.len());
+                    let _ = response.send(Ok(connections));
+                } else {
+                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                    debug!("❌ [XRoutesHandler] Cannot get connections: ConnectionTracker not enabled");
+                }
+            }
+            XRoutesCommand::GetPeerConnections { peer_id, response } => {
+                debug!("🔄 [XRoutesHandler] Getting connections for peer: {:?}", peer_id);
+                
+                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
+                    match connection_tracker.get_peer_connections(&peer_id) {
+                        Some(peer_connections) => {
+                            info!("✅ [XRoutesHandler] Returning connections for peer: {:?}", peer_id);
+                            let _ = response.send(Ok(peer_connections.clone()));
+                        }
+                        None => {
+                            let error_msg = format!("No connections found for peer: {}", peer_id);
+                            let _ = response.send(Err(error_msg.into()));
+                            debug!("❌ [XRoutesHandler] No connections found for peer: {:?}", peer_id);
+                        }
+                    }
+                } else {
+                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                    debug!("❌ [XRoutesHandler] Cannot get peer connections: ConnectionTracker not enabled");
+                }
+            }
+            XRoutesCommand::GetConnection { connection_id, response } => {
+                debug!("🔄 [XRoutesHandler] Getting connection info for: {:?}", connection_id);
+                
+                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
+                    match connection_tracker.get_connection(&connection_id) {
+                        Some(connection_info) => {
+                            info!("✅ [XRoutesHandler] Returning connection info for: {:?}", connection_id);
+                            let _ = response.send(Ok(connection_info.clone()));
+                        }
+                        None => {
+                            let error_msg = format!("Connection not found: {:?}", connection_id);
+                            let _ = response.send(Err(error_msg.into()));
+                            debug!("❌ [XRoutesHandler] Connection not found: {:?}", connection_id);
+                        }
+                    }
+                } else {
+                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                    debug!("❌ [XRoutesHandler] Cannot get connection: ConnectionTracker not enabled");
+                }
+            }
+            XRoutesCommand::GetConnectedPeers { response } => {
+                debug!("🔄 [XRoutesHandler] Getting all connected peers");
+                
+                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
+                    let connected_peers = connection_tracker.get_connected_peers();
+                    info!("✅ [XRoutesHandler] Returning {} connected peers", connected_peers.len());
+                    let _ = response.send(Ok(connected_peers));
+                } else {
+                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                    debug!("❌ [XRoutesHandler] Cannot get connected peers: ConnectionTracker not enabled");
+                }
+            }
+            XRoutesCommand::GetConnectionStats { response } => {
+                debug!("🔄 [XRoutesHandler] Getting connection statistics");
+                
+                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
+                    let stats = connection_tracker.get_connection_stats();
+                    info!("✅ [XRoutesHandler] Returning connection statistics");
+                    let _ = response.send(Ok(stats));
+                } else {
+                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                    debug!("❌ [XRoutesHandler] Cannot get connection stats: ConnectionTracker not enabled");
+                }
+            }
+            XRoutesCommand::GetListenAddresses { response } => {
+                debug!("🔄 [XRoutesHandler] Getting listen addresses");
+                
+                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
+                    let listen_addresses = connection_tracker.get_listen_addresses().to_vec();
+                    info!("✅ [XRoutesHandler] Returning {} listen addresses", listen_addresses.len());
+                    let _ = response.send(Ok(listen_addresses));
+                } else {
+                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                    debug!("❌ [XRoutesHandler] Cannot get listen addresses: ConnectionTracker not enabled");
+                }
+            }
+            XRoutesCommand::GetExternalAddresses { response } => {
+                debug!("🔄 [XRoutesHandler] Getting external addresses");
+                
+                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
+                    let external_addresses = connection_tracker.get_external_addresses().to_vec();
+                    info!("✅ [XRoutesHandler] Returning {} external addresses", external_addresses.len());
+                    let _ = response.send(Ok(external_addresses));
+                } else {
+                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                    debug!("❌ [XRoutesHandler] Cannot get external addresses: ConnectionTracker not enabled");
+                }
+            }
         }
     }
 
@@ -544,10 +686,10 @@ impl BehaviourHandler for XRoutesHandler {
                         if let Some(kad) = behaviour.kad.as_mut() {
                             for addr in &info.listen_addrs {
                                 kad.add_address(&peer_id, addr.clone());
-                                println!("📍 [XRoutesHandler] Added address to Kademlia: {} -> {}", peer_id, addr);
+                                //println!("📍 [XRoutesHandler] Added address to Kademlia: {} -> {}", peer_id, addr);
                             }
-                            println!("✅ [XRoutesHandler] Added {} addresses to Kademlia for peer: {}", 
-                                     info.listen_addrs.len(), peer_id);
+                            //println!("✅ [XRoutesHandler] Added {} addresses to Kademlia for peer: {}", 
+                            //         info.listen_addrs.len(), peer_id);
                         } else {
                             debug!("⚠️ [XRoutesHandler] Kademlia not enabled, cannot add addresses for peer: {}", peer_id);
                         }
@@ -591,12 +733,19 @@ impl BehaviourHandler for XRoutesHandler {
                 // TODO: Add relay client event handling
             }
             XRoutesBehaviourEvent::Dcutr(dcutr_event) => {
-                debug!("🔄 [XRoutesHandler] DCUtR event received: {:?}", dcutr_event);
+                println!("🔄 [XRoutesHandler] DCUtR event received: {:?}", dcutr_event);
                 // DCUtR events are handled automatically by the behaviour
             }
-            XRoutesBehaviourEvent::Autonat(autonat_event) => {
-                debug!("🔄 [XRoutesHandler] AutoNAT event received: {:?}", autonat_event);
-                // AutoNAT events are handled automatically by the behaviour
+            XRoutesBehaviourEvent::AutonatClient(autonat_client_event) => {
+                //println!("🔄 [XRoutesHandler] AutoNAT v2 client event received: {:?}", autonat_client_event);
+                // AutoNAT v2 client events are handled automatically by the behaviour
+            }
+            XRoutesBehaviourEvent::AutonatServer(autonat_server_event) => {
+                //println!("🔄 [XRoutesHandler] AutoNAT v2 server event received: {:?}", autonat_server_event);
+                // AutoNAT v2 server events are handled automatically by the behaviour
+            }
+            XRoutesBehaviourEvent::Empty => {
+                // Empty event - no action needed
             }
         }
     }

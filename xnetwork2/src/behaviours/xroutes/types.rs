@@ -16,10 +16,14 @@ pub struct XRoutesConfig {
     // relay_client теперь всегда включен, поэтому enable_relay_client убран
     /// Enable DCUtR for hole punching
     pub enable_dcutr: bool,
-    /// Enable AutoNAT for NAT type detection
-    pub enable_autonat: bool,
+    /// Enable AutoNAT server for providing NAT detection services
+    pub enable_autonat_server: bool,
+    /// Enable AutoNAT client for detecting NAT type
+    pub enable_autonat_client: bool,
     /// Enable automatic hole punching
     pub auto_hole_punching: bool,
+    /// Enable connection tracking
+    pub enable_connection_tracking: bool,
 }
 
 impl Default for XRoutesConfig {
@@ -30,8 +34,10 @@ impl Default for XRoutesConfig {
             enable_kad: true,
             enable_relay_server: false,
             enable_dcutr: false,
-            enable_autonat: false,
+            enable_autonat_server: false,
+            enable_autonat_client: false,
             auto_hole_punching: false,
+            enable_connection_tracking: true, // Enable connection tracking by default
         }
     }
 }
@@ -68,8 +74,10 @@ impl XRoutesConfig {
             enable_kad: false,
             enable_relay_server: false,
             enable_dcutr: false,
-            enable_autonat: false,
+            enable_autonat_server: false,
+            enable_autonat_client: false,
             auto_hole_punching: false,
+            enable_connection_tracking: false,
         }
     }
 
@@ -85,15 +93,28 @@ impl XRoutesConfig {
         self
     }
 
-    /// Enable AutoNAT for NAT type detection
-    pub fn with_autonat(mut self, enable: bool) -> Self {
-        self.enable_autonat = enable;
+
+    /// Enable AutoNAT server for providing NAT detection services
+    pub fn with_autonat_server(mut self, enable: bool) -> Self {
+        self.enable_autonat_server = enable;
+        self
+    }
+
+    /// Enable AutoNAT client for detecting NAT type
+    pub fn with_autonat_client(mut self, enable: bool) -> Self {
+        self.enable_autonat_client = enable;
         self
     }
 
     /// Enable automatic hole punching
     pub fn with_auto_hole_punching(mut self, enable: bool) -> Self {
         self.auto_hole_punching = enable;
+        self
+    }
+
+    /// Enable connection tracking
+    pub fn with_connection_tracking(mut self, enable: bool) -> Self {
+        self.enable_connection_tracking = enable;
         self
     }
 }
@@ -107,14 +128,20 @@ pub struct XRoutesStatus {
     pub mdns_enabled: bool,
     /// Kademlia behaviour status
     pub kad_enabled: bool,
+    /// Kademlia mode (if enabled)
+    pub kad_mode: Option<KadMode>,
     /// Relay server behaviour status
     pub relay_server_enabled: bool,
     /// Relay client behaviour status
     pub relay_client_enabled: bool,
     /// DCUtR behaviour status
     pub dcutr_enabled: bool,
-    /// AutoNAT behaviour status
-    pub autonat_enabled: bool,
+    /// AutoNAT server behaviour status
+    pub autonat_server_enabled: bool,
+    /// AutoNAT client behaviour status
+    pub autonat_client_enabled: bool,
+    /// Connection tracking status
+    pub connection_tracking_enabled: bool,
 }
 
 impl Default for XRoutesStatus {
@@ -123,13 +150,50 @@ impl Default for XRoutesStatus {
             identify_enabled: false,
             mdns_enabled: false,
             kad_enabled: false,
+            kad_mode: None,
             relay_server_enabled: false,
             relay_client_enabled: false,
             dcutr_enabled: false,
-            autonat_enabled: false,
+            autonat_server_enabled: false,
+            autonat_client_enabled: false,
+            connection_tracking_enabled: false,
         }
     }
 }
 
 /// Custom protocol for XRoutes identify
 pub const XROUTES_IDENTIFY_PROTOCOL: StreamProtocol = StreamProtocol::new("/xroutes/identify");
+
+/// Kademlia mode configuration
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KadMode {
+    /// Client mode - only makes requests, does not respond to other peers
+    Client,
+    /// Server mode - responds to requests from other peers
+    Server,
+    /// Auto mode - automatically switches between client/server based on external addresses
+    Auto,
+}
+
+impl std::fmt::Display for KadMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KadMode::Client => write!(f, "client"),
+            KadMode::Server => write!(f, "server"),
+            KadMode::Auto => write!(f, "auto"),
+        }
+    }
+}
+
+impl std::str::FromStr for KadMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "client" => Ok(KadMode::Client),
+            "server" => Ok(KadMode::Server),
+            "auto" => Ok(KadMode::Auto),
+            _ => Err(format!("Invalid Kademlia mode: {}. Valid modes: client, server, auto", s)),
+        }
+    }
+}
