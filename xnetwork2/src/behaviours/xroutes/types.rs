@@ -24,8 +24,6 @@ pub struct XRoutesConfig {
     pub enable_autonat_client: bool,
     /// Enable automatic hole punching
     pub auto_hole_punching: bool,
-    /// Enable connection tracking
-    pub enable_connection_tracking: bool,
 }
 
 impl Default for XRoutesConfig {
@@ -40,7 +38,6 @@ impl Default for XRoutesConfig {
             enable_autonat_server: false,
             enable_autonat_client: false,
             auto_hole_punching: false,
-            enable_connection_tracking: true, // Enable connection tracking by default
         }
     }
 }
@@ -102,7 +99,6 @@ impl XRoutesConfig {
             enable_autonat_server: false,
             enable_autonat_client: false,
             auto_hole_punching: false,
-            enable_connection_tracking: false,
         }
     }
 
@@ -137,11 +133,6 @@ impl XRoutesConfig {
         self
     }
 
-    /// Enable connection tracking
-    pub fn with_connection_tracking(mut self, enable: bool) -> Self {
-        self.enable_connection_tracking = enable;
-        self
-    }
 }
 
 /// Status of XRoutes behaviours
@@ -165,8 +156,6 @@ pub struct XRoutesStatus {
     pub autonat_server_enabled: bool,
     /// AutoNAT client behaviour status
     pub autonat_client_enabled: bool,
-    /// Connection tracking status
-    pub connection_tracking_enabled: bool,
 }
 
 impl Default for XRoutesStatus {
@@ -181,7 +170,6 @@ impl Default for XRoutesStatus {
             dcutr_enabled: false,
             autonat_server_enabled: false,
             autonat_client_enabled: false,
-            connection_tracking_enabled: false,
         }
     }
 }

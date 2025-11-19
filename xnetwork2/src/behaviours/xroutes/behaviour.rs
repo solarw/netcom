@@ -11,7 +11,6 @@ use libp2p::{
 use libp2p::autonat::v2;
 
 use super::types::{XROUTES_IDENTIFY_PROTOCOL, KadMode};
-use crate::connection_tracker::ConnectionTracker;
 
 /// Composite behaviour for XRoutes with toggle components
 #[derive(NetworkBehaviour)]
@@ -33,8 +32,6 @@ pub struct XRoutesBehaviour {
     pub autonat_client: Toggle<v2::client::Behaviour>,
     /// AutoNAT v2 server behaviour for providing NAT detection services
     pub autonat_server: Toggle<v2::server::Behaviour>,
-    /// Connection tracker behaviour for monitoring connections
-    pub connection_tracker: Toggle<ConnectionTracker>,
 }
 
 /// Events emitted by XRoutesBehaviour
@@ -150,11 +147,36 @@ impl XRoutesBehaviour {
             kad_config.set_periodic_bootstrap_interval(Some(Duration::from_secs(5)));
             kad_config.set_replication_interval(Some(Duration::from_secs(5)));
             kad_config.set_provider_publication_interval(Some(Duration::from_secs(5)));
-            Toggle::from(Some(kad::Behaviour::with_config(
+            
+            let mut kad_behaviour = kad::Behaviour::with_config(
                 local_peer_id,
                 store,
                 kad_config,
-            )))
+            );
+            
+            // Apply Kademlia mode from configuration
+            if let Some(kad_mode) = config.kad_mode {
+                match kad_mode {
+                    super::types::KadMode::Client => {
+                        kad_behaviour.set_mode(Some(kad::Mode::Client));
+                        println!("🔍 Kademlia configured in CLIENT mode");
+                    }
+                    super::types::KadMode::Server => {
+                        kad_behaviour.set_mode(Some(kad::Mode::Server));
+                        println!("🔍 Kademlia configured in SERVER mode");
+                    }
+                    super::types::KadMode::Auto => {
+                        kad_behaviour.set_mode(None); // Auto mode
+                        println!("🔍 Kademlia configured in AUTO mode");
+                    }
+                }
+            } else {
+                // Default to auto mode if no specific mode is set
+                kad_behaviour.set_mode(None);
+                println!("🔍 Kademlia configured in AUTO mode (default)");
+            }
+            
+            Toggle::from(Some(kad_behaviour))
         } else {
             Toggle::from(None)
         };
@@ -197,13 +219,6 @@ impl XRoutesBehaviour {
             Toggle::from(None)
         };
 
-        // Create ConnectionTracker behaviour
-        let connection_tracker = if config.enable_connection_tracking {
-            Toggle::from(Some(ConnectionTracker::new(local_peer_id)))
-        } else {
-            Toggle::from(None)
-        };
-
         Ok(Self {
             identify,
             mdns,
@@ -213,7 +228,6 @@ impl XRoutesBehaviour {
             dcutr,
             autonat_client,
             autonat_server,
-            connection_tracker,
         })
     }
 
@@ -307,7 +321,6 @@ impl XRoutesBehaviour {
             dcutr_enabled: self.dcutr.as_ref().is_some(),
             autonat_server_enabled: self.autonat_server.as_ref().is_some(),
             autonat_client_enabled: self.autonat_client.as_ref().is_some(),
-            connection_tracking_enabled: self.connection_tracker.as_ref().is_some(),
         }
     }
 

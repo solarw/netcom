@@ -14,7 +14,7 @@ use super::behaviour::{XRoutesBehaviour, XRoutesBehaviourEvent};
 use super::command::{XRoutesCommand, MdnsCacheStatus};
 use super::pending_task_manager::PendingTaskManager;
 use super::types::{XRoutesConfig, XROUTES_IDENTIFY_PROTOCOL};
-use crate::connection_tracker::{ConnectionInfo, PeerConnections, ConnectionStats};
+use crate::conntracker::{ConnectionInfo, PeerConnections, ConnectionStats};
 
 /// Record for mDNS peer with TTL
 #[derive(Debug, Clone)]
@@ -189,7 +189,7 @@ impl XRoutesHandler {
     async fn handle_kad_event(&mut self, kad_event: kad::Event) {
         match kad_event {
             kad::Event::OutboundQueryProgressed { id, result, .. } => {
-                debug!(
+                println!(
                     "🔍 [XRoutesHandler] Kademlia query progressed - ID: {:?}, Result: {:?}",
                     id, result
                 );
@@ -570,109 +570,34 @@ impl BehaviourHandler for XRoutesHandler {
                     }
                 }
             }
-            // ConnectionTracker commands
+            // ConnectionTracker commands are now handled by SwarmHandler
             XRoutesCommand::GetConnections { response } => {
-                debug!("🔄 [XRoutesHandler] Getting all connections");
-                
-                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
-                    let connections: Vec<ConnectionInfo> = connection_tracker.get_all_connections()
-                        .into_iter()
-                        .cloned()
-                        .collect();
-                    info!("✅ [XRoutesHandler] Returning {} connections", connections.len());
-                    let _ = response.send(Ok(connections));
-                } else {
-                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                    debug!("❌ [XRoutesHandler] Cannot get connections: ConnectionTracker not enabled");
-                }
+                debug!("🔄 [XRoutesHandler] ConnectionTracker commands are now handled by SwarmHandler");
+                let _ = response.send(Err("ConnectionTracker commands are now handled by SwarmHandler. Use SwarmLevelCommand::ConnectionTracker instead.".into()));
             }
-            XRoutesCommand::GetPeerConnections { peer_id, response } => {
-                debug!("🔄 [XRoutesHandler] Getting connections for peer: {:?}", peer_id);
-                
-                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
-                    match connection_tracker.get_peer_connections(&peer_id) {
-                        Some(peer_connections) => {
-                            info!("✅ [XRoutesHandler] Returning connections for peer: {:?}", peer_id);
-                            let _ = response.send(Ok(peer_connections.clone()));
-                        }
-                        None => {
-                            let error_msg = format!("No connections found for peer: {}", peer_id);
-                            let _ = response.send(Err(error_msg.into()));
-                            debug!("❌ [XRoutesHandler] No connections found for peer: {:?}", peer_id);
-                        }
-                    }
-                } else {
-                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                    debug!("❌ [XRoutesHandler] Cannot get peer connections: ConnectionTracker not enabled");
-                }
+            XRoutesCommand::GetPeerConnections { response, .. } => {
+                debug!("🔄 [XRoutesHandler] ConnectionTracker commands are now handled by SwarmHandler");
+                let _ = response.send(Err("ConnectionTracker commands are now handled by SwarmHandler. Use SwarmLevelCommand::ConnectionTracker instead.".into()));
             }
-            XRoutesCommand::GetConnection { connection_id, response } => {
-                debug!("🔄 [XRoutesHandler] Getting connection info for: {:?}", connection_id);
-                
-                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
-                    match connection_tracker.get_connection(&connection_id) {
-                        Some(connection_info) => {
-                            info!("✅ [XRoutesHandler] Returning connection info for: {:?}", connection_id);
-                            let _ = response.send(Ok(connection_info.clone()));
-                        }
-                        None => {
-                            let error_msg = format!("Connection not found: {:?}", connection_id);
-                            let _ = response.send(Err(error_msg.into()));
-                            debug!("❌ [XRoutesHandler] Connection not found: {:?}", connection_id);
-                        }
-                    }
-                } else {
-                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                    debug!("❌ [XRoutesHandler] Cannot get connection: ConnectionTracker not enabled");
-                }
+            XRoutesCommand::GetConnection { response, .. } => {
+                debug!("🔄 [XRoutesHandler] ConnectionTracker commands are now handled by SwarmHandler");
+                let _ = response.send(Err("ConnectionTracker commands are now handled by SwarmHandler. Use SwarmLevelCommand::ConnectionTracker instead.".into()));
             }
             XRoutesCommand::GetConnectedPeers { response } => {
-                debug!("🔄 [XRoutesHandler] Getting all connected peers");
-                
-                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
-                    let connected_peers = connection_tracker.get_connected_peers();
-                    info!("✅ [XRoutesHandler] Returning {} connected peers", connected_peers.len());
-                    let _ = response.send(Ok(connected_peers));
-                } else {
-                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                    debug!("❌ [XRoutesHandler] Cannot get connected peers: ConnectionTracker not enabled");
-                }
+                debug!("🔄 [XRoutesHandler] ConnectionTracker commands are now handled by SwarmHandler");
+                let _ = response.send(Err("ConnectionTracker commands are now handled by SwarmHandler. Use SwarmLevelCommand::ConnectionTracker instead.".into()));
             }
             XRoutesCommand::GetConnectionStats { response } => {
-                debug!("🔄 [XRoutesHandler] Getting connection statistics");
-                
-                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
-                    let stats = connection_tracker.get_connection_stats();
-                    info!("✅ [XRoutesHandler] Returning connection statistics");
-                    let _ = response.send(Ok(stats));
-                } else {
-                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                    debug!("❌ [XRoutesHandler] Cannot get connection stats: ConnectionTracker not enabled");
-                }
+                debug!("🔄 [XRoutesHandler] ConnectionTracker commands are now handled by SwarmHandler");
+                let _ = response.send(Err("ConnectionTracker commands are now handled by SwarmHandler. Use SwarmLevelCommand::ConnectionTracker instead.".into()));
             }
             XRoutesCommand::GetListenAddresses { response } => {
-                debug!("🔄 [XRoutesHandler] Getting listen addresses");
-                
-                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
-                    let listen_addresses = connection_tracker.get_listen_addresses().to_vec();
-                    info!("✅ [XRoutesHandler] Returning {} listen addresses", listen_addresses.len());
-                    let _ = response.send(Ok(listen_addresses));
-                } else {
-                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                    debug!("❌ [XRoutesHandler] Cannot get listen addresses: ConnectionTracker not enabled");
-                }
+                debug!("🔄 [XRoutesHandler] ConnectionTracker commands are now handled by SwarmHandler");
+                let _ = response.send(Err("ConnectionTracker commands are now handled by SwarmHandler. Use SwarmLevelCommand::ConnectionTracker instead.".into()));
             }
             XRoutesCommand::GetExternalAddresses { response } => {
-                debug!("🔄 [XRoutesHandler] Getting external addresses");
-                
-                if let Some(connection_tracker) = behaviour.connection_tracker.as_ref() {
-                    let external_addresses = connection_tracker.get_external_addresses().to_vec();
-                    info!("✅ [XRoutesHandler] Returning {} external addresses", external_addresses.len());
-                    let _ = response.send(Ok(external_addresses));
-                } else {
-                    let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                    debug!("❌ [XRoutesHandler] Cannot get external addresses: ConnectionTracker not enabled");
-                }
+                debug!("🔄 [XRoutesHandler] ConnectionTracker commands are now handled by SwarmHandler");
+                let _ = response.send(Err("ConnectionTracker commands are now handled by SwarmHandler. Use SwarmLevelCommand::ConnectionTracker instead.".into()));
             }
         }
     }
@@ -699,7 +624,7 @@ impl BehaviourHandler for XRoutesHandler {
                     }
                     identify::Event::Sent { peer_id, .. } => {
                         debug!(
-                            "📤 [XRoutesHandler] Identify sent to peer: {:?}",
+                            "� [XRoutesHandler] Identify sent to peer: {:?}",
                             peer_id
                         );
                     }

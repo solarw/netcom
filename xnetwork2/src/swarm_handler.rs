@@ -9,8 +9,8 @@ use tokio::sync::broadcast;
 use tracing::{debug, info};
 
 use crate::behaviours::xroutes::PendingTaskManager;
-use crate::connection_tracker::{ConnectionInfo, PeerConnections};
-use crate::connection_tracker_commands::ConnectionTrackerCommand;
+use crate::conntracker::{Conntracker, ConnectionInfo, PeerConnections};
+use crate::conntracker::commands::ConntrackerCommand;
 use crate::main_behaviour::{XNetworkBehaviour, XNetworkBehaviourEvent};
 use crate::node_events::NodeEvent;
 use crate::swarm_commands::{NetworkState, SwarmLevelCommand};
@@ -41,6 +41,8 @@ pub struct XNetworkSwarmHandler {
         Box<dyn std::error::Error + Send + Sync>,
         (),
     >,
+    /// Connection tracker service
+    conntracker: Conntracker,
 }
 
 impl Default for XNetworkSwarmHandler {
@@ -50,6 +52,7 @@ impl Default for XNetworkSwarmHandler {
             authenticated_peers: std::collections::HashSet::new(),
             listen_wait_tasks: PendingTaskManager::new(),
             dial_wait_tasks: PendingTaskManager::new(),
+            conntracker: Conntracker::new(PeerId::random()), // Will be updated with actual peer_id later
         }
     }
 }
@@ -62,7 +65,14 @@ impl XNetworkSwarmHandler {
             authenticated_peers: std::collections::HashSet::new(),
             listen_wait_tasks: PendingTaskManager::new(),
             dial_wait_tasks: PendingTaskManager::new(),
+            conntracker: Conntracker::new(PeerId::random()), // Will be updated with actual peer_id later
         }
+    }
+
+    /// Update Conntracker with actual local peer ID from swarm
+    pub fn update_local_peer_id(&mut self, local_peer_id: PeerId) {
+        // Create new Conntracker with correct local peer ID
+        self.conntracker = Conntracker::new(local_peer_id);
     }
 
     /// Check if a peer is authenticated
@@ -608,78 +618,50 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
             SwarmLevelCommand::ConnectionTracker { command } => {
                 debug!("🔄 [SwarmHandler] Processing ConnectionTracker command: {:?}", command);
                 
-                // Handle ConnectionTracker commands through XRoutesBehaviour
+                // Handle ConnectionTracker commands using local Conntracker
                 match command {
-                    ConnectionTrackerCommand::GetConnections { response } => {
-                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
-                            let connections = connection_tracker.get_all_connections();
-                            let connections_cloned: Vec<ConnectionInfo> = connections.into_iter().cloned().collect();
-                            let _ = response.send(Ok(connections_cloned));
-                        } else {
-                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                        }
+                    ConntrackerCommand::GetConnections { response } => {
+                        let connections = self.conntracker.get_all_connections();
+                        let connections_cloned: Vec<ConnectionInfo> = connections.into_iter().cloned().collect();
+                        let _ = response.send(Ok(connections_cloned));
                     }
-                    ConnectionTrackerCommand::GetPeerConnections { peer_id, response } => {
-                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
-                            match connection_tracker.get_peer_connections(&peer_id) {
-                                Some(peer_connections) => {
-                                    let _ = response.send(Ok(peer_connections.clone()));
-                                }
-                                None => {
-                                    let error_msg = format!("No connections found for peer: {}", peer_id);
-                                    let _ = response.send(Err(error_msg.into()));
-                                }
+                    ConntrackerCommand::GetPeerConnections { peer_id, response } => {
+                        match self.conntracker.get_peer_connections(&peer_id) {
+                            Some(peer_connections) => {
+                                let _ = response.send(Ok(peer_connections.clone()));
                             }
-                        } else {
-                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                        }
-                    }
-                    ConnectionTrackerCommand::GetConnection { connection_id, response } => {
-                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
-                            match connection_tracker.get_connection(&connection_id) {
-                                Some(connection_info) => {
-                                    let _ = response.send(Ok(connection_info.clone()));
-                                }
-                                None => {
-                                    let error_msg = format!("Connection not found: {:?}", connection_id);
-                                    let _ = response.send(Err(error_msg.into()));
-                                }
+                            None => {
+                                let error_msg = format!("No connections found for peer: {}", peer_id);
+                                let _ = response.send(Err(error_msg.into()));
                             }
-                        } else {
-                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
                         }
                     }
-                    ConnectionTrackerCommand::GetConnectedPeers { response } => {
-                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
-                            let connected_peers = connection_tracker.get_connected_peers();
-                            let _ = response.send(Ok(connected_peers));
-                        } else {
-                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                    ConntrackerCommand::GetConnection { connection_id, response } => {
+                        match self.conntracker.get_connection(&connection_id) {
+                            Some(connection_info) => {
+                                let _ = response.send(Ok(connection_info.clone()));
+                            }
+                            None => {
+                                let error_msg = format!("Connection not found: {:?}", connection_id);
+                                let _ = response.send(Err(error_msg.into()));
+                            }
                         }
                     }
-                    ConnectionTrackerCommand::GetConnectionStats { response } => {
-                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
-                            let stats = connection_tracker.get_connection_stats();
-                            let _ = response.send(Ok(stats));
-                        } else {
-                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                        }
+                    ConntrackerCommand::GetConnectedPeers { response } => {
+                        let connected_peers = self.conntracker.get_connected_peers();
+                        let _ = response.send(Ok(connected_peers));
                     }
-                    ConnectionTrackerCommand::GetListenAddresses { response } => {
-                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
-                            let listen_addresses = connection_tracker.get_listen_addresses().to_vec();
-                            let _ = response.send(Ok(listen_addresses));
-                        } else {
-                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                        }
+                    ConntrackerCommand::GetConnectionStats { response } => {
+                        let stats = self.conntracker.get_connection_stats();
+                        let _ = response.send(Ok(stats));
                     }
-                    ConnectionTrackerCommand::GetExternalAddresses { response } => {
-                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
-                            let external_addresses = connection_tracker.get_external_addresses().to_vec();
-                            let _ = response.send(Ok(external_addresses));
-                        } else {
-                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
-                        }
+                    ConntrackerCommand::GetListenAddresses { response } => {
+                        let listen_addresses = self.conntracker.get_listen_addresses().to_vec();
+                        let _ = response.send(Ok(listen_addresses));
+                    }
+                    ConntrackerCommand::GetExternalAddresses { response } => {
+                        let external_addresses = self.conntracker.get_external_addresses().to_vec();
+                        let _ = response.send(Ok(external_addresses));
                     }
                 }
             }
@@ -699,10 +681,28 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
         // Then handle the event normally (logging, etc.)
         match event {
             libp2p::swarm::SwarmEvent::NewExternalAddrCandidate { address } => {
+                // Update Conntracker with new external address candidate
+                self.conntracker.add_external_address(address.clone());
             }
             libp2p::swarm::SwarmEvent::ExternalAddrConfirmed { address } => {
+                // Update Conntracker with confirmed external address
+                self.conntracker.add_external_address(address.clone());
             }
-            libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, connection_id ,.. } => {
+            libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, connection_id, endpoint, .. } => {
+                // Update Conntracker with new connection
+                self.conntracker.add_connection(*connection_id, *peer_id, endpoint.clone());
+            }
+            libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, connection_id, .. } => {
+                // Update Conntracker with closed connection
+                self.conntracker.remove_connection(connection_id);
+            }
+            libp2p::swarm::SwarmEvent::NewListenAddr { listener_id, address, .. } => {
+                // Update Conntracker with new listen address
+                self.conntracker.add_listen_address(address.clone());
+            }
+            libp2p::swarm::SwarmEvent::ExpiredListenAddr { listener_id, address, .. } => {
+                // Update Conntracker with expired listen address
+                self.conntracker.remove_listen_address(address);
             }
             libp2p::swarm::SwarmEvent::Behaviour(behaviour_event) => {
                 match behaviour_event {

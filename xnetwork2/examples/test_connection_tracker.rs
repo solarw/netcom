@@ -54,6 +54,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("  - Peer: {}", peer_id);
     }
 
+    // Enable Kademlia first
+    println!("🔄 Enabling Kademlia...");
+    commander.enable_kad().await?;
+    println!("✅ Kademlia enabled");
+
     // Set Kademlia mode to server to test integration
     println!("🔄 Setting Kademlia mode to server...");
     commander.set_kad_mode(KadMode::Server).await?;
@@ -116,7 +121,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("  - mDNS enabled: {}", xroutes_status.mdns_enabled);
     println!("  - Kademlia enabled: {}", xroutes_status.kad_enabled);
     println!("  - Kademlia mode: {:?}", xroutes_status.kad_mode);
-    println!("  - Connection tracking: {}", xroutes_status.connection_tracking_enabled);
 
     // Test network state
     let network_state = commander.get_network_state().await?;

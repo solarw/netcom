@@ -5,7 +5,7 @@ use libp2p::{Multiaddr, PeerId};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::behaviours::{XAuthCommand, XStreamCommand};
-use crate::connection_tracker_commands::ConnectionTrackerCommand;
+use crate::conntracker::commands::ConntrackerCommand;
 use crate::main_behaviour::XNetworkCommands;
 use crate::swarm_commands::{NetworkState, SwarmLevelCommand};
 use xstream::xstream::XStream;
@@ -440,10 +440,10 @@ impl Commander {
     /// Get all connections
     pub async fn get_connections(
         &self,
-    ) -> Result<Vec<crate::connection_tracker::ConnectionInfo>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Vec<crate::conntracker::ConnectionInfo>, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
-            command: ConnectionTrackerCommand::GetConnections {
+            command: ConntrackerCommand::GetConnections {
                 response: response_tx,
             },
         });
@@ -455,10 +455,10 @@ impl Commander {
     pub async fn get_peer_connections(
         &self,
         peer_id: PeerId,
-    ) -> Result<crate::connection_tracker::PeerConnections, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<crate::conntracker::PeerConnections, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
-            command: ConnectionTrackerCommand::GetPeerConnections {
+            command: ConntrackerCommand::GetPeerConnections {
                 peer_id,
                 response: response_tx,
             },
@@ -471,10 +471,10 @@ impl Commander {
     pub async fn get_connection(
         &self,
         connection_id: command_swarm::ConnectionId,
-    ) -> Result<crate::connection_tracker::ConnectionInfo, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<crate::conntracker::ConnectionInfo, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
-            command: ConnectionTrackerCommand::GetConnection {
+            command: ConntrackerCommand::GetConnection {
                 connection_id,
                 response: response_tx,
             },
@@ -489,7 +489,7 @@ impl Commander {
     ) -> Result<Vec<PeerId>, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
-            command: ConnectionTrackerCommand::GetConnectedPeers {
+            command: ConntrackerCommand::GetConnectedPeers {
                 response: response_tx,
             },
         });
@@ -500,10 +500,10 @@ impl Commander {
     /// Get connection statistics
     pub async fn get_connection_stats(
         &self,
-    ) -> Result<crate::connection_tracker::ConnectionStats, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<crate::conntracker::ConnectionStats, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
-            command: ConnectionTrackerCommand::GetConnectionStats {
+            command: ConntrackerCommand::GetConnectionStats {
                 response: response_tx,
             },
         });
@@ -517,7 +517,7 @@ impl Commander {
     ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
         let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
-            command: ConnectionTrackerCommand::GetListenAddresses {
+            command: ConntrackerCommand::GetListenAddresses {
                 response: response_tx,
             },
         });

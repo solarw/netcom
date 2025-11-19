@@ -1,3 +1,4 @@
 //! Integration tests for xnetwork2
 
-mod kad_modes_test;
+mod kademlia_modes;
+mod kademlia_config_test;

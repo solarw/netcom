@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("🛠️ Создаем node...");
     let mut node = NodeBuilder::new()
         .with_fixed_key(key_bytes)
-        .with_kademlia()
+        .with_kad_server()
         .with_autonat_client() // Включаем AutoNAT клиент для определения типа NAT
         .with_dcutr()
         .build()
@@ -54,12 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("▶️ Запускаем node...");
     node.start().await?;
 
-    // ВКЛЮЧАЕМ KADEMLIA ДО ПРОСЛУШИВАНИЯ
-    println!("🌐 Включаем Kademlia DHT...");
-    node.commander.enable_kad().await?;
-    node.commander.set_kad_mode(KadMode::Server).await?;
-    println!("✅ Kademlia DHT включена");
-    println!("KAD MODE {:?}", node.commander.get_kad_mode().await);
+
     // Настраиваем прослушивание на случайном порту
     println!("🎯 Настраиваем прослушивание...");
     let node_addr = utils::setup_listening_node(&mut node).await?;
@@ -79,7 +74,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     sleep(Duration::from_millis(5000)).await;
     // Получаем relay адрес
     println!("🌐 Получаем relay адрес...");
-    println!("KAD MODE {:?}", node.commander.get_kad_mode().await);
     sleep(Duration::from_millis(500)).await;
     let relay_addr = get_relay_address(&mut node, &args.relay_peer_id).await?;
     println!("✅ Relay адрес получен: {}", relay_addr);
@@ -119,7 +113,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .bootstrap_to_peer(relay_peer_id, [relay_server_addr.clone()].to_vec())
         .await?;
     sleep(Duration::from_millis(5000)).await;
-    println!("KAD MODE {:?}", node.commander.get_kad_mode().await);
     // Если указан target_peer, подключаемся к нему
 
     if let Some(target_peer_id_str) = &args.target_peer {

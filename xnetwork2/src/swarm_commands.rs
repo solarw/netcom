@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 use std::time::Duration;
 use std::fmt;
 
-use crate::connection_tracker_commands::ConnectionTrackerCommand;
+use crate::conntracker::commands::ConntrackerCommand;
 
 /// Swarm-level commands for XNetwork2 with response channels
 pub enum SwarmLevelCommand {
@@ -69,7 +69,7 @@ pub enum SwarmLevelCommand {
     },
     /// ConnectionTracker commands
     ConnectionTracker {
-        command: ConnectionTrackerCommand,
+        command: ConntrackerCommand,
     },
 }
 

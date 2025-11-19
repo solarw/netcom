@@ -7,8 +7,7 @@
 
 pub mod behaviours;
 pub mod commander;
-pub mod connection_tracker;
-pub mod connection_tracker_commands;
+pub mod conntracker;
 pub mod main_behaviour;
 pub mod node;
 pub mod node_builder;

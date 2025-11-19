@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut relay = NodeBuilder::new()
         .with_fixed_key(key_bytes)
         .with_relay_server()
-        .with_kademlia()
+        .with_kad_server()
         .with_autonat_server() // Включаем AutoNAT сервер для предоставления услуг определения NAT
         .build()
         .await?;
@@ -33,17 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("▶️ Запускаем relay сервер...");
     relay.start().await?;
 
-    // Включаем Kademlia DHT
-    println!("🌐 Включаем Kademlia DHT...");
-    relay.commander.enable_kad().await?;
-    println!("✅ Kademlia DHT включена");
-    println!("KAD MODE {:?}", relay.commander.get_kad_mode().await);
 
-    relay
-        .set_kad_mode(xnetwork2::xroutes::types::KadMode::Server)
-        .await;
-
-    println!("KAD MODE {:?}", relay.commander.get_kad_mode().await);
     // Настраиваем прослушивание на фиксированном порту
     println!("🎯 Настраиваем прослушивание на порту 15003...");
     let relay_addr =
@@ -56,7 +46,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .commander
         .add_external_address(relay_addr.clone())
         .await?;
-    println!("KAD MODE {:?}", relay.commander.get_kad_mode().await);
 
     println!("✅ Relay сервер готов к работе!");
     println!("💡 Peer ID: {}", relay.peer_id());

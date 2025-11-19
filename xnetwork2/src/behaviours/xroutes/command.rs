@@ -4,7 +4,7 @@ use libp2p::{PeerId, Multiaddr};
 use command_swarm::ConnectionId;
 use std::time::SystemTime;
 use super::types::{XRoutesStatus, KadMode};
-use crate::connection_tracker::{ConnectionInfo, PeerConnections, ConnectionStats};
+use crate::conntracker::{ConnectionInfo, PeerConnections, ConnectionStats};
 
 /// Status information for mDNS cache
 #[derive(Debug, Clone)]
