@@ -33,12 +33,14 @@ async fn relay_connection_test() -> Result<(), Box<dyn std::error::Error + Send 
         .expect("❌ Не удалось создать server узел - критическая ошибка");
 
     println!("🆕 Создаем node1 узел...");
-    let mut node1 = Node::new()
+    let mut node1 = NodeBuilder::new()
+        .build()
         .await
         .expect("❌ Не удалось создать node1 узел - критическая ошибка");
 
     println!("🆕 Создаем node2 узел...");
-    let mut node2 = Node::new()
+    let mut node2 = NodeBuilder::new()
+        .build()
         .await
         .expect("❌ Не удалось создать node2 узел - критическая ошибка");
 
@@ -71,6 +73,10 @@ async fn relay_connection_test() -> Result<(), Box<dyn std::error::Error + Send 
     println!("🎯 Настраиваем server узел для прослушивания...");
     let server_addr = setup_listening_node(&mut server).await?;
     println!("📡 Server узел слушает на: {}", server_addr);
+
+    println!("🎯 Настраиваем внешний адрес server узел для прослушивания...");
+    server.commander.add_external_address(server_addr.clone()).await?;
+    println!("📡 Server узел слушает на внешнем: {}", server_addr);
 
     // Настраиваем node1 узел для прослушивания
     println!("🎯 Настраиваем node1 узел для прослушивания...");

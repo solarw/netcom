@@ -793,10 +793,14 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                             },
                             super::behaviours::xroutes::XRoutesBehaviourEvent::RelayServer(
                                 relay_event,
-                            ) => {}
+                            ) => {
+                                println!(">>> RELAY SERVER event {:?}", relay_event);
+                            }
                             super::behaviours::xroutes::XRoutesBehaviourEvent::RelayClient(
                                 relay_event,
-                            ) => {}
+                            ) => {
+                                println!(">>> RELAY CLIENT event {:?}", relay_event);
+                            }
                             super::behaviours::xroutes::XRoutesBehaviourEvent::Dcutr(
                                 dcutr_event,
                             ) => {}

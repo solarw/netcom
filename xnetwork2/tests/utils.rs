@@ -181,7 +181,7 @@ pub async fn setup_listening_node_with_addr(node: &mut Node, addr: String) -> Re
 
         let listen_addr = match listen_event {
             NodeEvent::NewListenAddr { address, listener_id: _ } => address,
-            _ => panic!("❌ Получено неожиданное событие: {:?}", listen_event),
+            _ => {println!("❌ Получено неожиданное событие: {:?}", listen_event); panic!("❌ Получено неожиданное событие: {:?}", listen_event)},
         };
 
         println!("✅ Нода слушает на адресе: {}", listen_addr);
