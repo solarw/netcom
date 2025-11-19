@@ -106,7 +106,7 @@ async fn test_get_external_addresses_with_listening() -> Result<(), Box<dyn std:
     // Настраиваем прослушивание
     println!("🎯 Настраиваем прослушивание...");
     let listen_addr = node.commander.listen_and_wait(
-        "/ip4/127.0.0.1/tcp/0/udp/0/quic-v1".parse().unwrap(),
+        "/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap(),
         std::time::Duration::from_secs(5)
     ).await
     .expect("❌ Не удалось настроить прослушивание");

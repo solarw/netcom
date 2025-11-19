@@ -45,10 +45,10 @@ async fn test_two_nodes_xstream_complete_data_transfer_in_10_seconds() {
 
             while let Ok(event) = node1_events_task.recv().await {
                 match event {
-                    NodeEvent::XStreamIncomingStreamRequest { peer_id, connection_id, decision_sender } => {
+                    NodeEvent::XStreamIncomingStreamRequest { peer_id, connection_id: _, decision_sender } => {
                         println!("✅ Нода1 получила запрос на входящий XStream от пира: {}", peer_id);
                         // Автоматически подтверждаем все входящие XStream запросы
-                        decision_sender.approve();
+                        let _ = decision_sender.approve();
                         println!("✅ Нода1 подтвердила входящий XStream запрос");
                     }
                     NodeEvent::XStreamIncoming { mut stream } => {

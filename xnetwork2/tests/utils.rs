@@ -518,7 +518,7 @@ pub fn spawn_auth_completion_task(
         println!("⏳ Ожидаем завершение аутентификации для пира {} (таймаут {} секунд)...", 
                 expected_peer_id, timeout_duration.as_secs());
         
-        let auth_event = wait_for_event(
+        let _auth_event = wait_for_event(
             &mut events,
             |e| {
                 matches!(e, 

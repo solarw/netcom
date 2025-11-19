@@ -3,7 +3,6 @@
 //! после того, как node2 подключился к bootstrap (Kademlia + Relay сервер) и начал слушать через relay
 
 use std::time::Duration;
-use tokio::time::timeout;
 use xnetwork2::{
     node_builder,
 };

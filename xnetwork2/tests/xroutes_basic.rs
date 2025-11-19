@@ -1,6 +1,6 @@
 //! Basic tests for XRoutes behaviour
 
-use libp2p::{identity::Keypair, PeerId};
+use libp2p::identity::Keypair;
 use xnetwork2::behaviours::xroutes::{XRoutesBehaviour, XRoutesConfig};
 
 #[tokio::test]
@@ -8,7 +8,7 @@ async fn test_xroutes_behaviour_creation() {
     // Create a test keypair and get public key
     let keypair = Keypair::generate_ed25519();
     let public_key = keypair.public();
-    let peer_id = public_key.to_peer_id();
+    let _peer_id = public_key.to_peer_id();
     
     // Test with default configuration
     let config = XRoutesConfig::default();
@@ -32,7 +32,7 @@ async fn test_xroutes_behaviour_disabled() {
     // Create a test keypair and get public key
     let keypair = Keypair::generate_ed25519();
     let public_key = keypair.public();
-    let peer_id = public_key.to_peer_id();
+    let _peer_id = public_key.to_peer_id();
     
     // Test with all behaviours disabled
     let config = XRoutesConfig::disabled();

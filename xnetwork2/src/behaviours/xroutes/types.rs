@@ -9,8 +9,10 @@ pub struct XRoutesConfig {
     pub enable_identify: bool,
     /// Enable mDNS local discovery
     pub enable_mdns: bool,
-    /// Enable Kademlia DHT discovery
+    /// Enable Kademlia DHT discovery (legacy, use kad_mode instead)
     pub enable_kad: bool,
+    /// Kademlia mode configuration
+    pub kad_mode: Option<KadMode>,
     /// Enable relay server behaviour
     pub enable_relay_server: bool,
     // relay_client теперь всегда включен, поэтому enable_relay_client убран
@@ -32,6 +34,7 @@ impl Default for XRoutesConfig {
             enable_identify: true,
             enable_mdns: true,
             enable_kad: true,
+            kad_mode: None,
             enable_relay_server: false,
             enable_dcutr: false,
             enable_autonat_server: false,
@@ -66,12 +69,34 @@ impl XRoutesConfig {
         self
     }
 
+    /// Set Kademlia mode
+    pub fn with_kad_mode(mut self, mode: KadMode) -> Self {
+        self.kad_mode = Some(mode);
+        self.enable_kad = true;
+        self
+    }
+
+    /// Enable Kademlia server mode
+    pub fn with_kad_server(mut self) -> Self {
+        self.kad_mode = Some(KadMode::Server);
+        self.enable_kad = true;
+        self
+    }
+
+    /// Enable Kademlia client mode
+    pub fn with_kad_client(mut self) -> Self {
+        self.kad_mode = Some(KadMode::Client);
+        self.enable_kad = true;
+        self
+    }
+
     /// Create configuration with all behaviours disabled
     pub fn disabled() -> Self {
         Self {
             enable_identify: false,
             enable_mdns: false,
             enable_kad: false,
+            kad_mode: None,
             enable_relay_server: false,
             enable_dcutr: false,
             enable_autonat_server: false,

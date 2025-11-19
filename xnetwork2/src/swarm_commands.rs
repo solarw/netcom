@@ -6,6 +6,8 @@ use tokio::sync::oneshot;
 use std::time::Duration;
 use std::fmt;
 
+use crate::connection_tracker_commands::ConnectionTrackerCommand;
+
 /// Swarm-level commands for XNetwork2 with response channels
 pub enum SwarmLevelCommand {
     /// Dial a peer
@@ -65,6 +67,10 @@ pub enum SwarmLevelCommand {
     GetExternalAddresses {
         response: oneshot::Sender<Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>>>,
     },
+    /// ConnectionTracker commands
+    ConnectionTracker {
+        command: ConnectionTrackerCommand,
+    },
 }
 
 /// Network state information
@@ -111,6 +117,9 @@ impl fmt::Debug for SwarmLevelCommand {
             }
             SwarmLevelCommand::GetExternalAddresses { .. } => {
                 write!(f, "GetExternalAddresses")
+            }
+            SwarmLevelCommand::ConnectionTracker { command } => {
+                write!(f, "ConnectionTracker({:?})", command)
             }
         }
     }

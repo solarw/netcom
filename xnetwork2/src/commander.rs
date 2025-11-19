@@ -5,6 +5,7 @@ use libp2p::{Multiaddr, PeerId};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::behaviours::{XAuthCommand, XStreamCommand};
+use crate::connection_tracker_commands::ConnectionTrackerCommand;
 use crate::main_behaviour::XNetworkCommands;
 use crate::swarm_commands::{NetworkState, SwarmLevelCommand};
 use xstream::xstream::XStream;
@@ -441,8 +442,10 @@ impl Commander {
         &self,
     ) -> Result<Vec<crate::connection_tracker::ConnectionInfo>, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetConnections {
-            response: response_tx,
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
+            command: ConnectionTrackerCommand::GetConnections {
+                response: response_tx,
+            },
         });
         self.send(command).await?;
         response_rx.await?
@@ -454,9 +457,11 @@ impl Commander {
         peer_id: PeerId,
     ) -> Result<crate::connection_tracker::PeerConnections, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetPeerConnections {
-            peer_id,
-            response: response_tx,
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
+            command: ConnectionTrackerCommand::GetPeerConnections {
+                peer_id,
+                response: response_tx,
+            },
         });
         self.send(command).await?;
         response_rx.await?
@@ -468,9 +473,11 @@ impl Commander {
         connection_id: command_swarm::ConnectionId,
     ) -> Result<crate::connection_tracker::ConnectionInfo, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetConnection {
-            connection_id,
-            response: response_tx,
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
+            command: ConnectionTrackerCommand::GetConnection {
+                connection_id,
+                response: response_tx,
+            },
         });
         self.send(command).await?;
         response_rx.await?
@@ -481,8 +488,10 @@ impl Commander {
         &self,
     ) -> Result<Vec<PeerId>, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetConnectedPeers {
-            response: response_tx,
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
+            command: ConnectionTrackerCommand::GetConnectedPeers {
+                response: response_tx,
+            },
         });
         self.send(command).await?;
         response_rx.await?
@@ -493,8 +502,10 @@ impl Commander {
         &self,
     ) -> Result<crate::connection_tracker::ConnectionStats, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetConnectionStats {
-            response: response_tx,
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
+            command: ConnectionTrackerCommand::GetConnectionStats {
+                response: response_tx,
+            },
         });
         self.send(command).await?;
         response_rx.await?
@@ -505,8 +516,10 @@ impl Commander {
         &self,
     ) -> Result<Vec<Multiaddr>, Box<dyn std::error::Error + Send + Sync>> {
         let (response_tx, response_rx) = oneshot::channel();
-        let command = XNetworkCommands::xroutes(crate::behaviours::xroutes::XRoutesCommand::GetListenAddresses {
-            response: response_tx,
+        let command = XNetworkCommands::SwarmLevel(SwarmLevelCommand::ConnectionTracker {
+            command: ConnectionTrackerCommand::GetListenAddresses {
+                response: response_tx,
+            },
         });
         self.send(command).await?;
         response_rx.await?

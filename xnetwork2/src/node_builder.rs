@@ -35,8 +35,12 @@ pub struct NodeConfig {
     pub enable_autonat_server: bool,
     /// Включить клиентский AutoNAT для определения типа NAT
     pub enable_autonat_client: bool,
-    /// Включить Kademlia DHT discovery
+    /// Включить Kademlia DHT discovery (устаревшее, используйте with_kad_server/with_kad_client)
     pub enable_kademlia: bool,
+    /// Включить серверный режим Kademlia (хранит записи, отвечает на запросы)
+    pub enable_kad_server: bool,
+    /// Включить клиентский режим Kademlia (только делает запросы)
+    pub enable_kad_client: bool,
 }
 
 impl Default for NodeConfig {
@@ -49,6 +53,8 @@ impl Default for NodeConfig {
             enable_autonat_server: false,
             enable_autonat_client: false,
             enable_kademlia: false,
+            enable_kad_server: false,
+            enable_kad_client: false,
         }
     }
 }
@@ -156,9 +162,21 @@ impl NodeBuilder {
         self
     }
 
-    /// Включает Kademlia DHT discovery
+    /// Включает Kademlia DHT discovery (устаревшее, используйте with_kad_server/with_kad_client)
     pub fn with_kademlia(mut self) -> Self {
         self.config.enable_kademlia = true;
+        self
+    }
+
+    /// Включает серверный режим Kademlia (хранит записи, отвечает на запросы)
+    pub fn with_kad_server(mut self) -> Self {
+        self.config.enable_kad_server = true;
+        self
+    }
+
+    /// Включает клиентский режим Kademlia (только делает запросы)
+    pub fn with_kad_client(mut self) -> Self {
+        self.config.enable_kad_client = true;
         self
     }
 
@@ -214,13 +232,22 @@ impl NodeBuilder {
                 let xstream_behaviour = xstream::behaviour::XStreamNetworkBehaviour::new_with_policy(xstream_policy);
 
         // Create XRoutes behaviour with NAT traversal configuration
-        let xroutes_config = crate::behaviours::xroutes::XRoutesConfig::disabled()
+        let mut xroutes_config = crate::behaviours::xroutes::XRoutesConfig::disabled()
             .with_relay_server(self.config.enable_relay_server)
             .with_dcutr(self.config.enable_dcutr)
             .with_autonat_server(self.config.enable_autonat_server)
             .with_autonat_client(self.config.enable_autonat_client)
-            .with_kad(self.config.enable_kademlia)
             .with_identify(true);
+
+        // Configure Kademlia mode based on new settings
+        if self.config.enable_kad_server {
+            xroutes_config = xroutes_config.with_kad_server();
+        } else if self.config.enable_kad_client {
+            xroutes_config = xroutes_config.with_kad_client();
+        } else if self.config.enable_kademlia {
+            // Legacy mode - enable Kademlia without specific mode
+            xroutes_config = xroutes_config.with_kad(true);
+        }
         let xroutes_behaviour = crate::behaviours::xroutes::XRoutesBehaviour::new(
             keypair.public(),
             &xroutes_config,

@@ -72,7 +72,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             println!("📈 XRoutes статус серверного узла:");
             println!("   - AutoNAT Server: {}", status.autonat_server_enabled);
             println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
-            println!("   - AutoNAT (legacy): {}", status.autonat_enabled);
             assert!(status.autonat_server_enabled, "❌ AutoNAT Server должен быть включен на серверном узле");
             assert!(!status.autonat_client_enabled, "❌ AutoNAT Client должен быть выключен на серверном узле");
         }
@@ -84,7 +83,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             println!("📈 XRoutes статус клиентского узла:");
             println!("   - AutoNAT Server: {}", status.autonat_server_enabled);
             println!("   - AutoNAT Client: {}", status.autonat_client_enabled);
-            println!("   - AutoNAT (legacy): {}", status.autonat_enabled);
             assert!(!status.autonat_server_enabled, "❌ AutoNAT Server должен быть выключен на клиентском узле");
             assert!(status.autonat_client_enabled, "❌ AutoNAT Client должен быть включен на клиентском узле");
         }

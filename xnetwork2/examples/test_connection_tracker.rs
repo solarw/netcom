@@ -1,14 +1,10 @@
 //! Test example for ConnectionTracker functionality
 
-use libp2p::{identity, Multiaddr, PeerId};
 use std::time::Duration;
 use tokio::time::sleep;
 use xnetwork2::{
-    behaviours::xroutes::{
-        connection_tracker::{ConnectionInfo, PeerConnections},
-        types::{KadMode, XRoutesConfig},
-    },
     node::Node,
+    behaviours::xroutes::types::KadMode,
 };
 
 #[tokio::main]
@@ -16,14 +12,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("🚀 Starting ConnectionTracker test example...");
 
     // Create node with ConnectionTracker enabled
-    let config = XRoutesConfig::default()
-        .with_connection_tracking(true)
-        .with_kad(true)
-        .with_identify(true)
-        .with_mdns(true);
-
-    let node = Node::new(config).await?;
-    let commander = node.commander().clone();
+    let mut node = Node::new().await?;
+    node.start().await?;
+    let commander = node.commander.clone();
 
     println!("✅ Node created with ConnectionTracker enabled");
 
@@ -31,9 +22,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let stats = commander.get_connection_stats().await?;
     println!("📊 Initial connection statistics:");
     println!("  - Total connections: {}", stats.total_connections);
-    println!("  - Connected peers: {}", stats.connected_peers);
-    println!("  - Listen addresses: {}", stats.listen_addresses);
-    println!("  - External addresses: {}", stats.external_addresses);
+    println!("  - Total peers: {}", stats.total_peers);
+    println!("  - Listen addresses: {}", stats.listen_addresses_count);
+    println!("  - External addresses: {}", stats.external_addresses_count);
 
     // Get listen addresses
     let listen_addresses = commander.get_listen_addresses().await?;
@@ -81,9 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let updated_stats = commander.get_connection_stats().await?;
     println!("📊 Updated connection statistics:");
     println!("  - Total connections: {}", updated_stats.total_connections);
-    println!("  - Connected peers: {}", updated_stats.connected_peers);
-    println!("  - Listen addresses: {}", updated_stats.listen_addresses);
-    println!("  - External addresses: {}", updated_stats.external_addresses);
+    println!("  - Total peers: {}", updated_stats.total_peers);
+    println!("  - Listen addresses: {}", updated_stats.listen_addresses_count);
+    println!("  - External addresses: {}", updated_stats.external_addresses_count);
 
     // Test getting specific connection information
     if !connections.is_empty() {
@@ -92,9 +83,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("🔍 First connection details:");
         println!("  - Connection ID: {:?}", connection_info.connection_id);
         println!("  - Peer ID: {}", connection_info.peer_id);
-        println!("  - Direction: {:?}", connection_info.direction);
+        println!("  - Local address: {:?}", connection_info.local_addr);
+        println!("  - Remote address: {:?}", connection_info.remote_addr);
         println!("  - Established: {:?}", connection_info.established_at);
-        println!("  - Address: {:?}", connection_info.address);
     }
 
     // Test getting peer connections
@@ -142,9 +133,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let final_stats = commander.get_connection_stats().await?;
     println!("📊 Final connection statistics:");
     println!("  - Total connections: {}", final_stats.total_connections);
-    println!("  - Connected peers: {}", final_stats.connected_peers);
-    println!("  - Listen addresses: {}", final_stats.listen_addresses);
-    println!("  - External addresses: {}", final_stats.external_addresses);
+    println!("  - Total peers: {}", final_stats.total_peers);
+    println!("  - Listen addresses: {}", final_stats.listen_addresses_count);
+    println!("  - External addresses: {}", final_stats.external_addresses_count);
 
     println!("✅ ConnectionTracker test completed successfully!");
 

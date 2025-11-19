@@ -3,17 +3,15 @@
 //! This test verifies that two nodes with enabled Kademlia, Identify, and mDNS
 //! can discover each other through mDNS and exchange addresses.
 
-use libp2p::PeerId;
 use std::time::Duration;
 use tokio::time::timeout;
 
 use xnetwork2::{
-    node::Node,
     node_builder,
     node_events::NodeEvent,
 };
 mod utils;
-use utils::{setup_listening_node, wait_for_event};
+use utils::setup_listening_node;
 
 /// Test mDNS discovery between two nodes
 #[tokio::test]

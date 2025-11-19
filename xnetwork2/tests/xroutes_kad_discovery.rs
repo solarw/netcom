@@ -1,12 +1,7 @@
 //! Integration test for Kademlia discovery functionality
 
 use std::time::Duration;
-use tokio::time::timeout;
-use tokio::time::sleep;
-use xnetwork2::{
-    node_builder,
-    node_events::NodeEvent,
-};
+use xnetwork2::node_builder;
 mod utils;
 use utils::{setup_listening_node, setup_connection_with_auth};
 
@@ -38,9 +33,9 @@ async fn test_kademlia_discovery_with_bootstrap() -> Result<(), Box<dyn std::err
 
     // Подписка на события ДО запуска узлов
     println!("📡 Подписываемся на события всех узлов...");
-    let mut bootstrap_events = node_bootstrap.subscribe();
-    let mut node1_events = node1.subscribe();
-    let mut node2_events = node2.subscribe();
+    let _bootstrap_events = node_bootstrap.subscribe();
+    let _node1_events = node1.subscribe();
+    let _node2_events = node2.subscribe();
 
     // Запуск всех узлов
     println!("🚀 Запускаем все узлы...");

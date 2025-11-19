@@ -9,6 +9,8 @@ use tokio::sync::broadcast;
 use tracing::{debug, info};
 
 use crate::behaviours::xroutes::PendingTaskManager;
+use crate::connection_tracker::{ConnectionInfo, PeerConnections};
+use crate::connection_tracker_commands::ConnectionTrackerCommand;
 use crate::main_behaviour::{XNetworkBehaviour, XNetworkBehaviourEvent};
 use crate::node_events::NodeEvent;
 use crate::swarm_commands::{NetworkState, SwarmLevelCommand};
@@ -602,6 +604,84 @@ impl SwarmHandler<XNetworkBehaviour> for XNetworkSwarmHandler {
                 }
 
                 let _ = response.send(Ok(external_addrs));
+            }
+            SwarmLevelCommand::ConnectionTracker { command } => {
+                debug!("🔄 [SwarmHandler] Processing ConnectionTracker command: {:?}", command);
+                
+                // Handle ConnectionTracker commands through XRoutesBehaviour
+                match command {
+                    ConnectionTrackerCommand::GetConnections { response } => {
+                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
+                            let connections = connection_tracker.get_all_connections();
+                            let connections_cloned: Vec<ConnectionInfo> = connections.into_iter().cloned().collect();
+                            let _ = response.send(Ok(connections_cloned));
+                        } else {
+                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                        }
+                    }
+                    ConnectionTrackerCommand::GetPeerConnections { peer_id, response } => {
+                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
+                            match connection_tracker.get_peer_connections(&peer_id) {
+                                Some(peer_connections) => {
+                                    let _ = response.send(Ok(peer_connections.clone()));
+                                }
+                                None => {
+                                    let error_msg = format!("No connections found for peer: {}", peer_id);
+                                    let _ = response.send(Err(error_msg.into()));
+                                }
+                            }
+                        } else {
+                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                        }
+                    }
+                    ConnectionTrackerCommand::GetConnection { connection_id, response } => {
+                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
+                            match connection_tracker.get_connection(&connection_id) {
+                                Some(connection_info) => {
+                                    let _ = response.send(Ok(connection_info.clone()));
+                                }
+                                None => {
+                                    let error_msg = format!("Connection not found: {:?}", connection_id);
+                                    let _ = response.send(Err(error_msg.into()));
+                                }
+                            }
+                        } else {
+                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                        }
+                    }
+                    ConnectionTrackerCommand::GetConnectedPeers { response } => {
+                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
+                            let connected_peers = connection_tracker.get_connected_peers();
+                            let _ = response.send(Ok(connected_peers));
+                        } else {
+                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                        }
+                    }
+                    ConnectionTrackerCommand::GetConnectionStats { response } => {
+                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
+                            let stats = connection_tracker.get_connection_stats();
+                            let _ = response.send(Ok(stats));
+                        } else {
+                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                        }
+                    }
+                    ConnectionTrackerCommand::GetListenAddresses { response } => {
+                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
+                            let listen_addresses = connection_tracker.get_listen_addresses().to_vec();
+                            let _ = response.send(Ok(listen_addresses));
+                        } else {
+                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                        }
+                    }
+                    ConnectionTrackerCommand::GetExternalAddresses { response } => {
+                        if let Some(connection_tracker) = swarm.behaviour().xroutes.connection_tracker.as_ref() {
+                            let external_addresses = connection_tracker.get_external_addresses().to_vec();
+                            let _ = response.send(Ok(external_addresses));
+                        } else {
+                            let _ = response.send(Err("ConnectionTracker not enabled".into()));
+                        }
+                    }
+                }
             }
         }
     }

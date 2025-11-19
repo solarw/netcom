@@ -1,6 +1,5 @@
 //! Тест подключения трех узлов без xauth
 
-use core::panic;
 use std::time::Duration;
 use tokio::time::sleep;
 use xnetwork2::{Node, NodeBuilder};

@@ -1,3 +1,3 @@
 //! Integration tests for xnetwork2
 
-mod kad_mode_test;
+mod kad_modes_test;
