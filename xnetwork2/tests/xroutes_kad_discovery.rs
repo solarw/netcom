@@ -3,7 +3,7 @@
 use std::time::Duration;
 use xnetwork2::node_builder;
 mod utils;
-use utils::{setup_listening_node, setup_connection_with_auth};
+use utils::{setup_listening_node_with_kad, setup_connection_with_auth};
 
 
 /// Test Kademlia discovery with bootstrap node
@@ -92,22 +92,22 @@ async fn test_kademlia_discovery_with_bootstrap() -> Result<(), Box<dyn std::err
 
 
 
-    // 1.2 Настройка всех узлов для прослушивания адресов (последовательно)
-    println!("🎯 Настраиваем все узлы для прослушивания...");
+    // 1.2 Настройка всех узлов для прослушивания адресов с Kademlia (последовательно)
+    println!("🎯 Настраиваем все узлы для прослушивания с Kademlia...");
     
     // Настраиваем bootstrap node
-    println!("🎯 Настраиваем bootstrap node для прослушивания...");
-    let bootstrap_addr = setup_listening_node(&mut node_bootstrap).await?;
+    println!("🎯 Настраиваем bootstrap node для прослушивания с Kademlia...");
+    let bootstrap_addr = setup_listening_node_with_kad(&mut node_bootstrap).await?;
     println!("📡 Bootstrap node слушает на: {}", bootstrap_addr);
     
     // Настраиваем node1
-    println!("🎯 Настраиваем node1 для прослушивания...");
-    let node1_addr = setup_listening_node(&mut node1).await?;
+    println!("🎯 Настраиваем node1 для прослушивания с Kademlia...");
+    let node1_addr = setup_listening_node_with_kad(&mut node1).await?;
     println!("📡 Node 1 слушает на: {}", node1_addr);
     
     // Настраиваем node2
-    println!("🎯 Настраиваем node2 для прослушивания...");
-    let node2_addr = setup_listening_node(&mut node2).await?;
+    println!("🎯 Настраиваем node2 для прослушивания с Kademlia...");
+    let node2_addr = setup_listening_node_with_kad(&mut node2).await?;
     println!("📡 Node 2 слушает на: {}", node2_addr);
 
     // Проверяем, что все адреса содержат QUIC

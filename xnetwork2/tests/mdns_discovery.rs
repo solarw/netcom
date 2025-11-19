@@ -11,7 +11,7 @@ use xnetwork2::{
     node_events::NodeEvent,
 };
 mod utils;
-use utils::setup_listening_node;
+use utils::setup_listening_node_with_kad;
 
 /// Test mDNS discovery between two nodes
 #[tokio::test]
@@ -67,11 +67,11 @@ async fn test_mdns_discovery() {
     node2.enable_mdns().await.expect("Failed to enable mDNS on node 2");
     println!("✅ mDNS enabled on both nodes");
 
-    // Setup listening addresses for both nodes
-    println!("🎯 Setting up listening addresses...");
-    let addr1 = setup_listening_node(&mut node1).await
+    // Setup listening addresses for both nodes with Kademlia
+    println!("🎯 Setting up listening addresses with Kademlia...");
+    let addr1 = setup_listening_node_with_kad(&mut node1).await
         .expect("Failed to setup listening for node 1");
-    let addr2 = setup_listening_node(&mut node2).await
+    let addr2 = setup_listening_node_with_kad(&mut node2).await
         .expect("Failed to setup listening for node 2");
     
     println!("📡 Node 1 listening on: {}", addr1);

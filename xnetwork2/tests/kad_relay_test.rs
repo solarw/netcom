@@ -75,31 +75,19 @@ async fn test_kademlia_relay_address_discovery() -> Result<(), Box<dyn std::erro
     println!("🎯 Фаза 3: Настройка прослушивания...");
 
     // 3.1 Настройка bootstrap узла
-    println!("🎯 Настраиваем bootstrap узел для прослушивания...");
-    let bootstrap_addr = setup_listening_node(&mut bootstrap_node).await?;
+    println!("🎯 Настраиваем bootstrap узел для прослушивания с Kademlia...");
+    let bootstrap_addr = utils::setup_listening_node_with_kad(&mut bootstrap_node).await?;
     println!("📡 Bootstrap узел слушает на: {}", bootstrap_addr);
 
-    println!("🎯 Настраиваем внешний адрес bootstrap_node узел для прослушивания...");
-    bootstrap_node.commander.add_external_address(bootstrap_addr.clone()).await?;
-    println!("📡 bootstrap_node узел слушает на внешнем: {}", bootstrap_addr);
     // 3.2 Настройка node1
-    println!("🎯 Настраиваем node1 для прослушивания...");
-    let node1_addr = setup_listening_node(&mut node1).await?;
+    println!("🎯 Настраиваем node1 для прослушивания с Kademlia...");
+    let node1_addr = utils::setup_listening_node_with_kad(&mut node1).await?;
     println!("📡 Node 1 слушает на: {}", node1_addr);
     
-    println!("🎯 Настраиваем внешний адрес node1 узел для прослушивания для кад...");
-    node1.commander.add_external_address(node1_addr.clone()).await?;
-    println!("📡 bootstrnode1ap_node узел слушает на внешнем: {}", node1_addr);
-    
-    // 3.2 Настройка node1
     // 3.3 Настройка node2
-    println!("🎯 Настраиваем node2 для прослушивания...");
-    let node2_addr = setup_listening_node(&mut node2).await?;
+    println!("🎯 Настраиваем node2 для прослушивания с Kademlia...");
+    let node2_addr = utils::setup_listening_node_with_kad(&mut node2).await?;
     println!("📡 Node 2 слушает на: {}", node2_addr);
-
-    println!("🎯 Настраиваем внешний адрес node2 узел для прослушивания для кад...");
-    node2.commander.add_external_address(node2_addr.clone()).await?;
-    println!("📡 node2 узел слушает на внешнем: {}", node2_addr);
     // 3.2 Настройка node1
 
     // Проверяем, что все адреса содержат QUIC

@@ -473,6 +473,26 @@ pub async fn get_connection_id(
     }
 }
 
+/// Настраивает ноду для прослушивания и автоматически добавляет адрес в Kademlia как внешний
+/// Объединяет setup_listening_node и add_external_address в одну операцию
+#[allow(dead_code)]
+pub async fn setup_listening_node_with_kad(
+    node: &mut Node,
+) -> Result<Multiaddr, Box<dyn std::error::Error + Send + Sync>> {
+    println!("🎯 Настраиваем ноду для прослушивания с автоматической регистрацией в Kademlia...");
+
+    // Сначала настраиваем прослушивание
+    let listen_addr = setup_listening_node(node).await?;
+    println!("📡 Нода слушает на адресе: {}", listen_addr);
+
+    // Затем добавляем адрес как внешний для Kademlia
+    println!("🌐 Добавляем адрес как внешний для Kademlia...");
+    node.commander.add_external_address(listen_addr.clone()).await?;
+    println!("✅ Адрес {} успешно добавлен как внешний для Kademlia", listen_addr);
+
+    Ok(listen_addr)
+}
+
 /// Запускает задачу ожидания ConnectionEstablished для получения connection_id
 /// Должна запускаться ДО dial_and_wait_connection
 #[allow(dead_code)]
